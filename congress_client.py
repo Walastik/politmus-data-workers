@@ -1,23 +1,115 @@
+import argparse
 import os
+import time
 
 import requests
 from dotenv import load_dotenv
 
 from database import SessionLocal
-from models import Official
+from init_db import ensure_schema
+from models import Bill, Official, Vote
 
 load_dotenv()
 
 BASE_URL = "https://api.congress.gov/v3"
 API_KEY = os.getenv("CONGRESS_GOV_API_KEY")
 PAGE_SIZE = 250
+CURRENT_CONGRESS = 119
+REQUEST_PAUSE_SECONDS = 0.2
+MAX_RETRIES = 5
+INITIAL_BACKOFF_SECONDS = 1.0
+
+POSITION_MAP = {
+    "yea": "Yes",
+    "aye": "Yes",
+    "yes": "Yes",
+    "nay": "No",
+    "no": "No",
+    "present": "Present",
+    "not voting": "Not Voting",
+    "notvoting": "Not Voting",
+}
 
 
-def fetch_current_members():
+def _require_api_key():
     if not API_KEY:
         raise RuntimeError("CONGRESS_GOV_API_KEY is not set")
 
+
+def _retry_wait_seconds(response, delay):
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return float(retry_after)
+        except ValueError:
+            pass
+    return delay
+
+
+def congress_get(url, params=None):
+    """GET JSON from Congress.gov with polite pacing and 429 backoff."""
+    _require_api_key()
+    if url.startswith("/"):
+        url = BASE_URL + url
+
     headers = {"X-Api-Key": API_KEY}
+    query = {"format": "json", "api_key": API_KEY}
+    if params:
+        query.update(params)
+
+    delay = INITIAL_BACKOFF_SECONDS
+    last_error = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        time.sleep(REQUEST_PAUSE_SECONDS)
+        try:
+            response = requests.get(url, headers=headers, params=query, timeout=30)
+        except requests.RequestException as exc:
+            last_error = exc
+            print(f"  Request error ({exc}); retrying in {delay:.1f}s...")
+            time.sleep(delay)
+            delay *= 2
+            continue
+
+        if response.status_code == 429 or response.status_code >= 500:
+            wait = _retry_wait_seconds(response, delay)
+            print(
+                f"  HTTP {response.status_code} from Congress.gov; "
+                f"retrying in {wait:.1f}s (attempt {attempt}/{MAX_RETRIES})..."
+            )
+            time.sleep(wait)
+            delay *= 2
+            last_error = requests.HTTPError(
+                f"{response.status_code} for {url}", response=response
+            )
+            continue
+
+        response.raise_for_status()
+        return response.json()
+
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Failed to fetch {url}")
+
+
+def make_bill_id(congress, bill_type, number):
+    return f"{congress}-{str(bill_type).lower()}-{number}"
+
+
+def normalize_position(vote_cast):
+    if not vote_cast:
+        return None
+    mapped = POSITION_MAP.get(str(vote_cast).strip().lower())
+    if mapped:
+        return mapped
+    return str(vote_cast).strip()
+
+
+def load_official_ids(session):
+    return {row[0] for row in session.query(Official.id).all()}
+
+
+def fetch_current_members():
     url = f"{BASE_URL}/member"
     params = {
         "currentMember": "true",
@@ -27,9 +119,7 @@ def fetch_current_members():
     members = []
 
     while url:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        payload = response.json()
+        payload = congress_get(url, params=params)
         members.extend(payload.get("members", []))
         url = payload.get("pagination", {}).get("next")
         params = None
@@ -66,10 +156,456 @@ def save_officials(members):
         session.close()
 
 
+def fetch_recent_bills(limit=50, congress=CURRENT_CONGRESS):
+    path = f"/bill/{congress}" if congress else "/bill"
+    payload = congress_get(path, params={"limit": limit, "format": "json"})
+    return payload.get("bills", [])
+
+
+def fetch_bill_detail(congress, bill_type, number):
+    path = f"/bill/{congress}/{str(bill_type).lower()}/{number}"
+    payload = congress_get(path, params={"format": "json"})
+    return payload.get("bill") or payload
+
+
+def fetch_bill_actions(congress, bill_type, number):
+    url = f"{BASE_URL}/bill/{congress}/{str(bill_type).lower()}/{number}/actions"
+    params = {"limit": PAGE_SIZE, "format": "json"}
+    actions = []
+
+    while url:
+        payload = congress_get(url, params=params)
+        actions.extend(payload.get("actions", []))
+        url = payload.get("pagination", {}).get("next")
+        params = None
+
+    return actions
+
+
+def fetch_house_vote_members(congress, session_number, roll_number):
+    url = (
+        f"{BASE_URL}/house-vote/{congress}/{session_number}/{roll_number}/members"
+    )
+    params = {"limit": PAGE_SIZE, "format": "json"}
+    members = []
+
+    while url:
+        payload = congress_get(url, params=params)
+        inner = payload.get("houseRollCallVoteMemberVotes") or {}
+        members.extend(inner.get("results") or [])
+        url = (payload.get("pagination") or {}).get("next")
+        if not url:
+            url = (inner.get("pagination") or {}).get("next")
+        params = None
+
+    return members
+
+
+def _sponsor_record(detail):
+    sponsors = detail.get("sponsors") or []
+    if not sponsors:
+        return {}
+    return sponsors[0] or {}
+
+
+def _sponsor_display_name(sponsor):
+    if not sponsor:
+        return None
+    full_name = (sponsor.get("fullName") or "").strip()
+    if full_name:
+        return full_name
+    parts = [
+        sponsor.get("firstName"),
+        sponsor.get("middleName"),
+        sponsor.get("lastName"),
+    ]
+    joined = " ".join(part for part in parts if part)
+    return joined or None
+
+
+def _resolve_sponsor_id(bioguide_id, official_ids):
+    if not bioguide_id:
+        return None
+    if bioguide_id not in official_ids:
+        return None
+    return bioguide_id
+
+
+def upsert_bill(
+    session,
+    bill_id,
+    title,
+    sponsor_id,
+    sponsor_bioguide_id=None,
+    sponsor_name=None,
+):
+    session.merge(
+        Bill(
+            id=bill_id,
+            title=title,
+            sponsor_id=sponsor_id,
+            sponsor_bioguide_id=sponsor_bioguide_id,
+            sponsor_name=sponsor_name,
+        )
+    )
+    session.flush()
+
+
+def _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name):
+    label = sponsor_name or "unknown name"
+    print(
+        f"  WARNING: {bill_id} sponsor {bioguide_id} ({label}) is not in officials. "
+        "The roster ingest did not include this member. "
+        "Saving their Congress.gov identity on the bill with sponsor_id=NULL."
+    )
+
+
+def _recorded_votes_from_actions(actions):
+    """Unique roll calls, oldest first so the latest position wins on upsert."""
+    seen = set()
+    recorded = []
+    for action in actions:
+        for vote in action.get("recordedVotes") or []:
+            key = (
+                vote.get("chamber"),
+                vote.get("congress"),
+                vote.get("sessionNumber"),
+                vote.get("rollNumber"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            recorded.append(vote)
+    recorded.sort(key=lambda item: item.get("date") or "")
+    return recorded
+
+
+def sync_bill_votes(
+    congress,
+    bill_type,
+    bill_number,
+    session=None,
+    official_ids=None,
+    ensure_bill=True,
+):
+    """Ingest House roll-call positions for a bill into `votes`.
+
+    Senate roll calls are skipped: Congress.gov has no Senate member-vote
+    endpoint, and Senate XML uses LIS ids rather than bioguide ids.
+    Multiple House roll calls on the same bill collapse to one row per
+    official; the latest roll call's position is kept.
+    """
+    owns_session = session is None
+    if owns_session:
+        session = SessionLocal()
+
+    stats = {
+        "bill_id": make_bill_id(congress, bill_type, bill_number),
+        "house_roll_calls": 0,
+        "senate_roll_calls_skipped": 0,
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped_unknown_officials": 0,
+    }
+
+    try:
+        if official_ids is None:
+            official_ids = load_official_ids(session)
+
+        bill_id = stats["bill_id"]
+        existing_bill = session.get(Bill, bill_id)
+        if existing_bill is None and ensure_bill:
+            detail = fetch_bill_detail(congress, bill_type, bill_number)
+            sponsor = _sponsor_record(detail)
+            bioguide_id = sponsor.get("bioguideId")
+            sponsor_name = _sponsor_display_name(sponsor)
+            sponsor_id = _resolve_sponsor_id(bioguide_id, official_ids)
+            if bioguide_id and sponsor_id is None:
+                _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name)
+            upsert_bill(
+                session,
+                bill_id,
+                detail.get("title"),
+                sponsor_id,
+                sponsor_bioguide_id=bioguide_id,
+                sponsor_name=sponsor_name,
+            )
+        elif existing_bill is None:
+            print(f"  Skipping votes for {bill_id}; bill is not in the database.")
+            return stats
+
+        actions = fetch_bill_actions(congress, bill_type, bill_number)
+        recorded = _recorded_votes_from_actions(actions)
+        latest_by_official = {}
+        unknown_officials = set()
+
+        for vote in recorded:
+            chamber = (vote.get("chamber") or "").strip()
+            if chamber.lower() != "house":
+                stats["senate_roll_calls_skipped"] += 1
+                print(
+                    f"  Skipping {chamber} roll call {vote.get('rollNumber')} "
+                    f"on {bill_id} (no Senate member-vote API)."
+                )
+                continue
+
+            session_number = vote.get("sessionNumber")
+            roll_number = vote.get("rollNumber")
+            if session_number is None or roll_number is None:
+                continue
+
+            stats["house_roll_calls"] += 1
+            print(
+                f"  House roll call {roll_number} "
+                f"(congress {vote.get('congress')}, session {session_number})"
+            )
+            members = fetch_house_vote_members(
+                vote.get("congress") or congress,
+                session_number,
+                roll_number,
+            )
+            for member in members:
+                bioguide_id = member.get("bioguideID") or member.get("bioguideId")
+                if not bioguide_id:
+                    continue
+                if bioguide_id not in official_ids:
+                    unknown_officials.add(bioguide_id)
+                    continue
+                position = normalize_position(member.get("voteCast"))
+                if not position:
+                    continue
+                latest_by_official[bioguide_id] = position
+
+        stats["skipped_unknown_officials"] = len(unknown_officials)
+
+        existing_votes = {
+            row.official_id: row
+            for row in session.query(Vote).filter_by(bill_id=bill_id).all()
+        }
+        for official_id, position in latest_by_official.items():
+            current = existing_votes.get(official_id)
+            if current is None:
+                session.add(
+                    Vote(
+                        bill_id=bill_id,
+                        official_id=official_id,
+                        position=position,
+                    )
+                )
+                stats["inserted"] += 1
+            elif current.position != position:
+                current.position = position
+                stats["updated"] += 1
+            else:
+                stats["unchanged"] += 1
+
+        if owns_session:
+            session.commit()
+        return stats
+    except Exception:
+        if owns_session:
+            session.rollback()
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
+    """Fetch recent bills, upsert them, and optionally ingest roll-call votes."""
+    _require_api_key()
+    ensure_schema()
+    session = SessionLocal()
+    stats = {
+        "bills_fetched": 0,
+        "bills_upserted": 0,
+        "bills_with_sponsor": 0,
+        "bills_without_sponsor": 0,
+        "bills_missing_official": 0,
+        "missing_sponsors": [],
+        "votes_inserted": 0,
+        "votes_updated": 0,
+        "votes_unchanged": 0,
+        "votes_skipped_unknown_officials": 0,
+        "senate_roll_calls_skipped": 0,
+        "house_roll_calls": 0,
+    }
+
+    try:
+        official_ids = load_official_ids(session)
+        bills = fetch_recent_bills(limit=limit, congress=congress)
+        stats["bills_fetched"] = len(bills)
+        print(f"Fetched {len(bills)} bills from Congress.gov.")
+
+        for index, item in enumerate(bills, start=1):
+            item_congress = item.get("congress") or congress
+            bill_type = item.get("type")
+            number = item.get("number")
+            if not item_congress or not bill_type or number is None:
+                print(f"[{index}/{len(bills)}] Skipping bill with missing identifiers.")
+                continue
+
+            bill_id = make_bill_id(item_congress, bill_type, number)
+            print(
+                f"[{index}/{len(bills)}] {bill_id} — fetching detail..."
+            )
+            detail = fetch_bill_detail(item_congress, bill_type, number)
+            title = detail.get("title") or item.get("title")
+            sponsor = _sponsor_record(detail)
+            bioguide_id = sponsor.get("bioguideId")
+            sponsor_name = _sponsor_display_name(sponsor)
+            sponsor_id = _resolve_sponsor_id(bioguide_id, official_ids)
+            if bioguide_id and sponsor_id is None:
+                _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name)
+                stats["bills_missing_official"] += 1
+                stats["missing_sponsors"].append(
+                    {
+                        "bill_id": bill_id,
+                        "bioguide_id": bioguide_id,
+                        "name": sponsor_name,
+                    }
+                )
+
+            upsert_bill(
+                session,
+                bill_id,
+                title,
+                sponsor_id,
+                sponsor_bioguide_id=bioguide_id,
+                sponsor_name=sponsor_name,
+            )
+            stats["bills_upserted"] += 1
+            if sponsor_id:
+                stats["bills_with_sponsor"] += 1
+            elif not bioguide_id:
+                stats["bills_without_sponsor"] += 1
+
+            title_preview = (title or "")[:80]
+            print(
+                f"  Upserted {bill_id} sponsor={sponsor_id or 'NULL'} "
+                f"sponsor_name={sponsor_name or 'NULL'!r} "
+                f"title={title_preview!r}"
+            )
+
+            if sync_votes:
+                vote_stats = sync_bill_votes(
+                    item_congress,
+                    bill_type,
+                    number,
+                    session=session,
+                    official_ids=official_ids,
+                    ensure_bill=False,
+                )
+                stats["votes_inserted"] += vote_stats["inserted"]
+                stats["votes_updated"] += vote_stats["updated"]
+                stats["votes_unchanged"] += vote_stats["unchanged"]
+                stats["votes_skipped_unknown_officials"] += vote_stats[
+                    "skipped_unknown_officials"
+                ]
+                stats["senate_roll_calls_skipped"] += vote_stats[
+                    "senate_roll_calls_skipped"
+                ]
+                stats["house_roll_calls"] += vote_stats["house_roll_calls"]
+                print(
+                    f"  Votes: inserted={vote_stats['inserted']} "
+                    f"updated={vote_stats['updated']} "
+                    f"unchanged={vote_stats['unchanged']}"
+                )
+
+            session.commit()
+
+        return stats
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def _print_bill_stats(stats):
+    print("\nIngest summary")
+    print(f"  Bills fetched:              {stats['bills_fetched']}")
+    print(f"  Bills upserted:             {stats['bills_upserted']}")
+    print(f"  Bills with linked official: {stats['bills_with_sponsor']}")
+    print(f"  Bills with no sponsor:      {stats['bills_without_sponsor']}")
+    print(f"  Sponsors missing from roster: {stats['bills_missing_official']}")
+    if stats["missing_sponsors"]:
+        print("  Missing roster members:")
+        for missing in stats["missing_sponsors"]:
+            print(
+                f"    {missing['bill_id']}: {missing['bioguide_id']} "
+                f"({missing['name'] or 'unknown name'})"
+            )
+    print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
+    print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
+    print(f"  Votes inserted:             {stats['votes_inserted']}")
+    print(f"  Votes updated:              {stats['votes_updated']}")
+    print(f"  Votes unchanged:            {stats['votes_unchanged']}")
+    print(
+        f"  Votes skipped (no official): {stats['votes_skipped_unknown_officials']}"
+    )
+
+
+def _print_vote_stats(stats):
+    print("\nVote ingest summary")
+    print(f"  Bill:                       {stats['bill_id']}")
+    print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
+    print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
+    print(f"  Votes inserted:             {stats['inserted']}")
+    print(f"  Votes updated:              {stats['updated']}")
+    print(f"  Votes unchanged:            {stats['unchanged']}")
+    print(f"  Votes skipped (no official): {stats['skipped_unknown_officials']}")
+
+
 def main():
-    members = fetch_current_members()
-    saved = save_officials(members)
-    print(f"Fetched {len(members)} members and saved {saved} officials.")
+    parser = argparse.ArgumentParser(
+        description="Ingest Congress.gov members, bills, and roll-call votes."
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["members", "bills", "votes"],
+        default="bills",
+        help="members: current roster. bills: recent bills (default). "
+        "votes: roll calls for one bill.",
+    )
+    parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
+    parser.add_argument(
+        "--congress",
+        type=int,
+        default=CURRENT_CONGRESS,
+        help=f"Congress number for bill/vote sync (default {CURRENT_CONGRESS}).",
+    )
+    parser.add_argument(
+        "--skip-votes",
+        action="store_true",
+        help="When syncing bills, do not fetch roll-call votes.",
+    )
+    parser.add_argument("--bill-type", help="Bill type for the votes command, e.g. hr.")
+    parser.add_argument("--bill-number", help="Bill number for the votes command, e.g. 1.")
+    args = parser.parse_args()
+
+    if args.command == "members":
+        members = fetch_current_members()
+        saved = save_officials(members)
+        print(f"Fetched {len(members)} members and saved {saved} officials.")
+        return
+
+    if args.command == "votes":
+        if not args.bill_type or not args.bill_number:
+            parser.error("votes requires --bill-type and --bill-number")
+        ensure_schema()
+        vote_stats = sync_bill_votes(args.congress, args.bill_type, args.bill_number)
+        _print_vote_stats(vote_stats)
+        return
+
+    bill_stats = sync_recent_bills(
+        limit=args.limit,
+        congress=args.congress,
+        sync_votes=not args.skip_votes,
+    )
+    _print_bill_stats(bill_stats)
 
 
 if __name__ == "__main__":

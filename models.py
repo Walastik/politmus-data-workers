@@ -17,7 +17,10 @@ class Bill(Base):
 
     id = Column(String, primary_key=True)
     title = Column(String)
-    sponsor_id = Column(String, ForeignKey('officials.id'))
+    sponsor_id = Column(String, ForeignKey('officials.id'), nullable=True)
+    # Congress.gov sponsor identity, kept even when the member is not in officials.
+    sponsor_bioguide_id = Column(String, nullable=True)
+    sponsor_name = Column(String, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     votes = relationship("Vote", back_populates="bill")
