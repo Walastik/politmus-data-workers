@@ -1,14 +1,17 @@
 import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import BillDrawer from './BillDrawer'
 import {
   officeLine,
   partyBadgeClass,
   partyShort,
   positionBadgeClass,
   rosterStatusLabel,
+  type Bill,
   type Official,
   type OfficialDetail,
+  type OfficialVote,
 } from './types'
 
 export default function MemberDrawer({
@@ -21,12 +24,14 @@ export default function MemberDrawer({
   const [detail, setDetail] = useState<OfficialDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError(null)
     setDetail(null)
+    setSelectedBill(null)
 
     fetch(`/api/officials/${official.id}`, { signal: controller.signal })
       .then(async (res) => {
@@ -53,13 +58,13 @@ export default function MemberDrawer({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !selectedBill) {
         onClose()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [onClose, selectedBill])
 
   const votes = detail?.votes ?? []
 
@@ -122,32 +127,55 @@ export default function MemberDrawer({
           ) : (
             <ul className="mt-3 space-y-3">
               {votes.map((vote) => (
-                <li
-                  key={`${vote.bill_id}-${vote.position}`}
-                  className="rounded-lg border border-slate-800 bg-slate-800/60 p-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="font-mono text-xs text-slate-400">{vote.bill_id}</p>
-                    <span
-                      className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${positionBadgeClass(vote.position)}`}
-                    >
-                      {vote.position ?? 'Unknown'}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm font-medium leading-snug">
-                    {vote.bill_title || 'Untitled bill'}
-                  </p>
-                  {vote.sponsor_name ? (
-                    <p className="mt-1 text-xs text-slate-500">
-                      Sponsor: {vote.sponsor_name}
+                <li key={`${vote.bill_id}-${vote.position}`}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBill(billFromVote(vote))}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-800/60 p-3 text-left transition hover:border-slate-500 hover:bg-slate-800"
+                    aria-label={`Open details for ${vote.bill_title || vote.bill_id}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="font-mono text-xs text-slate-400">{vote.bill_id}</p>
+                      <span
+                        className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${positionBadgeClass(vote.position)}`}
+                      >
+                        {vote.position ?? 'Unknown'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm font-medium leading-snug">
+                      {vote.bill_title || 'Untitled bill'}
                     </p>
-                  ) : null}
+                    {vote.sponsor_name ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Sponsor: {vote.sponsor_name}
+                      </p>
+                    ) : null}
+                  </button>
                 </li>
               ))}
             </ul>
           )}
         </div>
       </aside>
+      {selectedBill ? (
+        <BillDrawer
+          bill={selectedBill}
+          onClose={() => setSelectedBill(null)}
+        />
+      ) : null}
     </div>
   )
+}
+
+function billFromVote(vote: OfficialVote): Bill {
+  return {
+    id: vote.bill_id,
+    title: vote.bill_title,
+    sponsor_id: null,
+    sponsor_bioguide_id: null,
+    sponsor_name: vote.sponsor_name,
+    policy_area: null,
+    summary: null,
+    votes_summary: {},
+  }
 }

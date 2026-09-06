@@ -35,6 +35,8 @@ def _bill_detail(bill: Bill, votes_summary: dict[str, int]) -> BillDetailOut:
         sponsor_id=bill.sponsor_id,
         sponsor_bioguide_id=bill.sponsor_bioguide_id,
         sponsor_name=bill.sponsor_name,
+        policy_area=bill.policy_area,
+        summary=bill.summary,
         votes_summary=votes_summary,
     )
 

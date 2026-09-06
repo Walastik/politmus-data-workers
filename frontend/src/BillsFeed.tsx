@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import BillDrawer, { PolicyAreaTag } from './BillDrawer'
 import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
 
@@ -11,6 +12,7 @@ export default function BillsFeed() {
   const [bills, setBills] = useState<Bill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -73,21 +75,39 @@ export default function BillsFeed() {
         {ordered.map((bill) => (
           <article
             key={bill.id}
-            className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm"
+            className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
           >
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <p className="font-mono text-xs text-slate-400">{bill.id}</p>
-              <SponsorTag bill={bill} />
-            </div>
-            <h3 className="mt-2 text-base font-semibold leading-snug">
-              {bill.title || 'Untitled bill'}
-            </h3>
-            <div className="mt-3">
-              <VoteTallyBar summary={bill.votes_summary} />
-            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedBill(bill)}
+              className="w-full text-left"
+              aria-label={`Open details for ${bill.title || bill.id}`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="font-mono text-xs text-slate-400">{bill.id}</p>
+                <SponsorTag bill={bill} />
+              </div>
+              <h3 className="mt-2 text-base font-semibold leading-snug">
+                {bill.title || 'Untitled bill'}
+              </h3>
+              {bill.policy_area ? (
+                <div className="mt-2">
+                  <PolicyAreaTag area={bill.policy_area} />
+                </div>
+              ) : null}
+              <div className="mt-3">
+                <VoteTallyBar summary={bill.votes_summary} />
+              </div>
+            </button>
           </article>
         ))}
       </div>
+      {selectedBill ? (
+        <BillDrawer
+          bill={selectedBill}
+          onClose={() => setSelectedBill(null)}
+        />
+      ) : null}
     </>
   )
 }

@@ -34,6 +34,8 @@ class BillOut(BaseModel):
     sponsor_id: Optional[str] = None
     sponsor_bioguide_id: Optional[str] = None
     sponsor_name: Optional[str] = None
+    policy_area: Optional[str] = None
+    summary: Optional[str] = None
 
 
 class BillDetailOut(BillOut):

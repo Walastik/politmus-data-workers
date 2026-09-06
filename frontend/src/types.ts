@@ -25,6 +25,8 @@ export interface Bill {
   sponsor_id: string | null
   sponsor_bioguide_id: string | null
   sponsor_name: string | null
+  policy_area: string | null
+  summary: string | null
   votes_summary: Record<string, number>
 }
 
@@ -121,6 +123,13 @@ export function partyShort(party: string) {
 
 export function rosterStatusLabel(official: Official) {
   return official.current_member ? 'Active' : 'Former'
+}
+
+export function sanitizeCrsHtml(html: string) {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
 }
 
 export function positionBadgeClass(position: string | null) {
