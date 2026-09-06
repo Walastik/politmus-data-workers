@@ -12,6 +12,17 @@ class OfficialOut(BaseModel):
     party: Optional[str] = None
 
 
+class OfficialVoteOut(BaseModel):
+    bill_id: str
+    bill_title: Optional[str] = None
+    position: Optional[str] = None
+    sponsor_name: Optional[str] = None
+
+
+class OfficialDetailOut(OfficialOut):
+    votes: list[OfficialVoteOut] = Field(default_factory=list)
+
+
 class BillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

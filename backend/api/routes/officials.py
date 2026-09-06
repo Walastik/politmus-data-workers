@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from api.filters import normalize_party, normalize_state
-from api.schemas import OfficialOut
+from api.schemas import OfficialDetailOut, OfficialOut, OfficialVoteOut
 from database import get_db
-from models import Official
+from models import Bill, Official, Vote
 
 router = APIRouter()
 
@@ -36,9 +36,32 @@ def list_officials(
     return officials
 
 
-@router.get("/{official_id}", response_model=OfficialOut)
+@router.get("/{official_id}", response_model=OfficialDetailOut)
 def get_official(official_id: str, db: Session = Depends(get_db)):
     official = db.query(Official).filter(Official.id == official_id).first()
     if not official:
         raise HTTPException(status_code=404, detail="Official not found")
-    return official
+
+    vote_rows = (
+        db.query(Vote, Bill)
+        .join(Bill, Bill.id == Vote.bill_id)
+        .filter(Vote.official_id == official_id)
+        .order_by(Bill.id.desc())
+        .all()
+    )
+
+    return OfficialDetailOut(
+        id=official.id,
+        name=official.name,
+        state=official.state,
+        party=official.party,
+        votes=[
+            OfficialVoteOut(
+                bill_id=bill.id,
+                bill_title=bill.title,
+                position=vote.position,
+                sponsor_name=bill.sponsor_name,
+            )
+            for vote, bill in vote_rows
+        ],
+    )

@@ -1,44 +1,30 @@
-import { Landmark } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Landmark, ScrollText, Users } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
 
-interface Official {
-  id: string
-  name: string
-  state: string
-  party: string
-}
+import BillsFeed from './BillsFeed'
+import MemberDrawer from './MemberDrawer'
+import {
+  PARTY_FILTERS,
+  partyBadgeClass,
+  partyShort,
+  type Official,
+} from './types'
 
-const PARTY_FILTERS = [
-  { value: '', label: 'All' },
-  { value: 'D', label: 'D' },
-  { value: 'R', label: 'R' },
-  { value: 'I', label: 'I' },
-] as const
-
-function partyBadgeClass(party: string) {
-  if (party === 'Democratic' || party === 'D') {
-    return 'bg-blue-900/60 text-blue-300'
-  }
-  if (party === 'Republican' || party === 'R') {
-    return 'bg-red-900/60 text-red-300'
-  }
-  return 'bg-emerald-900/60 text-emerald-300'
-}
-
-function partyShort(party: string) {
-  if (party === 'Democratic') return 'D'
-  if (party === 'Republican') return 'R'
-  if (party === 'Independent') return 'I'
-  return party
-}
+type Tab = 'roster' | 'bills'
 
 export default function App() {
+  const [tab, setTab] = useState<Tab>('roster')
   const [officials, setOfficials] = useState<Official[]>([])
   const [filterParty, setFilterParty] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
 
   useEffect(() => {
+    if (tab !== 'roster') {
+      return
+    }
+
     const controller = new AbortController()
     const params = new URLSearchParams()
     if (filterParty) {
@@ -76,40 +62,64 @@ export default function App() {
       })
 
     return () => controller.abort()
-  }, [filterParty])
+  }, [filterParty, tab])
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-8">
-      <header className="max-w-6xl mx-auto mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Landmark className="mt-1 h-7 w-7 text-blue-400" aria-hidden="true" />
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Politmus Explorer</h1>
-            <p className="text-slate-400 text-sm mt-1">
-              Congressional Roster & Legislation Feed
-            </p>
+      <header className="mx-auto mb-8 max-w-6xl">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <Landmark className="mt-1 h-7 w-7 text-blue-400" aria-hidden="true" />
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Politmus Explorer</h1>
+              <p className="mt-1 text-sm text-slate-400">
+                Congressional Roster & Legislation Feed
+              </p>
+            </div>
           </div>
+          <nav className="flex gap-2" aria-label="Primary">
+            <TabButton
+              active={tab === 'roster'}
+              icon={<Users className="h-3.5 w-3.5" />}
+              label="Roster"
+              onClick={() => setTab('roster')}
+            />
+            <TabButton
+              active={tab === 'bills'}
+              icon={<ScrollText className="h-3.5 w-3.5" />}
+              label="Bills"
+              onClick={() => {
+                setSelectedOfficial(null)
+                setTab('bills')
+              }}
+            />
+          </nav>
         </div>
-        <div className="flex gap-2">
-          {PARTY_FILTERS.map(({ value, label }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => setFilterParty(value)}
-              className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition ${
-                filterParty === value
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+
+        {tab === 'roster' ? (
+          <div className="mt-4 flex gap-2">
+            {PARTY_FILTERS.map(({ value, label }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setFilterParty(value)}
+                className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition ${
+                  filterParty === value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </header>
 
-      <main className="max-w-6xl mx-auto">
-        {loading ? (
+      <main className="mx-auto max-w-6xl">
+        {tab === 'bills' ? (
+          <BillsFeed />
+        ) : loading ? (
           <p className="text-slate-400">Loading congressional roster...</p>
         ) : error ? (
           <p className="text-red-400">
@@ -119,31 +129,67 @@ export default function App() {
           <p className="text-slate-400">No officials match this filter.</p>
         ) : (
           <>
-            <p className="text-slate-400 text-sm mb-4">
+            <p className="mb-4 text-sm text-slate-400">
               Showing {officials.length} member{officials.length === 1 ? '' : 's'}
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {officials.map((official) => (
-                <div
+                <button
                   key={official.id}
-                  className="bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-sm"
+                  type="button"
+                  onClick={() => setSelectedOfficial(official)}
+                  className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-left shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
                 >
-                  <div className="flex justify-between items-start">
+                  <div className="flex items-start justify-between">
                     <span
-                      className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(official.party)}`}
+                      className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(official.party)}`}
                     >
                       {partyShort(official.party)}
                     </span>
                     <span className="text-xs text-slate-400">{official.state}</span>
                   </div>
-                  <h3 className="text-base font-semibold mt-2">{official.name}</h3>
-                  <p className="text-xs text-slate-500 mt-1 font-mono">{official.id}</p>
-                </div>
+                  <h3 className="mt-2 text-base font-semibold">{official.name}</h3>
+                  <p className="mt-1 font-mono text-xs text-slate-500">{official.id}</p>
+                </button>
               ))}
             </div>
           </>
         )}
       </main>
+
+      {selectedOfficial ? (
+        <MemberDrawer
+          official={selectedOfficial}
+          onClose={() => setSelectedOfficial(null)}
+        />
+      ) : null}
     </div>
+  )
+}
+
+function TabButton({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean
+  icon: ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition ${
+        active
+          ? 'bg-blue-600 text-white'
+          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }
