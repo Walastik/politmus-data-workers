@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
+  officeLine,
   partyBadgeClass,
   partyShort,
   positionBadgeClass,
@@ -88,7 +89,9 @@ export default function MemberDrawer({
             <h2 id="member-drawer-title" className="mt-2 text-xl font-semibold">
               {official.name}
             </h2>
-            <p className="mt-1 font-mono text-xs text-slate-500">{official.id}</p>
+            <p className="mt-1 text-sm text-slate-400">
+              {officeLine(official)}
+            </p>
           </div>
           <button
             type="button"

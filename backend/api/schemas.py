@@ -10,6 +10,8 @@ class OfficialOut(BaseModel):
     name: Optional[str] = None
     state: Optional[str] = None
     party: Optional[str] = None
+    office: Optional[str] = None
+    district: Optional[int] = None
 
 
 class OfficialVoteOut(BaseModel):

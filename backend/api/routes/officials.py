@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from api.filters import normalize_party, normalize_state
+from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.schemas import OfficialDetailOut, OfficialOut, OfficialVoteOut
 from database import get_db
 from models import Bill, Official, Vote
@@ -21,16 +21,24 @@ def list_officials(
         default=None,
         description="Full state name or postal abbreviation (e.g. California or CA).",
     ),
+    q: Optional[str] = Query(
+        default=None,
+        max_length=100,
+        description="Case-insensitive substring match on official name.",
+    ),
     limit: int = Query(default=600, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
     query = db.query(Official)
     party_value = normalize_party(party)
     state_value = normalize_state(state)
+    name_pattern = name_search_pattern(q)
     if party_value:
         query = query.filter(Official.party.ilike(party_value))
     if state_value:
         query = query.filter(Official.state.ilike(state_value))
+    if name_pattern:
+        query = query.filter(Official.name.ilike(name_pattern, escape="\\"))
 
     officials = query.order_by(Official.name).limit(limit).all()
     return officials
@@ -55,6 +63,8 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         name=official.name,
         state=official.state,
         party=official.party,
+        office=official.office,
+        district=official.district,
         votes=[
             OfficialVoteOut(
                 bill_id=bill.id,

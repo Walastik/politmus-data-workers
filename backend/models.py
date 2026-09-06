@@ -9,6 +9,8 @@ class Official(Base):
     name = Column(String)
     state = Column(String)
     party = Column(String)
+    office = Column(String)
+    district = Column(Integer, nullable=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 

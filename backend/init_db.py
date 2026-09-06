@@ -8,6 +8,12 @@ def ensure_schema():
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS office VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS district INTEGER"
+        ))
+        conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_bioguide_id VARCHAR"
         ))
         conn.execute(text(

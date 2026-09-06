@@ -109,6 +109,64 @@ def load_official_ids(session):
     return {row[0] for row in session.query(Official.id).all()}
 
 
+TERRITORY_HOUSE_OFFICES = {
+    "District of Columbia": "Delegate",
+    "Guam": "Delegate",
+    "American Samoa": "Delegate",
+    "Virgin Islands": "Delegate",
+    "Northern Mariana Islands": "Delegate",
+    "Puerto Rico": "Resident Commissioner",
+}
+
+
+def _latest_term(member):
+    terms = member.get("terms")
+    items = []
+    if isinstance(terms, dict):
+        items = terms.get("item") or []
+    elif isinstance(terms, list):
+        items = terms
+    if not items:
+        return {}
+    current = [term for term in items if not term.get("endYear") and not term.get("end")]
+    pool = current or items
+    return max(pool, key=lambda term: term.get("startYear") or term.get("start") or 0)
+
+
+def office_from_member(member):
+    """Human-readable office for the current term, e.g. Senator or Representative."""
+    term = _latest_term(member)
+    member_type = (term.get("memberType") or member.get("memberType") or "").strip()
+    if member_type:
+        return member_type
+
+    chamber = (term.get("chamber") or member.get("chamber") or "").strip().lower()
+    if "senate" in chamber:
+        return "Senator"
+    if "house" in chamber:
+        return TERRITORY_HOUSE_OFFICES.get(member.get("state") or "", "Representative")
+
+    if member.get("district") in (None, ""):
+        return "Senator"
+    return TERRITORY_HOUSE_OFFICES.get(member.get("state") or "", "Representative")
+
+
+def district_from_member(member):
+    """House district number, or None for senators / missing data.
+
+    Congress.gov uses 0 for at-large House seats.
+    """
+    if office_from_member(member) == "Senator":
+        return None
+    raw = member.get("district")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_current_members():
     url = f"{BASE_URL}/member"
     params = {
@@ -128,6 +186,7 @@ def fetch_current_members():
 
 
 def save_officials(members):
+    ensure_schema()
     session = SessionLocal()
     saved = 0
 
@@ -143,6 +202,8 @@ def save_officials(members):
                     name=member.get("name"),
                     state=member.get("state"),
                     party=member.get("partyName"),
+                    office=office_from_member(member),
+                    district=district_from_member(member),
                 )
             )
             saved += 1

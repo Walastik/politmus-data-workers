@@ -1,10 +1,12 @@
-import { Landmark, ScrollText, Users } from 'lucide-react'
+import { Landmark, ScrollText, Search, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import BillsFeed from './BillsFeed'
 import MemberDrawer from './MemberDrawer'
 import {
   PARTY_FILTERS,
+  STATE_OPTIONS,
+  officeLine,
   partyBadgeClass,
   partyShort,
   type Official,
@@ -16,9 +18,19 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('roster')
   const [officials, setOfficials] = useState<Official[]>([])
   const [filterParty, setFilterParty] = useState('')
+  const [filterState, setFilterState] = useState('')
+  const [nameQuery, setNameQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedQuery(nameQuery.trim())
+    }, 200)
+    return () => window.clearTimeout(timeout)
+  }, [nameQuery])
 
   useEffect(() => {
     if (tab !== 'roster') {
@@ -30,10 +42,15 @@ export default function App() {
     if (filterParty) {
       params.set('party', filterParty)
     }
+    if (filterState) {
+      params.set('state', filterState)
+    }
+    if (debouncedQuery) {
+      params.set('q', debouncedQuery)
+    }
     const query = params.toString()
     const url = query ? `/api/officials?${query}` : '/api/officials'
 
-    setLoading(true)
     setError(null)
 
     fetch(url, { signal: controller.signal })
@@ -62,7 +79,7 @@ export default function App() {
       })
 
     return () => controller.abort()
-  }, [filterParty, tab])
+  }, [debouncedQuery, filterParty, filterState, tab])
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-8">
@@ -97,21 +114,54 @@ export default function App() {
         </div>
 
         {tab === 'roster' ? (
-          <div className="mt-4 flex gap-2">
-            {PARTY_FILTERS.map(({ value, label }) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => setFilterParty(value)}
-                className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition ${
-                  filterParty === value
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mt-4 flex flex-col gap-3">
+            <div className="flex flex-wrap gap-2">
+              {PARTY_FILTERS.map(({ value, label }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setFilterParty(value)}
+                  className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition ${
+                    filterParty === value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="relative block min-w-0 flex-1">
+                <span className="sr-only">Search members by name</span>
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+                  aria-hidden="true"
+                />
+                <input
+                  type="search"
+                  value={nameQuery}
+                  onChange={(event) => setNameQuery(event.target.value)}
+                  placeholder="Search by name"
+                  className="w-full rounded border border-slate-700 bg-slate-800 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+                />
+              </label>
+              <label className="sm:w-64">
+                <span className="sr-only">Filter by state</span>
+                <select
+                  value={filterState}
+                  onChange={(event) => setFilterState(event.target.value)}
+                  className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">All states</option>
+                  {STATE_OPTIONS.map((state) => (
+                    <option key={state.abbr} value={state.abbr}>
+                      {state.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
         ) : null}
       </header>
@@ -149,7 +199,9 @@ export default function App() {
                     <span className="text-xs text-slate-400">{official.state}</span>
                   </div>
                   <h3 className="mt-2 text-base font-semibold">{official.name}</h3>
-                  <p className="mt-1 font-mono text-xs text-slate-500">{official.id}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {officeLine(official)}
+                  </p>
                 </button>
               ))}
             </div>

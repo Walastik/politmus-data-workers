@@ -87,3 +87,15 @@ def normalize_state(value: Optional[str]) -> Optional[str]:
         return None
     stripped = value.strip()
     return STATE_NAME_BY_ABBR.get(stripped.upper(), stripped)
+
+
+def name_search_pattern(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    escaped = (
+        stripped.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+    return f"%{escaped}%"
