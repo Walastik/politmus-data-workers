@@ -5,11 +5,14 @@ import BillsFeed from './BillsFeed'
 import MemberDrawer from './MemberDrawer'
 import {
   PARTY_FILTERS,
+  ROSTER_STATUS_FILTERS,
   STATE_OPTIONS,
   officeLine,
   partyBadgeClass,
   partyShort,
+  rosterStatusLabel,
   type Official,
+  type RosterStatusFilter,
 } from './types'
 
 type Tab = 'roster' | 'bills'
@@ -18,6 +21,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('roster')
   const [officials, setOfficials] = useState<Official[]>([])
   const [filterParty, setFilterParty] = useState('')
+  const [filterStatus, setFilterStatus] = useState<RosterStatusFilter>('active')
   const [filterState, setFilterState] = useState('')
   const [nameQuery, setNameQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -39,6 +43,11 @@ export default function App() {
 
     const controller = new AbortController()
     const params = new URLSearchParams()
+    if (filterStatus === 'active') {
+      params.set('current_member', 'true')
+    } else if (filterStatus === 'former') {
+      params.set('current_member', 'false')
+    }
     if (filterParty) {
       params.set('party', filterParty)
     }
@@ -52,6 +61,7 @@ export default function App() {
     const url = query ? `/api/officials?${query}` : '/api/officials'
 
     setError(null)
+    setLoading(true)
 
     fetch(url, { signal: controller.signal })
       .then(async (res) => {
@@ -79,7 +89,7 @@ export default function App() {
       })
 
     return () => controller.abort()
-  }, [debouncedQuery, filterParty, filterState, tab])
+  }, [debouncedQuery, filterParty, filterState, filterStatus, tab])
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-8">
@@ -115,7 +125,40 @@ export default function App() {
 
         {tab === 'roster' ? (
           <div className="mt-4 flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Status
+              </span>
+              <div
+                className="flex flex-wrap gap-2"
+                role="group"
+                aria-label="Filter by member status"
+              >
+                {ROSTER_STATUS_FILTERS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setFilterStatus(value)}
+                    className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition ${
+                      filterStatus === value
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Party
+              </span>
+              <div
+                className="flex flex-wrap gap-2"
+                role="group"
+                aria-label="Filter by party"
+              >
               {PARTY_FILTERS.map(({ value, label }) => (
                 <button
                   key={label}
@@ -130,6 +173,7 @@ export default function App() {
                   {label}
                 </button>
               ))}
+              </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <label className="relative block min-w-0 flex-1">
@@ -202,6 +246,11 @@ export default function App() {
                   <p className="mt-1 text-xs text-slate-400">
                     {officeLine(official)}
                   </p>
+                  {filterStatus !== 'active' ? (
+                    <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      {rosterStatusLabel(official)}
+                    </p>
+                  ) : null}
                 </button>
               ))}
             </div>

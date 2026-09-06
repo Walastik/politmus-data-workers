@@ -5,6 +5,7 @@ export interface Official {
   party: string
   office: string | null
   district: number | null
+  current_member: boolean
 }
 
 export interface OfficialVote {
@@ -33,6 +34,14 @@ export const PARTY_FILTERS = [
   { value: 'R', label: 'R' },
   { value: 'I', label: 'I' },
 ] as const
+
+export const ROSTER_STATUS_FILTERS = [
+  { value: 'active', label: 'Active' },
+  { value: 'former', label: 'Former' },
+  { value: 'all', label: 'All' },
+] as const
+
+export type RosterStatusFilter = (typeof ROSTER_STATUS_FILTERS)[number]['value']
 
 export const STATE_OPTIONS = [
   { abbr: 'AL', name: 'Alabama' },
@@ -108,6 +117,10 @@ export function partyShort(party: string) {
   if (party === 'Republican') return 'R'
   if (party === 'Independent') return 'I'
   return party
+}
+
+export function rosterStatusLabel(official: Official) {
+  return official.current_member ? 'Active' : 'Former'
 }
 
 export function positionBadgeClass(position: string | null) {

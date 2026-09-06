@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, ForeignKey
+from sqlalchemy import Boolean, Column, String, Integer, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -11,6 +11,7 @@ class Official(Base):
     party = Column(String)
     office = Column(String)
     district = Column(Integer, nullable=True)
+    current_member = Column(Boolean, nullable=False, default=False, server_default='false')
 
     bills = relationship("Bill", back_populates="sponsor")
 
@@ -23,6 +24,8 @@ class Bill(Base):
     # Congress.gov sponsor identity, kept even when the member is not in officials.
     sponsor_bioguide_id = Column(String, nullable=True)
     sponsor_name = Column(String, nullable=True)
+    policy_area = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     votes = relationship("Vote", back_populates="bill")

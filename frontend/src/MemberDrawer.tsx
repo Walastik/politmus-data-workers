@@ -6,6 +6,7 @@ import {
   partyBadgeClass,
   partyShort,
   positionBadgeClass,
+  rosterStatusLabel,
   type Official,
   type OfficialDetail,
 } from './types'
@@ -85,6 +86,9 @@ export default function MemberDrawer({
                 {partyShort(official.party)}
               </span>
               <span className="text-xs text-slate-400">{official.state}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                {rosterStatusLabel(official)}
+              </span>
             </div>
             <h2 id="member-drawer-title" className="mt-2 text-xl font-semibold">
               {official.name}

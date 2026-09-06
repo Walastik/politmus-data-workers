@@ -27,6 +27,10 @@ def list_officials(
         description="Case-insensitive substring match on official name.",
     ),
     limit: int = Query(default=600, ge=1, le=1000),
+    current_member: Optional[bool] = Query(
+        default=None,
+        description="If true, only current members. If false, only former members.",
+    ),
     db: Session = Depends(get_db),
 ):
     query = db.query(Official)
@@ -39,6 +43,8 @@ def list_officials(
         query = query.filter(Official.state.ilike(state_value))
     if name_pattern:
         query = query.filter(Official.name.ilike(name_pattern, escape="\\"))
+    if current_member is not None:
+        query = query.filter(Official.current_member.is_(current_member))
 
     officials = query.order_by(Official.name).limit(limit).all()
     return officials
@@ -65,6 +71,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         party=official.party,
         office=official.office,
         district=official.district,
+        current_member=bool(official.current_member),
         votes=[
             OfficialVoteOut(
                 bill_id=bill.id,

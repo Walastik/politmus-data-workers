@@ -119,6 +119,20 @@ TERRITORY_HOUSE_OFFICES = {
 }
 
 
+def _term_end(term):
+    return term.get("endYear") or term.get("end") or term.get("termEndYear")
+
+
+def _term_start(term):
+    return (
+        term.get("startYear")
+        or term.get("start")
+        or term.get("termBeginYear")
+        or term.get("congress")
+        or 0
+    )
+
+
 def _latest_term(member):
     terms = member.get("terms")
     items = []
@@ -128,9 +142,9 @@ def _latest_term(member):
         items = terms
     if not items:
         return {}
-    current = [term for term in items if not term.get("endYear") and not term.get("end")]
+    current = [term for term in items if not _term_end(term)]
     pool = current or items
-    return max(pool, key=lambda term: term.get("startYear") or term.get("start") or 0)
+    return max(pool, key=_term_start)
 
 
 def office_from_member(member):
@@ -160,6 +174,8 @@ def district_from_member(member):
         return None
     raw = member.get("district")
     if raw in (None, ""):
+        raw = _latest_term(member).get("district")
+    if raw in (None, ""):
         return None
     try:
         return int(raw)
@@ -185,31 +201,192 @@ def fetch_current_members():
     return members
 
 
+def fetch_member(bioguide_id):
+    """GET /v3/member/{bioguideId} and return the member object."""
+    payload = congress_get(f"/member/{bioguide_id}", params={"format": "json"})
+    return payload.get("member") or payload
+
+
+def _member_bioguide_id(member):
+    identifiers = member.get("identifiers") or {}
+    return member.get("bioguideId") or identifiers.get("bioguideId")
+
+
+def _name_from_member(member):
+    return (
+        member.get("name")
+        or member.get("invertedOrderName")
+        or member.get("directOrderName")
+        or None
+    )
+
+
+def _party_from_member(member):
+    party = member.get("partyName") or member.get("party")
+    if not party:
+        history = member.get("partyHistory") or []
+        if history:
+            current = [item for item in history if not item.get("endYear")]
+            pool = current or history
+            latest = max(pool, key=lambda item: item.get("startYear") or 0)
+            party = latest.get("partyName")
+    if not party:
+        return None
+    party = str(party).strip()
+    if party.lower() == "democrat":
+        return "Democratic"
+    return party or None
+
+
+def _current_member_flag(member, default=False):
+    if "currentMember" not in member:
+        return default
+    value = member.get("currentMember")
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return bool(value)
+
+
+def official_from_member(member, bioguide_id=None, current_member=None):
+    bioguide_id = bioguide_id or _member_bioguide_id(member)
+    if not bioguide_id:
+        return None
+    if current_member is None:
+        current_member = _current_member_flag(member, default=False)
+    return Official(
+        id=bioguide_id,
+        name=_name_from_member(member),
+        state=member.get("state"),
+        party=_party_from_member(member),
+        office=office_from_member(member),
+        district=district_from_member(member),
+        current_member=bool(current_member),
+    )
+
+
 def save_officials(members):
+    """Upsert the current roster. Only this path marks officials current.
+
+    Members from GET /member?currentMember=true are stored with
+    current_member=True. Anyone already in the table but missing from this
+    response is marked current_member=False.
+    """
     ensure_schema()
     session = SessionLocal()
     saved = 0
+    current_ids = []
 
     try:
         for member in members:
-            bioguide_id = member.get("bioguideId")
-            if not bioguide_id:
+            official = official_from_member(member, current_member=True)
+            if official is None:
                 continue
 
-            session.merge(
-                Official(
-                    id=bioguide_id,
-                    name=member.get("name"),
-                    state=member.get("state"),
-                    party=member.get("partyName"),
-                    office=office_from_member(member),
-                    district=district_from_member(member),
+            session.merge(official)
+            current_ids.append(official.id)
+            saved += 1
+
+        if current_ids:
+            former = (
+                session.query(Official)
+                .filter(~Official.id.in_(current_ids))
+                .filter(Official.current_member.is_(True))
+                .update(
+                    {Official.current_member: False},
+                    synchronize_session=False,
                 )
             )
-            saved += 1
+            if former:
+                print(
+                    f"  Marked {former} official(s) as not current "
+                    "(absent from GET /member?currentMember=true)."
+                )
 
         session.commit()
         return saved
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def sync_missing_sponsors():
+    """Insert officials for bills with sponsor_id NULL, then close the FK gap."""
+    _require_api_key()
+    ensure_schema()
+    session = SessionLocal()
+    stats = {
+        "missing_ids": 0,
+        "officials_upserted": 0,
+        "officials_failed": 0,
+        "bills_linked": 0,
+    }
+
+    try:
+        rows = (
+            session.query(Bill.sponsor_bioguide_id)
+            .filter(Bill.sponsor_id.is_(None))
+            .filter(Bill.sponsor_bioguide_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        bioguide_ids = sorted({row[0] for row in rows if row[0]})
+        stats["missing_ids"] = len(bioguide_ids)
+        print(
+            f"Found {len(bioguide_ids)} distinct sponsor bioguide IDs "
+            "with sponsor_id=NULL."
+        )
+
+        linked_ids = []
+        for index, bioguide_id in enumerate(bioguide_ids, start=1):
+            print(f"[{index}/{len(bioguide_ids)}] Fetching member {bioguide_id}...")
+            try:
+                member = fetch_member(bioguide_id)
+            except requests.HTTPError as exc:
+                status = getattr(exc.response, "status_code", "?")
+                print(f"  HTTP {status} for {bioguide_id}; skipping.")
+                stats["officials_failed"] += 1
+                continue
+            except (requests.RequestException, RuntimeError) as exc:
+                print(f"  Failed to fetch {bioguide_id}: {exc}")
+                stats["officials_failed"] += 1
+                continue
+
+            existing = session.get(Official, bioguide_id)
+            official = official_from_member(
+                member,
+                bioguide_id=bioguide_id,
+                current_member=bool(existing.current_member) if existing else False,
+            )
+            if official is None:
+                print(f"  No member payload for {bioguide_id}; skipping.")
+                stats["officials_failed"] += 1
+                continue
+
+            session.merge(official)
+            linked_ids.append(bioguide_id)
+            stats["officials_upserted"] += 1
+            print(
+                f"  Upserted official {official.id} "
+                f"name={official.name!r} office={official.office!r}"
+            )
+
+        session.flush()
+
+        if linked_ids:
+            bills = (
+                session.query(Bill)
+                .filter(Bill.sponsor_id.is_(None))
+                .filter(Bill.sponsor_bioguide_id.in_(linked_ids))
+                .all()
+            )
+            for bill in bills:
+                bill.sponsor_id = bill.sponsor_bioguide_id
+            stats["bills_linked"] = len(bills)
+
+        session.commit()
+        return stats
     except Exception:
         session.rollback()
         raise
@@ -619,6 +796,14 @@ def _print_vote_stats(stats):
     print(f"  Votes skipped (no official): {stats['skipped_unknown_officials']}")
 
 
+def _print_sponsor_stats(stats):
+    print("\nSponsor backfill summary")
+    print(f"  Distinct missing bioguide IDs: {stats['missing_ids']}")
+    print(f"  Officials upserted:            {stats['officials_upserted']}")
+    print(f"  Member fetches failed:         {stats['officials_failed']}")
+    print(f"  Bills linked to officials:     {stats['bills_linked']}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Ingest Congress.gov members, bills, and roll-call votes."
@@ -626,10 +811,11 @@ def main():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["members", "bills", "votes"],
+        choices=["members", "bills", "votes", "sponsors"],
         default="bills",
         help="members: current roster. bills: recent bills (default). "
-        "votes: roll calls for one bill.",
+        "votes: roll calls for one bill. "
+        "sponsors: backfill historical sponsors missing from officials.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(
@@ -651,6 +837,11 @@ def main():
         members = fetch_current_members()
         saved = save_officials(members)
         print(f"Fetched {len(members)} members and saved {saved} officials.")
+        return
+
+    if args.command == "sponsors":
+        sponsor_stats = sync_missing_sponsors()
+        _print_sponsor_stats(sponsor_stats)
         return
 
     if args.command == "votes":

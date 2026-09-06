@@ -13,11 +13,25 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS district INTEGER"
         ))
+        # Existing rows were loaded from the current roster; new inserts default false.
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS current_member "
+            "BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ALTER COLUMN current_member SET DEFAULT FALSE"
+        ))
         conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_bioguide_id VARCHAR"
         ))
         conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_name VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS policy_area VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS summary TEXT"
         ))
         conn.execute(text(
             """

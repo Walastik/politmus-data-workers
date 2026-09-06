@@ -12,6 +12,7 @@ class OfficialOut(BaseModel):
     party: Optional[str] = None
     office: Optional[str] = None
     district: Optional[int] = None
+    current_member: bool = False
 
 
 class OfficialVoteOut(BaseModel):
