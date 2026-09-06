@@ -1,8 +1,8 @@
 import { Landmark, ScrollText, Search, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
-import BillsFeed from './BillsFeed'
-import MemberDrawer from './MemberDrawer'
+import BillsFeed from '../BillsFeed'
+import MemberDrawer from '../MemberDrawer'
 import {
   PARTY_FILTERS,
   ROSTER_STATUS_FILTERS,
@@ -13,11 +13,11 @@ import {
   rosterStatusLabel,
   type Official,
   type RosterStatusFilter,
-} from './types'
+} from '../types'
 
 type Tab = 'roster' | 'bills'
 
-export default function App() {
+export default function Explorer() {
   const [tab, setTab] = useState<Tab>('roster')
   const [officials, setOfficials] = useState<Official[]>([])
   const [filterParty, setFilterParty] = useState('')
