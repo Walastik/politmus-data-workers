@@ -1,0 +1,45 @@
+name: Congress Data Ingestion
+
+on:
+  schedule:
+    # Every 6 hours at minute 0 UTC (00:00, 06:00, 12:00, 18:00)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allows you to click a "Run workflow" button in the GitHub UI manually
+
+concurrency:
+  group: congress-ingest
+  cancel-in-progress: false
+
+jobs:
+  sync_congress_data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CONGRESS_GOV_API_KEY: ${{ secrets.CONGRESS_GOV_API_KEY }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Member Roster Ingestion
+        run: python congress_client.py members
+
+      - name: Run Bill & Vote Ingestion
+        run: python congress_client.py bills
+
+      - name: Run Enrichment (Summaries & Policy Areas)
+        run: python congress_client.py enrich
