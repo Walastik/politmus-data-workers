@@ -4,6 +4,7 @@ import time
 
 import requests
 from dotenv import load_dotenv
+from sqlalchemy import or_
 
 from database import SessionLocal
 from init_db import ensure_schema
@@ -94,6 +95,17 @@ def congress_get(url, params=None):
 
 def make_bill_id(congress, bill_type, number):
     return f"{congress}-{str(bill_type).lower()}-{number}"
+
+
+def parse_bill_id(bill_id):
+    """Split a stored id like 119-hr-1 into (congress, bill_type, number)."""
+    parts = str(bill_id).split("-")
+    if len(parts) < 3:
+        return None
+    congress, bill_type, number = parts[0], parts[1], "-".join(parts[2:])
+    if not congress or not bill_type or not number:
+        return None
+    return congress, bill_type, number
 
 
 def normalize_position(vote_cast):
@@ -394,6 +406,138 @@ def sync_missing_sponsors():
         session.close()
 
 
+def fetch_bill_subjects(congress, bill_type, number):
+    path = f"/bill/{congress}/{str(bill_type).lower()}/{number}/subjects"
+    payload = congress_get(path, params={"format": "json"})
+    return payload.get("subjects") or payload
+
+
+def fetch_bill_summaries(congress, bill_type, number):
+    url = f"{BASE_URL}/bill/{congress}/{str(bill_type).lower()}/{number}/summaries"
+    params = {"limit": PAGE_SIZE, "format": "json"}
+    summaries = []
+
+    while url:
+        payload = congress_get(url, params=params)
+        summaries.extend(payload.get("summaries") or [])
+        url = (payload.get("pagination") or {}).get("next")
+        params = None
+
+    return summaries
+
+
+def _policy_area_from_subjects(subjects):
+    if not subjects:
+        return None
+    area = subjects.get("policyArea") or {}
+    if not isinstance(area, dict):
+        return None
+    name = (area.get("name") or "").strip()
+    return name or None
+
+
+def _latest_summary_text(summaries):
+    if not summaries:
+        return None
+    latest = max(
+        summaries,
+        key=lambda item: item.get("updateDate") or item.get("actionDate") or "",
+    )
+    text = latest.get("text")
+    if not isinstance(text, str):
+        return None
+    stripped = text.strip()
+    return stripped or None
+
+
+def sync_bill_enrichment():
+    """Fill NULL policy_area and summary on existing bills from Congress.gov."""
+    _require_api_key()
+    ensure_schema()
+    session = SessionLocal()
+    stats = {
+        "bills_pending": 0,
+        "policy_areas_set": 0,
+        "summaries_set": 0,
+        "bills_failed": 0,
+        "bills_unchanged": 0,
+    }
+
+    try:
+        bills = (
+            session.query(Bill)
+            .filter(or_(Bill.policy_area.is_(None), Bill.summary.is_(None)))
+            .order_by(Bill.id)
+            .all()
+        )
+        stats["bills_pending"] = len(bills)
+        print(
+            f"Found {len(bills)} bill(s) missing policy_area and/or summary."
+        )
+
+        for index, bill in enumerate(bills, start=1):
+            parsed = parse_bill_id(bill.id)
+            if parsed is None:
+                print(f"[{index}/{len(bills)}] Skipping unparseable id {bill.id!r}.")
+                stats["bills_failed"] += 1
+                continue
+
+            congress, bill_type, number = parsed
+            print(f"[{index}/{len(bills)}] {bill.id} — enriching...")
+            changed = False
+
+            if bill.policy_area is None:
+                try:
+                    subjects = fetch_bill_subjects(congress, bill_type, number)
+                    policy_area = _policy_area_from_subjects(subjects)
+                    if policy_area:
+                        bill.policy_area = policy_area
+                        stats["policy_areas_set"] += 1
+                        changed = True
+                        print(f"  policy_area={policy_area!r}")
+                    else:
+                        print("  No policyArea on subjects response.")
+                except requests.HTTPError as exc:
+                    status = getattr(exc.response, "status_code", "?")
+                    print(f"  HTTP {status} fetching subjects; skipping policy area.")
+                    stats["bills_failed"] += 1
+                except (requests.RequestException, RuntimeError) as exc:
+                    print(f"  Failed to fetch subjects: {exc}")
+                    stats["bills_failed"] += 1
+
+            if bill.summary is None:
+                try:
+                    summaries = fetch_bill_summaries(congress, bill_type, number)
+                    summary = _latest_summary_text(summaries)
+                    if summary:
+                        bill.summary = summary
+                        stats["summaries_set"] += 1
+                        changed = True
+                        preview = summary.replace("\n", " ")[:80]
+                        print(f"  summary={preview!r}")
+                    else:
+                        print("  No CRS summary on summaries response.")
+                except requests.HTTPError as exc:
+                    status = getattr(exc.response, "status_code", "?")
+                    print(f"  HTTP {status} fetching summaries; skipping summary.")
+                    stats["bills_failed"] += 1
+                except (requests.RequestException, RuntimeError) as exc:
+                    print(f"  Failed to fetch summaries: {exc}")
+                    stats["bills_failed"] += 1
+
+            if changed:
+                session.commit()
+            else:
+                stats["bills_unchanged"] += 1
+
+        return stats
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def fetch_recent_bills(limit=50, congress=CURRENT_CONGRESS):
     path = f"/bill/{congress}" if congress else "/bill"
     payload = congress_get(path, params={"limit": limit, "format": "json"})
@@ -476,7 +620,10 @@ def upsert_bill(
     sponsor_id,
     sponsor_bioguide_id=None,
     sponsor_name=None,
+    policy_area=None,
+    summary=None,
 ):
+    existing = session.get(Bill, bill_id)
     session.merge(
         Bill(
             id=bill_id,
@@ -484,6 +631,14 @@ def upsert_bill(
             sponsor_id=sponsor_id,
             sponsor_bioguide_id=sponsor_bioguide_id,
             sponsor_name=sponsor_name,
+            policy_area=(
+                policy_area
+                if policy_area is not None
+                else (existing.policy_area if existing else None)
+            ),
+            summary=(
+                summary if summary is not None else (existing.summary if existing else None)
+            ),
         )
     )
     session.flush()
@@ -804,6 +959,15 @@ def _print_sponsor_stats(stats):
     print(f"  Bills linked to officials:     {stats['bills_linked']}")
 
 
+def _print_enrichment_stats(stats):
+    print("\nBill enrichment summary")
+    print(f"  Bills missing fields:   {stats['bills_pending']}")
+    print(f"  Policy areas set:       {stats['policy_areas_set']}")
+    print(f"  Summaries set:          {stats['summaries_set']}")
+    print(f"  Unchanged (no data):    {stats['bills_unchanged']}")
+    print(f"  Fetch/parse failures:   {stats['bills_failed']}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Ingest Congress.gov members, bills, and roll-call votes."
@@ -811,11 +975,19 @@ def main():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["members", "bills", "votes", "sponsors"],
+        choices=[
+            "members",
+            "bills",
+            "votes",
+            "sponsors",
+            "backfill-sponsors",
+            "enrich",
+        ],
         default="bills",
         help="members: current roster. bills: recent bills (default). "
         "votes: roll calls for one bill. "
-        "sponsors: backfill historical sponsors missing from officials.",
+        "backfill-sponsors: insert missing historical sponsors. "
+        "enrich: fill policy area and CRS summary on existing bills.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(
@@ -839,9 +1011,14 @@ def main():
         print(f"Fetched {len(members)} members and saved {saved} officials.")
         return
 
-    if args.command == "sponsors":
+    if args.command in {"sponsors", "backfill-sponsors"}:
         sponsor_stats = sync_missing_sponsors()
         _print_sponsor_stats(sponsor_stats)
+        return
+
+    if args.command == "enrich":
+        enrichment_stats = sync_bill_enrichment()
+        _print_enrichment_stats(enrichment_stats)
         return
 
     if args.command == "votes":
