@@ -101,7 +101,6 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 3. After deploy:
 
    - Site: `https://politmus-web.fly.dev`
-   - Explorer: `https://politmus-web.fly.dev/dev-explorer`
    - API health: `https://politmus-api.fly.dev/api/health`
 
 ### Later deploys
