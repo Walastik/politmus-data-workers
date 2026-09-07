@@ -217,7 +217,7 @@ export default function Explorer() {
           <p className="text-slate-400">Loading congressional roster...</p>
         ) : error ? (
           <p className="text-red-400">
-            {error}. Start the API on port 8000 and refresh.
+            {error}. Check that the API is reachable and refresh.
           </p>
         ) : officials.length === 0 ? (
           <p className="text-slate-400">No officials match this filter.</p>

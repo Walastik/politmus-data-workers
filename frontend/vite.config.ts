@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     host: true,
     proxy: {
+      // Local /api proxy. Production nginx does the same against politmus-api.flycast.
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

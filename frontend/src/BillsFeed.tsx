@@ -49,7 +49,7 @@ export default function BillsFeed() {
   if (error) {
     return (
       <p className="text-red-400">
-        {error}. Start the API on port 8000 and refresh.
+        {error}. Check that the API is reachable and refresh.
       </p>
     )
   }

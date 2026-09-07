@@ -1,0 +1,32 @@
+# politmus-api — FastAPI. Deploy from backend/: `fly deploy`
+app = "politmus-api"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  release_command = "python init_db.py"
+
+[env]
+  PORT = "8080"
+  CORS_ORIGINS = "https://politmus-web.fly.dev,http://localhost:5173,http://127.0.0.1:5173"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
