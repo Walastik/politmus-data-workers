@@ -123,7 +123,7 @@ gh secret set FLY_API_TOKEN
 Use an org or personal token, not a deploy-only token (`fly ssh` rejects those). Then run **Congress Data Ingestion** from the Actions tab, or load data once by hand:
 
 ```bash
-fly ssh console -a politmus-api -C "cd /app && python congress_client.py members"
-fly ssh console -a politmus-api -C "cd /app && python congress_client.py bills"
-fly ssh console -a politmus-api -C "cd /app && python congress_client.py enrich"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py members"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py bills"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py enrich"
 ```
