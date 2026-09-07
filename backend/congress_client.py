@@ -259,6 +259,69 @@ def _current_member_flag(member, default=False):
     return bool(value)
 
 
+def _text_or_none(value):
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _phone_from_member(member):
+    address = member.get("addressInformation")
+    if not isinstance(address, dict):
+        return None
+    telephone = address.get("officeTelephone")
+    if telephone in (None, ""):
+        telephone = address.get("phoneNumber")
+    if isinstance(telephone, dict):
+        telephone = (
+            telephone.get("phoneNumber")
+            or telephone.get("number")
+            or telephone.get("officeTelephone")
+        )
+    return _text_or_none(telephone)
+
+
+def _office_address_from_member(member):
+    address = member.get("addressInformation")
+    if not isinstance(address, dict):
+        return None
+    office_address = _text_or_none(address.get("officeAddress"))
+    if office_address:
+        return office_address
+    parts = [
+        _text_or_none(address.get("city")),
+        _text_or_none(address.get("district")),
+        _text_or_none(address.get("zipCode")),
+    ]
+    composed = " ".join(part for part in parts if part)
+    return composed or None
+
+
+def _website_url_from_member(member):
+    url = _text_or_none(
+        member.get("officialWebsiteUrl") or member.get("officialUrl")
+    )
+    if not url:
+        return None
+    if url.startswith("//"):
+        return f"https:{url}"
+    if not url.lower().startswith(("http://", "https://")):
+        return f"https://{url}"
+    return url
+
+
+def _combine_member_payloads(listing, detail):
+    """Prefer detail fields, but keep list identity when detail omits them."""
+    if not isinstance(detail, dict) or not detail:
+        return listing
+    combined = dict(listing)
+    for key, value in detail.items():
+        if value not in (None, "", []):
+            combined[key] = value
+    return combined
+
+
 def official_from_member(member, bioguide_id=None, current_member=None):
     bioguide_id = bioguide_id or _member_bioguide_id(member)
     if not bioguide_id:
@@ -273,7 +336,36 @@ def official_from_member(member, bioguide_id=None, current_member=None):
         office=office_from_member(member),
         district=district_from_member(member),
         current_member=bool(current_member),
+        phone=_phone_from_member(member),
+        office_address=_office_address_from_member(member),
+        website_url=_website_url_from_member(member),
     )
+
+
+def upsert_official(session, incoming):
+    """Insert or update an official without wiping stored contact fields.
+
+    List-level member payloads omit phone/address/website. SQLAlchemy merge
+    would null those columns, so blank incoming contact is left unchanged.
+    """
+    existing = session.get(Official, incoming.id)
+    if existing is None:
+        session.add(incoming)
+        return incoming
+
+    existing.name = incoming.name
+    existing.state = incoming.state
+    existing.party = incoming.party
+    existing.office = incoming.office
+    existing.district = incoming.district
+    existing.current_member = incoming.current_member
+    if incoming.phone:
+        existing.phone = incoming.phone
+    if incoming.office_address:
+        existing.office_address = incoming.office_address
+    if incoming.website_url:
+        existing.website_url = incoming.website_url
+    return existing
 
 
 def save_officials(members):
@@ -282,19 +374,42 @@ def save_officials(members):
     Members from GET /member?currentMember=true are stored with
     current_member=True. Anyone already in the table but missing from this
     response is marked current_member=False.
+
+    Contact fields (phone, DC office address, website) are only on
+    GET /member/{bioguideId}, so each current member is fetched in detail.
     """
     ensure_schema()
     session = SessionLocal()
     saved = 0
     current_ids = []
+    detail_failed = 0
 
     try:
-        for member in members:
-            official = official_from_member(member, current_member=True)
+        total = len(members)
+        for index, member in enumerate(members, start=1):
+            bioguide_id = _member_bioguide_id(member)
+            if not bioguide_id:
+                continue
+
+            print(f"[{index}/{total}] Fetching member {bioguide_id}...")
+            source = member
+            try:
+                source = _combine_member_payloads(member, fetch_member(bioguide_id))
+            except requests.HTTPError as exc:
+                status = getattr(exc.response, "status_code", "?")
+                print(f"  HTTP {status} for {bioguide_id}; using list payload.")
+                detail_failed += 1
+            except (requests.RequestException, RuntimeError) as exc:
+                print(f"  Failed to fetch {bioguide_id}: {exc}; using list payload.")
+                detail_failed += 1
+
+            official = official_from_member(
+                source, bioguide_id=bioguide_id, current_member=True
+            )
             if official is None:
                 continue
 
-            session.merge(official)
+            upsert_official(session, official)
             current_ids.append(official.id)
             saved += 1
 
@@ -313,6 +428,12 @@ def save_officials(members):
                     f"  Marked {former} official(s) as not current "
                     "(absent from GET /member?currentMember=true)."
                 )
+
+        if detail_failed:
+            print(
+                f"  Member detail fetches failed: {detail_failed} "
+                "(contact fields may be missing for those officials)."
+            )
 
         session.commit()
         return saved
@@ -376,7 +497,7 @@ def sync_missing_sponsors():
                 stats["officials_failed"] += 1
                 continue
 
-            session.merge(official)
+            upsert_official(session, official)
             linked_ids.append(bioguide_id)
             stats["officials_upserted"] += 1
             print(

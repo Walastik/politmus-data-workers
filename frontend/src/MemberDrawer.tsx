@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Globe, MapPin, Phone, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import BillDrawer from './BillDrawer'
@@ -113,6 +113,8 @@ export default function MemberDrawer({
         </header>
 
         <div className="flex-1 overflow-y-auto p-5">
+          <ContactSection official={detail ?? official} />
+
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Recorded votes
           </h3>
@@ -165,6 +167,79 @@ export default function MemberDrawer({
       ) : null}
     </div>
   )
+}
+
+function ContactSection({ official }: { official: Official }) {
+  const phone = official.phone
+  const officeAddress = official.office_address
+  const websiteUrl = official.website_url
+  if (!phone && !officeAddress && !websiteUrl) {
+    return null
+  }
+
+  return (
+    <section className="mb-6">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+        Contact
+      </h3>
+      <ul className="mt-3 space-y-3 text-sm">
+        {phone ? (
+          <li className="flex items-start gap-2">
+            <Phone
+              className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
+              aria-hidden="true"
+            />
+            <a
+              href={telHref(phone)}
+              className="text-slate-200 underline-offset-2 hover:text-white hover:underline"
+              aria-label={`Call ${phone}`}
+            >
+              {phone}
+            </a>
+          </li>
+        ) : null}
+        {officeAddress ? (
+          <li className="flex items-start gap-2">
+            <MapPin
+              className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
+              aria-hidden="true"
+            />
+            <span className="text-slate-200">{officeAddress}</span>
+          </li>
+        ) : null}
+        {websiteUrl ? (
+          <li className="flex items-start gap-2">
+            <Globe
+              className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
+              aria-hidden="true"
+            />
+            <a
+              href={websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-200 underline-offset-2 hover:text-white hover:underline"
+              aria-label={`Official website, ${websiteLabel(websiteUrl)} (opens in a new tab)`}
+            >
+              {websiteLabel(websiteUrl)}
+            </a>
+          </li>
+        ) : null}
+      </ul>
+    </section>
+  )
+}
+
+function telHref(phone: string) {
+  const digits = phone.replace(/[^\d+]/g, '')
+  return digits ? `tel:${digits}` : undefined
+}
+
+function websiteLabel(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
 }
 
 function billFromVote(vote: OfficialVote): Bill {

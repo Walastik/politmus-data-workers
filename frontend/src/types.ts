@@ -6,6 +6,9 @@ export interface Official {
   office: string | null
   district: number | null
   current_member: boolean
+  phone: string | null
+  office_address: string | null
+  website_url: string | null
 }
 
 export interface OfficialVote {

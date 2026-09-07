@@ -52,7 +52,7 @@ python init_db.py
 
 Talks to Congress.gov and writes into Postgres. Commands:
 
-**Current member roster** — fetches current members and upserts them into `officials` (id is the member’s Bioguide ID):
+**Current member roster** — fetches current members, then each member’s detail record (Capitol phone, DC office address, and official website), and upserts them into `officials` (id is the member’s Bioguide ID):
 
 ```bash
 python congress_client.py members

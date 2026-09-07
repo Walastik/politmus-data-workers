@@ -13,6 +13,9 @@ class OfficialOut(BaseModel):
     office: Optional[str] = None
     district: Optional[int] = None
     current_member: bool = False
+    phone: Optional[str] = None
+    office_address: Optional[str] = None
+    website_url: Optional[str] = None
 
 
 class OfficialVoteOut(BaseModel):

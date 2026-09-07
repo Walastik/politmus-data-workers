@@ -22,6 +22,15 @@ def ensure_schema():
             "ALTER TABLE officials ALTER COLUMN current_member SET DEFAULT FALSE"
         ))
         conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS phone VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS office_address VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS website_url VARCHAR"
+        ))
+        conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_bioguide_id VARCHAR"
         ))
         conn.execute(text(

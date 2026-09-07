@@ -72,6 +72,9 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         office=official.office,
         district=official.district,
         current_member=bool(official.current_member),
+        phone=official.phone,
+        office_address=official.office_address,
+        website_url=official.website_url,
         votes=[
             OfficialVoteOut(
                 bill_id=bill.id,

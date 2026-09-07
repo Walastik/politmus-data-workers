@@ -12,6 +12,9 @@ class Official(Base):
     office = Column(String)
     district = Column(Integer, nullable=True)
     current_member = Column(Boolean, nullable=False, default=False, server_default='false')
+    phone = Column(String, nullable=True)
+    office_address = Column(String, nullable=True)
+    website_url = Column(String, nullable=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 
