@@ -1,6 +1,7 @@
 import { Landmark, ScrollText, Search, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
+import { apiUrl } from '../api'
 import BillsFeed from '../BillsFeed'
 import MemberDrawer from '../MemberDrawer'
 import {
@@ -58,7 +59,7 @@ export default function Explorer() {
       params.set('q', debouncedQuery)
     }
     const query = params.toString()
-    const url = query ? `/api/officials?${query}` : '/api/officials'
+    const url = query ? apiUrl(`/api/officials?${query}`) : apiUrl('/api/officials')
 
     setError(null)
     setLoading(true)

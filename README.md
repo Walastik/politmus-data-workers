@@ -79,7 +79,7 @@ All Congress.gov requests pause briefly between calls and retry with exponential
 
 ## Deploy to Fly.io
 
-Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Vite SPA). The web app proxies `/api` to the API over Flycast, so the frontend keeps using relative `/api/...` URLs in local Vite and in production.
+Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Vite SPA). Local Vite proxies `/api` to `localhost:8000`. Production builds bake in `VITE_API_URL` from `frontend/.env.production` (`https://politmus-api.fly.dev`) so the SPA on [politmus.com](https://politmus.com) can call the API directly. CORS on the API allows `https://politmus.com`, `https://www.politmus.com`, and `https://politmus-web.fly.dev`.
 
 ### First-time setup
 
@@ -100,7 +100,7 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 3. After deploy:
 
-   - Site: `https://politmus-web.fly.dev`
+   - Site: `https://politmus.com` (also `https://politmus-web.fly.dev`)
    - API health: `https://politmus-api.fly.dev/api/health`
 
 ### Later deploys

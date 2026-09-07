@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { apiUrl } from './api'
 import VoteTallyBar from './VoteTallyBar'
 import { sanitizeCrsHtml, type Bill } from './types'
 
@@ -21,7 +22,7 @@ export default function BillDrawer({
     setError(null)
     setDetail(null)
 
-    fetch(`/api/bills/${encodeURIComponent(bill.id)}`, {
+    fetch(apiUrl(`/api/bills/${encodeURIComponent(bill.id)}`), {
       signal: controller.signal,
     })
       .then(async (res) => {

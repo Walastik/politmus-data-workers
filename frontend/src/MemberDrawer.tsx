@@ -1,6 +1,7 @@
 import { Globe, MapPin, Phone, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
 import {
   officeLine,
@@ -33,7 +34,7 @@ export default function MemberDrawer({
     setDetail(null)
     setSelectedBill(null)
 
-    fetch(`/api/officials/${official.id}`, { signal: controller.signal })
+    fetch(apiUrl(`/api/officials/${official.id}`), { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load votes (${res.status})`)

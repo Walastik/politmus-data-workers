@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { apiUrl } from './api'
 import BillDrawer, { PolicyAreaTag } from './BillDrawer'
 import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
@@ -19,7 +20,7 @@ export default function BillsFeed() {
     setLoading(true)
     setError(null)
 
-    fetch('/api/bills', { signal: controller.signal })
+    fetch(apiUrl('/api/bills'), { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load bills (${res.status})`)

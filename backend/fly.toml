@@ -10,7 +10,7 @@ primary_region = "ord"
 
 [env]
   PORT = "8080"
-  CORS_ORIGINS = "https://politmus-web.fly.dev,http://localhost:5173,http://127.0.0.1:5173"
+  CORS_ORIGINS = "https://politmus.com,https://www.politmus.com,https://politmus-web.fly.dev,http://localhost:5173,http://127.0.0.1:5173"
 
 [http_service]
   internal_port = 8080
