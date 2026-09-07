@@ -6,7 +6,7 @@ primary_region = "ord"
   dockerfile = "Dockerfile"
 
 [env]
-  API_UPSTREAM = "politmus-api.flycast:8080"
+  API_UPSTREAM = "politmus-api.flycast:80"
 
 [http_service]
   internal_port = 8080
