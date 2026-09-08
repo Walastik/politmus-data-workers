@@ -34,7 +34,7 @@ export default function MemberDrawer({
     setDetail(null)
     setSelectedBill(null)
 
-    fetch(apiUrl(`/api/officials/${official.id}`), { signal: controller.signal })
+    fetch(apiUrl(`/api/officials/${encodeURIComponent(official.id)}`), { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load votes (${res.status})`)

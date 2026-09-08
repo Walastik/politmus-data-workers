@@ -28,7 +28,7 @@ export default function LookupResults({
     <div>
       {matchedAddress ? (
         <p className="mb-8 text-sm text-slate-400">
-          Showing federal representation for{' '}
+          Showing representation for{' '}
           <span className="text-slate-200">{matchedAddress}</span>
         </p>
       ) : null}
@@ -60,6 +60,26 @@ export default function LookupResults({
           </p>
         )}
       </OfficeSection>
+
+      {grouped.stateSenators.length ? (
+        <OfficeSection title="State Senate">
+          <RepresentativeGrid
+            representatives={grouped.stateSenators}
+            fallbackState={fallbackState}
+            onSelectOfficial={onSelectOfficial}
+          />
+        </OfficeSection>
+      ) : null}
+
+      {grouped.stateHouse.length ? (
+        <OfficeSection title="State House">
+          <RepresentativeGrid
+            representatives={grouped.stateHouse}
+            fallbackState={fallbackState}
+            onSelectOfficial={onSelectOfficial}
+          />
+        </OfficeSection>
+      ) : null}
 
       {grouped.other.length ? (
         <OfficeSection title="Other offices">
@@ -149,7 +169,9 @@ function RepresentativeCard({
       <p className="mt-1 text-xs text-slate-400">
         {representative.office}
         {representative.division_name &&
-        representative.division_id?.includes('/cd:')
+        (representative.division_id?.includes('/cd:') ||
+          representative.division_id?.includes('/sldu:') ||
+          representative.division_id?.includes('/sldl:'))
           ? ` · ${representative.division_name}`
           : ''}
       </p>
@@ -197,7 +219,9 @@ function officialState(
 ) {
   if (
     representative.division_name &&
-    !representative.division_id?.includes('/cd:')
+    !representative.division_id?.includes('/cd:') &&
+    !representative.division_id?.includes('/sldu:') &&
+    !representative.division_id?.includes('/sldl:')
   ) {
     return representative.division_name
   }

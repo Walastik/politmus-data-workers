@@ -21,6 +21,10 @@ class CensusMatch:
     zip: Optional[str]
     district: int
     district_label: str
+    sldu: Optional[int] = None
+    sldu_label: Optional[str] = None
+    sldl: Optional[int] = None
+    sldl_label: Optional[str] = None
 
 
 class CensusUnavailable(Exception):
@@ -61,6 +65,58 @@ def _parse_district_code(raw: Any) -> Optional[int]:
     if value in {0, 98}:
         return 0
     return value
+
+
+def _parse_sld_code(raw: Any) -> Optional[int]:
+    text = _text_or_none(raw)
+    if not text:
+        return None
+    if text.upper() in {"ZZZ", "N/A", "NA"}:
+        return None
+    try:
+        value = int(text)
+    except ValueError:
+        return None
+    if value < 0:
+        return None
+    return value
+
+
+def _legislative_district(
+    geographies: dict[str, Any],
+    chamber: str,
+) -> tuple[Optional[int], Optional[str]]:
+    chamber = chamber.lower()
+    districts = None
+    for key, value in geographies.items():
+        key_l = str(key).lower()
+        if "state legislative district" not in key_l:
+            continue
+        if chamber not in key_l:
+            continue
+        districts = value
+        break
+    if not isinstance(districts, list) or not districts:
+        return None, None
+    item = districts[0]
+    if not isinstance(item, dict):
+        return None, None
+
+    raw = None
+    for key in ("SLDU", "SLDL", "SLDUST", "SLDLST"):
+        if key in item:
+            raw = item.get(key)
+            break
+    if raw in (None, ""):
+        raw = item.get("BASENAME")
+    if raw in (None, ""):
+        geoid = _text_or_none(item.get("GEOID"))
+        if geoid and len(geoid) >= 3:
+            raw = geoid[-3:]
+
+    return _parse_sld_code(raw), _text_or_none(item.get("NAME")) or _text_or_none(
+        item.get("BASENAME")
+    )
 
 
 def _congressional_district(
@@ -151,6 +207,13 @@ def _match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
         else:
             district_label = f"{state_name} Congressional District {district}"
 
+    sldu, sldu_label = _legislative_district(geographies, "upper")
+    sldl, sldl_label = _legislative_district(geographies, "lower")
+    if sldu is not None and not sldu_label:
+        sldu_label = f"{state_name} State Senate District {sldu}"
+    if sldl is not None and not sldl_label:
+        sldl_label = f"{state_name} State House District {sldl}"
+
     return CensusMatch(
         line1=line1,
         city=_text_or_none(components.get("city")),
@@ -159,6 +222,10 @@ def _match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
         zip=_text_or_none(components.get("zip")),
         district=district,
         district_label=district_label,
+        sldu=sldu,
+        sldu_label=sldu_label,
+        sldl=sldl,
+        sldl_label=sldl_label,
     )
 
 

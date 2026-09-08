@@ -50,6 +50,7 @@ export default function Explorer() {
     } else if (filterStatus === 'former') {
       params.set('current_member', 'false')
     }
+    params.set('level', 'federal')
     if (filterParty) {
       params.set('party', filterParty)
     }

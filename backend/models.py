@@ -15,6 +15,8 @@ class Official(Base):
     phone = Column(String, nullable=True)
     office_address = Column(String, nullable=True)
     website_url = Column(String, nullable=True)
+    level = Column(String, nullable=False, default='federal', server_default='federal')
+    openstates_id = Column(String, nullable=True, unique=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 
