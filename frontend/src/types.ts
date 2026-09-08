@@ -35,6 +35,43 @@ export interface Bill {
   votes_summary: Record<string, number>
 }
 
+export interface CivicAddress {
+  line1: string | null
+  line2: string | null
+  line3: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+}
+
+export interface CivicDivision {
+  ocd_id: string
+  name: string
+}
+
+export interface CivicRepresentative {
+  id: string | null
+  name: string
+  office: string
+  division_id: string | null
+  division_name: string | null
+  party: string | null
+  levels: string[]
+  roles: string[]
+  phones: string[]
+  emails: string[]
+  urls: string[]
+  photo_url: string | null
+  addresses: CivicAddress[]
+  channels: { type: string | null; id: string | null }[]
+}
+
+export interface CivicLookup {
+  normalized_input: CivicAddress | null
+  divisions: CivicDivision[]
+  representatives: CivicRepresentative[]
+}
+
 export const PARTY_FILTERS = [
   { value: '', label: 'All' },
   { value: 'D', label: 'D' },
@@ -186,4 +223,97 @@ export function seatLabel(official: Official) {
     return 'At-large'
   }
   return `District ${official.district}`
+}
+
+export function stateNameFromAbbr(abbr: string | null | undefined) {
+  if (!abbr) {
+    return ''
+  }
+  const found = STATE_OPTIONS.find((state) => state.abbr === abbr.toUpperCase())
+  return found?.name ?? abbr
+}
+
+export function formatCivicAddress(address: CivicAddress | null | undefined) {
+  if (!address) {
+    return null
+  }
+  const line1 = [address.line1, address.line2, address.line3]
+    .filter(Boolean)
+    .join(', ')
+  const cityLine = [address.city, address.state, address.zip]
+    .filter(Boolean)
+    .join(' ')
+  const parts = [line1, cityLine].filter(Boolean)
+  return parts.length ? parts.join(', ') : null
+}
+
+function officeKey(rep: CivicRepresentative) {
+  return (rep.office || '').trim().toLowerCase()
+}
+
+export function isCivicPresident(rep: CivicRepresentative) {
+  const office = officeKey(rep)
+  return (
+    office.includes('president of the united states') ||
+    office === 'president' ||
+    office.includes('vice president')
+  )
+}
+
+export function isCivicSenator(rep: CivicRepresentative) {
+  return officeKey(rep) === 'senator' || rep.roles.includes('legislatorUpperBody')
+}
+
+export function isCivicHouseMember(rep: CivicRepresentative) {
+  const office = officeKey(rep)
+  return (
+    office === 'representative' ||
+    office === 'delegate' ||
+    office === 'resident commissioner' ||
+    rep.roles.includes('legislatorLowerBody')
+  )
+}
+
+export function groupCivicRepresentatives(reps: CivicRepresentative[]) {
+  const president: CivicRepresentative[] = []
+  const senators: CivicRepresentative[] = []
+  const house: CivicRepresentative[] = []
+  const other: CivicRepresentative[] = []
+
+  for (const rep of reps) {
+    if (isCivicPresident(rep)) {
+      president.push(rep)
+    } else if (isCivicSenator(rep)) {
+      senators.push(rep)
+    } else if (isCivicHouseMember(rep)) {
+      house.push(rep)
+    } else {
+      other.push(rep)
+    }
+  }
+
+  return { president, senators, house, other }
+}
+
+export function civicRepresentativeToOfficial(
+  rep: CivicRepresentative,
+  state: string,
+): Official | null {
+  if (!rep.id) {
+    return null
+  }
+  const districtMatch = rep.division_id?.match(/\/cd:(\d+)$/)
+  const district = districtMatch ? Number(districtMatch[1]) : null
+  return {
+    id: rep.id,
+    name: rep.name,
+    state,
+    party: rep.party || '',
+    office: rep.office,
+    district,
+    current_member: true,
+    phone: rep.phones[0] ?? null,
+    office_address: formatCivicAddress(rep.addresses[0]) ?? null,
+    website_url: rep.urls[0] ?? null,
+  }
 }

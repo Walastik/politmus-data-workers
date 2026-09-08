@@ -1,6 +1,7 @@
-import { Landmark, ScrollText, Search, Users } from 'lucide-react'
+import { Landmark, MapPin, ScrollText, Search, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 
+import AddressLookup from '../AddressLookup'
 import { apiUrl } from '../api'
 import BillsFeed from '../BillsFeed'
 import MemberDrawer from '../MemberDrawer'
@@ -16,10 +17,10 @@ import {
   type RosterStatusFilter,
 } from '../types'
 
-type Tab = 'roster' | 'bills'
+type Tab = 'lookup' | 'roster' | 'bills'
 
 export default function Explorer() {
-  const [tab, setTab] = useState<Tab>('roster')
+  const [tab, setTab] = useState<Tab>('lookup')
   const [officials, setOfficials] = useState<Official[]>([])
   const [filterParty, setFilterParty] = useState('')
   const [filterStatus, setFilterStatus] = useState<RosterStatusFilter>('active')
@@ -101,11 +102,20 @@ export default function Explorer() {
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Politmus Explorer</h1>
               <p className="mt-1 text-sm text-slate-400">
-                Congressional Roster & Legislation Feed
+                Address lookup, congressional roster, and legislation feed
               </p>
             </div>
           </div>
           <nav className="flex gap-2" aria-label="Primary">
+            <TabButton
+              active={tab === 'lookup'}
+              icon={<MapPin className="h-3.5 w-3.5" />}
+              label="Lookup"
+              onClick={() => {
+                setSelectedOfficial(null)
+                setTab('lookup')
+              }}
+            />
             <TabButton
               active={tab === 'roster'}
               icon={<Users className="h-3.5 w-3.5" />}
@@ -212,7 +222,9 @@ export default function Explorer() {
       </header>
 
       <main className="mx-auto max-w-6xl">
-        {tab === 'bills' ? (
+        {tab === 'lookup' ? (
+          <AddressLookup />
+        ) : tab === 'bills' ? (
           <BillsFeed />
         ) : loading ? (
           <p className="text-slate-400">Loading congressional roster...</p>
