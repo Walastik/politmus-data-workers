@@ -75,6 +75,8 @@ STATE_NAME_BY_ABBR = {
     "VI": "Virgin Islands",
 }
 
+STATE_ABBR_BY_NAME = {name.lower(): abbr for abbr, name in STATE_NAME_BY_ABBR.items()}
+
 
 def normalize_party(value: Optional[str]) -> Optional[str]:
     if not value:

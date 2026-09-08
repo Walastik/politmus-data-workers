@@ -25,7 +25,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    CONGRESS_GOV_API_KEY=your_key_here
    ```
 
-   Get an API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/).
+   Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table; it does not need a Google API key.
 
 4. Create (or update) tables:
 

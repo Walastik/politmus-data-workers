@@ -51,3 +51,45 @@ class BillDetailOut(BillOut):
 class HealthOut(BaseModel):
     status: str
     service: str
+
+
+class CivicAddressOut(BaseModel):
+    line1: Optional[str] = None
+    line2: Optional[str] = None
+    line3: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+
+
+class CivicChannelOut(BaseModel):
+    type: Optional[str] = None
+    id: Optional[str] = None
+
+
+class CivicDivisionOut(BaseModel):
+    ocd_id: str
+    name: str
+
+
+class CivicRepresentativeOut(BaseModel):
+    id: Optional[str] = None
+    name: str
+    office: str
+    division_id: Optional[str] = None
+    division_name: Optional[str] = None
+    party: Optional[str] = None
+    levels: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    phones: list[str] = Field(default_factory=list)
+    emails: list[str] = Field(default_factory=list)
+    urls: list[str] = Field(default_factory=list)
+    photo_url: Optional[str] = None
+    addresses: list[CivicAddressOut] = Field(default_factory=list)
+    channels: list[CivicChannelOut] = Field(default_factory=list)
+
+
+class CivicLookupOut(BaseModel):
+    normalized_input: Optional[CivicAddressOut] = None
+    divisions: list[CivicDivisionOut] = Field(default_factory=list)
+    representatives: list[CivicRepresentativeOut] = Field(default_factory=list)
