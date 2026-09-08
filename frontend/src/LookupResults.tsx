@@ -33,20 +33,6 @@ export default function LookupResults({
         </p>
       ) : null}
 
-      <OfficeSection title="President">
-        {grouped.president.length ? (
-          <RepresentativeGrid
-            representatives={grouped.president}
-            fallbackState={fallbackState}
-            onSelectOfficial={onSelectOfficial}
-          />
-        ) : (
-          <p className="text-sm text-slate-500">
-            The current lookup covers Congress, not the White House.
-          </p>
-        )}
-      </OfficeSection>
-
       <OfficeSection title="United States Senate">
         {grouped.senators.length ? (
           <RepresentativeGrid
