@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,6 +40,8 @@ class BillOut(BaseModel):
     sponsor_name: Optional[str] = None
     policy_area: Optional[str] = None
     summary: Optional[str] = None
+    introduced_date: Optional[date] = None
+    voted_date: Optional[date] = None
 
 
 class BillDetailOut(BillOut):

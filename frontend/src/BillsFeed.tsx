@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
-import BillDrawer, { PolicyAreaTag } from './BillDrawer'
+import BillDrawer, { BillDates, PolicyAreaTag } from './BillDrawer'
 import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
 
@@ -96,6 +96,7 @@ export default function BillsFeed() {
                   <PolicyAreaTag area={bill.policy_area} />
                 </div>
               ) : null}
+              <BillDates bill={bill} className="mt-2" />
               <div className="mt-3">
                 <VoteTallyBar summary={bill.votes_summary} />
               </div>

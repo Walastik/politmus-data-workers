@@ -29,5 +29,5 @@ jobs:
       - name: Run Bill & Vote Ingestion
         run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/congress_client.py bills"
 
-      - name: Run Enrichment (Summaries & Policy Areas)
+      - name: Run Enrichment (Summaries, Policy Areas, Dates)
         run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/congress_client.py enrich"

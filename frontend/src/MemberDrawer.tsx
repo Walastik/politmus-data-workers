@@ -252,6 +252,8 @@ function billFromVote(vote: OfficialVote): Bill {
     sponsor_name: vote.sponsor_name,
     policy_area: null,
     summary: null,
+    introduced_date: null,
+    voted_date: null,
     votes_summary: {},
   }
 }

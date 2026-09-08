@@ -30,6 +30,8 @@ export interface Bill {
   sponsor_name: string | null
   policy_area: string | null
   summary: string | null
+  introduced_date: string | null
+  voted_date: string | null
   votes_summary: Record<string, number>
 }
 
@@ -126,6 +128,21 @@ export function partyShort(party: string) {
 
 export function rosterStatusLabel(official: Official) {
   return official.current_member ? 'Active' : 'Former'
+}
+
+export function formatBillDate(value: string | null | undefined) {
+  if (!value) {
+    return null
+  }
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 }
 
 export function sanitizeCrsHtml(html: string) {

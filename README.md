@@ -58,7 +58,7 @@ Talks to Congress.gov and writes into Postgres. Commands:
 python congress_client.py members
 ```
 
-**Recent bills and House roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills`, then loads House member votes into `votes` when a bill has roll calls:
+**Recent bills and House roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date and latest recorded-vote date), then loads House member votes into `votes` when a bill has roll calls:
 
 ```bash
 python congress_client.py
@@ -73,6 +73,12 @@ If a bill has a sponsor who is not in `officials`, the row is still saved. `spon
 
 ```bash
 python congress_client.py votes --congress 119 --bill-type hr --bill-number 1
+```
+
+**Enrich existing bills** — fills missing policy area, CRS summary, introduced date, and latest recorded-vote date:
+
+```bash
+python congress_client.py enrich
 ```
 
 All Congress.gov requests pause briefly between calls and retry with exponential backoff on HTTP 429 and 5xx responses. Re-running these commands is idempotent: existing bills are updated in place, and votes are upserted per official per bill.

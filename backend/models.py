@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, String, Integer, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Date, String, Integer, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -29,6 +29,8 @@ class Bill(Base):
     sponsor_name = Column(String, nullable=True)
     policy_area = Column(String, nullable=True)
     summary = Column(Text, nullable=True)
+    introduced_date = Column(Date, nullable=True)
+    voted_date = Column(Date, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     votes = relationship("Vote", back_populates="bill")

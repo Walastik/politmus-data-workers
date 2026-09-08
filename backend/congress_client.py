@@ -1,10 +1,11 @@
 import argparse
 import os
 import time
+from datetime import date, datetime
 
 import requests
 from dotenv import load_dotenv
-from sqlalchemy import or_
+from sqlalchemy import and_, exists, or_
 
 from database import SessionLocal
 from init_db import ensure_schema
@@ -557,6 +558,51 @@ def _policy_area_from_subjects(subjects):
     return name or None
 
 
+def parse_congress_date(value):
+    """Parse Congress.gov date or datetime strings into a date."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).date()
+    except ValueError:
+        pass
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _introduced_date_from_detail(detail):
+    if not detail:
+        return None
+    return parse_congress_date(detail.get("introducedDate"))
+
+
+def _latest_vote_date(actions):
+    latest = None
+    for action in actions or []:
+        votes = action.get("recordedVotes") or []
+        if not votes:
+            continue
+        action_date = parse_congress_date(action.get("actionDate"))
+        for vote in votes:
+            parsed = parse_congress_date(vote.get("date")) or action_date
+            if parsed is None:
+                continue
+            if latest is None or parsed > latest:
+                latest = parsed
+    return latest
+
+
 def _latest_summary_text(summaries):
     if not summaries:
         return None
@@ -572,7 +618,7 @@ def _latest_summary_text(summaries):
 
 
 def sync_bill_enrichment():
-    """Fill NULL policy_area and summary on existing bills from Congress.gov."""
+    """Fill missing policy area, summary, and bill dates from Congress.gov."""
     _require_api_key()
     ensure_schema()
     session = SessionLocal()
@@ -580,20 +626,31 @@ def sync_bill_enrichment():
         "bills_pending": 0,
         "policy_areas_set": 0,
         "summaries_set": 0,
+        "introduced_dates_set": 0,
+        "voted_dates_set": 0,
         "bills_failed": 0,
         "bills_unchanged": 0,
     }
 
     try:
+        has_votes = exists().where(Vote.bill_id == Bill.id)
         bills = (
             session.query(Bill)
-            .filter(or_(Bill.policy_area.is_(None), Bill.summary.is_(None)))
+            .filter(
+                or_(
+                    Bill.policy_area.is_(None),
+                    Bill.summary.is_(None),
+                    Bill.introduced_date.is_(None),
+                    and_(Bill.voted_date.is_(None), has_votes),
+                )
+            )
             .order_by(Bill.id)
             .all()
         )
         stats["bills_pending"] = len(bills)
         print(
-            f"Found {len(bills)} bill(s) missing policy_area and/or summary."
+            f"Found {len(bills)} bill(s) missing policy area, summary, "
+            "introduced date, and/or vote date."
         )
 
         for index, bill in enumerate(bills, start=1):
@@ -606,6 +663,28 @@ def sync_bill_enrichment():
             congress, bill_type, number = parsed
             print(f"[{index}/{len(bills)}] {bill.id} — enriching...")
             changed = False
+
+            if bill.introduced_date is None:
+                try:
+                    detail = fetch_bill_detail(congress, bill_type, number)
+                    introduced_date = _introduced_date_from_detail(detail)
+                    if introduced_date:
+                        bill.introduced_date = introduced_date
+                        stats["introduced_dates_set"] += 1
+                        changed = True
+                        print(f"  introduced_date={introduced_date.isoformat()}")
+                    else:
+                        print("  No introducedDate on bill detail.")
+                except requests.HTTPError as exc:
+                    status = getattr(exc.response, "status_code", "?")
+                    print(
+                        f"  HTTP {status} fetching bill detail; "
+                        "skipping introduced date."
+                    )
+                    stats["bills_failed"] += 1
+                except (requests.RequestException, RuntimeError) as exc:
+                    print(f"  Failed to fetch bill detail: {exc}")
+                    stats["bills_failed"] += 1
 
             if bill.policy_area is None:
                 try:
@@ -625,6 +704,32 @@ def sync_bill_enrichment():
                 except (requests.RequestException, RuntimeError) as exc:
                     print(f"  Failed to fetch subjects: {exc}")
                     stats["bills_failed"] += 1
+
+            if bill.voted_date is None:
+                vote_exists = (
+                    session.query(Vote.id).filter_by(bill_id=bill.id).first()
+                    is not None
+                )
+                if vote_exists:
+                    try:
+                        actions = fetch_bill_actions(congress, bill_type, number)
+                        voted_date = _latest_vote_date(actions)
+                        if voted_date:
+                            bill.voted_date = voted_date
+                            stats["voted_dates_set"] += 1
+                            changed = True
+                            print(f"  voted_date={voted_date.isoformat()}")
+                        else:
+                            print("  No recorded vote date on actions response.")
+                    except requests.HTTPError as exc:
+                        status = getattr(exc.response, "status_code", "?")
+                        print(
+                            f"  HTTP {status} fetching actions; skipping vote date."
+                        )
+                        stats["bills_failed"] += 1
+                    except (requests.RequestException, RuntimeError) as exc:
+                        print(f"  Failed to fetch actions: {exc}")
+                        stats["bills_failed"] += 1
 
             if bill.summary is None:
                 try:
@@ -743,6 +848,8 @@ def upsert_bill(
     sponsor_name=None,
     policy_area=None,
     summary=None,
+    introduced_date=None,
+    voted_date=None,
 ):
     existing = session.get(Bill, bill_id)
     session.merge(
@@ -759,6 +866,16 @@ def upsert_bill(
             ),
             summary=(
                 summary if summary is not None else (existing.summary if existing else None)
+            ),
+            introduced_date=(
+                introduced_date
+                if introduced_date is not None
+                else (existing.introduced_date if existing else None)
+            ),
+            voted_date=(
+                voted_date
+                if voted_date is not None
+                else (existing.voted_date if existing else None)
             ),
         )
     )
@@ -844,12 +961,18 @@ def sync_bill_votes(
                 sponsor_id,
                 sponsor_bioguide_id=bioguide_id,
                 sponsor_name=sponsor_name,
+                introduced_date=_introduced_date_from_detail(detail),
             )
         elif existing_bill is None:
             print(f"  Skipping votes for {bill_id}; bill is not in the database.")
             return stats
 
         actions = fetch_bill_actions(congress, bill_type, bill_number)
+        vote_date = _latest_vote_date(actions)
+        if vote_date is not None:
+            bill_row = session.get(Bill, bill_id)
+            if bill_row is not None:
+                bill_row.voted_date = vote_date
         recorded = _recorded_votes_from_actions(actions)
         latest_by_official = {}
         unknown_officials = set()
@@ -988,6 +1111,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                 sponsor_id,
                 sponsor_bioguide_id=bioguide_id,
                 sponsor_name=sponsor_name,
+                introduced_date=_introduced_date_from_detail(detail),
             )
             stats["bills_upserted"] += 1
             if sponsor_id:
@@ -1085,6 +1209,8 @@ def _print_enrichment_stats(stats):
     print(f"  Bills missing fields:   {stats['bills_pending']}")
     print(f"  Policy areas set:       {stats['policy_areas_set']}")
     print(f"  Summaries set:          {stats['summaries_set']}")
+    print(f"  Introduced dates set:   {stats['introduced_dates_set']}")
+    print(f"  Vote dates set:         {stats['voted_dates_set']}")
     print(f"  Unchanged (no data):    {stats['bills_unchanged']}")
     print(f"  Fetch/parse failures:   {stats['bills_failed']}")
 
@@ -1108,7 +1234,7 @@ def main():
         help="members: current roster. bills: recent bills (default). "
         "votes: roll calls for one bill. "
         "backfill-sponsors: insert missing historical sponsors. "
-        "enrich: fill policy area and CRS summary on existing bills.",
+        "enrich: fill policy area, CRS summary, and dates on existing bills.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(

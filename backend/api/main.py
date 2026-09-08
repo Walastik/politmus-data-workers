@@ -13,6 +13,9 @@ if str(_BACKEND_DIR) not in sys.path:
 
 from api.routes import bills, officials  # noqa: E402
 from api.schemas import HealthOut  # noqa: E402
+from init_db import ensure_schema  # noqa: E402
+
+ensure_schema()
 
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",

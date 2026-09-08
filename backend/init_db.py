@@ -43,6 +43,12 @@ def ensure_schema():
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS summary TEXT"
         ))
         conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS introduced_date DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS voted_date DATE"
+        ))
+        conn.execute(text(
             """
             UPDATE bills
             SET sponsor_bioguide_id = sponsor_id

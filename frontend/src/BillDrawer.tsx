@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
 import VoteTallyBar from './VoteTallyBar'
-import { sanitizeCrsHtml, type Bill } from './types'
+import { formatBillDate, sanitizeCrsHtml, type Bill } from './types'
 
 export default function BillDrawer({
   bill,
@@ -87,6 +87,7 @@ export default function BillDrawer({
               <PolicyAreaTag area={view.policy_area} />
               <SponsorTag bill={view} />
             </div>
+            <BillDates bill={view} className="mt-3" />
           </div>
           <button
             type="button"
@@ -130,6 +131,37 @@ export function PolicyAreaTag({ area }: { area: string | null }) {
     <span className="rounded-full bg-blue-900/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-300">
       {area}
     </span>
+  )
+}
+
+export function BillDates({
+  bill,
+  className = '',
+}: {
+  bill: Bill
+  className?: string
+}) {
+  const introduced = formatBillDate(bill.introduced_date)
+  const voted = formatBillDate(bill.voted_date)
+  if (!introduced && !voted) {
+    return null
+  }
+
+  return (
+    <dl className={`flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400 ${className}`.trim()}>
+      {introduced ? (
+        <div>
+          <dt className="inline text-slate-500">Introduced </dt>
+          <dd className="inline text-slate-300">{introduced}</dd>
+        </div>
+      ) : null}
+      {voted ? (
+        <div>
+          <dt className="inline text-slate-500">Voted </dt>
+          <dd className="inline text-slate-300">{voted}</dd>
+        </div>
+      ) : null}
+    </dl>
   )
 }
 
