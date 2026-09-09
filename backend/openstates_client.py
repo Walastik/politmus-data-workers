@@ -22,12 +22,15 @@ INITIAL_BACKOFF_SECONDS = 1.0
 
 # Bicameral states are upper + lower. Unicameral Nebraska is legislature only.
 # Skipping legislature elsewhere avoids an empty OpenStates call per state.
+# Executive is always fetched once more so lookup can return the governor.
 LEGISLATIVE_CLASSIFICATIONS = ("upper", "lower", "legislature")
 BICAMERAL_CLASSIFICATIONS = ("upper", "lower")
 UNICAMERAL_STATES = frozenset({"NE"})
 UNICAMERAL_CLASSIFICATIONS = ("legislature",)
+EXECUTIVE_CLASSIFICATION = "executive"
 STATE_UPPER_OFFICE = "State Senator"
 STATE_LOWER_OFFICE = "State Representative"
+GOVERNOR_OFFICE = "Governor"
 
 
 def _require_api_key():
@@ -91,11 +94,16 @@ def openstates_get(path, params=None):
 
 
 def classifications_for_state(state_code):
-    """OpenStates org_classification values to fetch for a jurisdiction."""
+    """Legislative OpenStates org_classification values for a jurisdiction."""
     abbr, _state_name = resolve_state(state_code)
     if abbr in UNICAMERAL_STATES:
         return UNICAMERAL_CLASSIFICATIONS
     return BICAMERAL_CLASSIFICATIONS
+
+
+def people_classifications_for_state(state_code):
+    """Legislative chambers plus one executive request for the governor."""
+    return classifications_for_state(state_code) + (EXECUTIVE_CLASSIFICATION,)
 
 
 def resolve_state(state_code):
@@ -207,11 +215,36 @@ def district_from_role(role):
     return value
 
 
+def _role_title(role):
+    if not isinstance(role, dict):
+        return ""
+    return str(role.get("title") or "").strip().lower()
+
+
+def is_governor_role(role):
+    """True for a sitting governor, not lieutenant governor or other executives."""
+    if not isinstance(role, dict):
+        return False
+    classification = str(role.get("org_classification") or "").strip().lower()
+    if classification != EXECUTIVE_CLASSIFICATION:
+        return False
+    title = _role_title(role)
+    if not title:
+        return False
+    if "lieutenant" in title or title.startswith("lt.") or title.startswith("lt "):
+        return False
+    return title == "governor" or title.startswith("governor")
+
+
 def office_from_role(role):
-    """Stable office label used by address lookup to pick a chamber."""
+    """Stable office label used by address lookup to pick a chamber or executive."""
     if not isinstance(role, dict):
         return STATE_LOWER_OFFICE
     classification = str(role.get("org_classification") or "").strip().lower()
+    if classification == EXECUTIVE_CLASSIFICATION:
+        if is_governor_role(role):
+            return GOVERNOR_OFFICE
+        return None
     if classification in {"upper", "legislature"}:
         return STATE_UPPER_OFFICE
     return STATE_LOWER_OFFICE
@@ -225,15 +258,23 @@ def official_from_person(person, state_name):
     if not isinstance(role, dict):
         return None
     classification = str(role.get("org_classification") or "").strip().lower()
-    if classification not in LEGISLATIVE_CLASSIFICATIONS:
+    if classification == EXECUTIVE_CLASSIFICATION:
+        if not is_governor_role(role):
+            return None
+        office = GOVERNOR_OFFICE
+        district = None
+    elif classification in LEGISLATIVE_CLASSIFICATIONS:
+        office = office_from_role(role)
+        district = district_from_role(role)
+    else:
         return None
     return Official(
         id=openstates_id,
         name=_text_or_none(person.get("name")),
         state=state_name,
         party=_party_from_person(person),
-        office=office_from_role(role),
-        district=district_from_role(role),
+        office=office,
+        district=district,
         current_member=True,
         phone=_phone_from_person(person),
         office_address=_office_address_from_person(person),
@@ -276,15 +317,15 @@ def upsert_official(session, incoming):
 
 
 def fetch_state_legislators(state_code):
-    """Current legislators for a state, keyed by OpenStates person id."""
+    """Current legislators and governor for a state, keyed by OpenStates person id."""
     abbr, _state_name = resolve_state(state_code)
     by_id = {}
 
-    for classification in classifications_for_state(abbr):
+    for classification in people_classifications_for_state(abbr):
         page = 1
         while True:
             print(
-                f"  Fetching {abbr} {classification} legislators "
+                f"  Fetching {abbr} {classification} people "
                 f"(page {page})..."
             )
             payload = openstates_get(
@@ -311,7 +352,7 @@ def fetch_state_legislators(state_code):
 
 
 def sync_state_members(state_code):
-    """Upsert active state legislators into `officials` for one state."""
+    """Upsert active state legislators and the governor into `officials`."""
     _require_api_key()
     abbr, state_name = resolve_state(state_code)
     ensure_schema()
@@ -355,7 +396,7 @@ def sync_state_members(state_code):
                     "as not current."
                 )
         elif saved == 0:
-            print(f"  No current legislators saved for {state_name}.")
+            print(f"  No current state officials saved for {state_name}.")
 
         session.commit()
         return {
@@ -400,12 +441,12 @@ def _print_all_states_summary(results, failures):
 
 
 def sync_all_states():
-    """Upsert legislators for every postal abbreviation in STATE_NAME_BY_ABBR."""
+    """Upsert legislators and governors for every postal abbreviation."""
     results = []
     failures = []
     abbreviations = sorted(STATE_NAME_BY_ABBR)
     total = len(abbreviations)
-    print(f"Syncing OpenStates legislators for {total} jurisdictions...")
+    print(f"Syncing OpenStates legislators and governors for {total} jurisdictions...")
 
     for index, abbr in enumerate(abbreviations, start=1):
         state_name = STATE_NAME_BY_ABBR[abbr]
@@ -424,14 +465,14 @@ def sync_all_states():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ingest OpenStates state legislators into officials."
+        description="Ingest OpenStates state legislators and governors into officials."
     )
     parser.add_argument(
         "command",
         nargs="?",
         choices=["members"],
         default="members",
-        help="members: current state legislators (default).",
+        help="members: current state legislators and governor (default).",
     )
     state_group = parser.add_mutually_exclusive_group(required=True)
     state_group.add_argument(

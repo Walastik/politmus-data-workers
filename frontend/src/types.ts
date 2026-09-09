@@ -205,7 +205,7 @@ export function officeLine(official: Official) {
 }
 
 export function seatLabel(official: Official) {
-  if (official.office === 'Senator') {
+  if (official.office === 'Senator' || official.office === 'Governor') {
     return 'Statewide'
   }
   if (
@@ -286,8 +286,15 @@ export function isCivicHouseMember(rep: CivicRepresentative) {
   )
 }
 
-export function isCivicStateSenator(rep: CivicRepresentative) {
+export function isCivicGovernor(rep: CivicRepresentative) {
   if (!isCivicStateLevel(rep)) {
+    return false
+  }
+  return officeKey(rep) === 'governor'
+}
+
+export function isCivicStateSenator(rep: CivicRepresentative) {
+  if (!isCivicStateLevel(rep) || isCivicGovernor(rep)) {
     return false
   }
   const office = officeKey(rep)
@@ -299,7 +306,7 @@ export function isCivicStateSenator(rep: CivicRepresentative) {
 }
 
 export function isCivicStateHouseMember(rep: CivicRepresentative) {
-  if (!isCivicStateLevel(rep)) {
+  if (!isCivicStateLevel(rep) || isCivicGovernor(rep)) {
     return false
   }
   const office = officeKey(rep)
@@ -315,6 +322,7 @@ export function groupCivicRepresentatives(reps: CivicRepresentative[]) {
   const president: CivicRepresentative[] = []
   const senators: CivicRepresentative[] = []
   const house: CivicRepresentative[] = []
+  const governors: CivicRepresentative[] = []
   const stateSenators: CivicRepresentative[] = []
   const stateHouse: CivicRepresentative[] = []
   const other: CivicRepresentative[] = []
@@ -326,6 +334,8 @@ export function groupCivicRepresentatives(reps: CivicRepresentative[]) {
       senators.push(rep)
     } else if (isCivicHouseMember(rep)) {
       house.push(rep)
+    } else if (isCivicGovernor(rep)) {
+      governors.push(rep)
     } else if (isCivicStateSenator(rep)) {
       stateSenators.push(rep)
     } else if (isCivicStateHouseMember(rep)) {
@@ -335,7 +345,7 @@ export function groupCivicRepresentatives(reps: CivicRepresentative[]) {
     }
   }
 
-  return { president, senators, house, stateSenators, stateHouse, other }
+  return { president, senators, house, governors, stateSenators, stateHouse, other }
 }
 
 export function civicRepresentativeToOfficial(

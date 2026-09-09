@@ -14,6 +14,7 @@ router = APIRouter()
 HOUSE_OFFICES = ("Representative", "Delegate", "Resident Commissioner")
 STATE_UPPER_OFFICES = ("State Senator",)
 STATE_LOWER_OFFICES = ("State Representative",)
+GOVERNOR_OFFICE = "Governor"
 FEDERAL_LEVEL = "federal"
 STATE_LEVEL = "state"
 
@@ -22,6 +23,8 @@ def _office_roles(
     office: Optional[str], level: Optional[str] = None
 ) -> tuple[list[str], list[str]]:
     if level == STATE_LEVEL:
+        if office == GOVERNOR_OFFICE:
+            return ["administrativeArea1"], []
         if office in STATE_UPPER_OFFICES:
             return ["administrativeArea1"], ["legislatorUpperBody"]
         return ["administrativeArea1"], ["legislatorLowerBody"]
@@ -83,6 +86,18 @@ def _current_state_members(db: Session, state_name: str, offices: tuple[str, ...
     )
 
 
+def _current_state_governors(db: Session, state_name: str):
+    return (
+        db.query(Official)
+        .filter(Official.level == STATE_LEVEL)
+        .filter(Official.state.ilike(state_name))
+        .filter(Official.current_member.is_(True))
+        .filter(Official.office == GOVERNOR_OFFICE)
+        .order_by(Official.name)
+        .all()
+    )
+
+
 @router.get("", response_model=CivicLookupOut)
 def lookup_civic_info(
     address: str = Query(
@@ -96,8 +111,8 @@ def lookup_civic_info(
     """Resolve an address to districts, then load federal and state officials.
 
     Census geocodes the address, including congressional and state legislative
-    districts. FastAPI then returns current senators, the House member, and the
-    matching state legislators from Postgres.
+    districts. FastAPI then returns current senators, the House member, the
+    governor, and the matching state legislators from Postgres.
     """
     address = address.strip()
     if not address:
@@ -161,6 +176,7 @@ def lookup_civic_info(
         .order_by(Official.name)
         .all()
     )
+    governors = _current_state_governors(db, match.state_name)
     state_senators = (
         _current_state_members(db, match.state_name, STATE_UPPER_OFFICES, match.sldu)
         if match.sldu is not None
@@ -187,6 +203,14 @@ def lookup_civic_info(
             division_name=match.district_label,
         )
         for official in house_members
+    )
+    representatives.extend(
+        _representative_from_official(
+            official,
+            division_id=state_ocd,
+            division_name=match.state_name,
+        )
+        for official in governors
     )
     if sldu_ocd:
         representatives.extend(

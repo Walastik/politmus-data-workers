@@ -86,9 +86,9 @@ All Congress.gov requests pause briefly between calls and retry with exponential
 
 ### `openstates_client.py`
 
-Talks to the [OpenStates API](https://docs.openstates.org/api-v3/) and upserts active state legislators into `officials` with `level='state'` and an `openstates_id`. Re-running is idempotent.
+Talks to the [OpenStates API](https://docs.openstates.org/api-v3/) and upserts active state legislators and the current governor into `officials` with `level='state'` and an `openstates_id`. Governors are stored with `office='Governor'` and no district. Re-running is idempotent.
 
-**Current state legislators** — fetches upper and lower chamber members for one state, or every postal abbreviation in `STATE_NAME_BY_ABBR`. Nebraska (unicameral) uses `org_classification=legislature`; other states skip that extra request. OpenStates requests retry with exponential backoff on HTTP 429 and 5xx.
+**Current state legislators and governor** — fetches upper and lower chamber members for one state, or every postal abbreviation in `STATE_NAME_BY_ABBR`, plus `org_classification=executive` (one extra request per state). Only the governor is saved from that executive list. Nebraska (unicameral) uses `org_classification=legislature`; other states skip that extra legislative request. OpenStates requests retry with exponential backoff on HTTP 429 and 5xx.
 
 ```bash
 python openstates_client.py members --state TX

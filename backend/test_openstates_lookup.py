@@ -8,11 +8,14 @@ os.environ.setdefault(
 )
 
 from api.census import _legislative_district, _match_from_payload, _parse_sld_code
+from api.routes.lookup import _office_roles
 from openstates_client import (
     classifications_for_state,
     district_from_role,
+    fetch_state_legislators,
     office_from_role,
     official_from_person,
+    people_classifications_for_state,
     sync_all_states,
 )
 
@@ -121,6 +124,20 @@ class OpenStatesMappingTests(unittest.TestCase):
         self.assertEqual(
             office_from_role({"org_classification": "legislature"}), "State Senator"
         )
+        self.assertEqual(
+            office_from_role(
+                {"org_classification": "executive", "title": "Governor"}
+            ),
+            "Governor",
+        )
+        self.assertIsNone(
+            office_from_role(
+                {
+                    "org_classification": "executive",
+                    "title": "Lieutenant Governor",
+                }
+            )
+        )
 
     def test_district_from_role(self):
         self.assertEqual(district_from_role({"district": "15"}), 15)
@@ -159,22 +176,103 @@ class OpenStatesMappingTests(unittest.TestCase):
         self.assertEqual(official.website_url, "https://senate.example.gov")
         self.assertTrue(official.current_member)
 
-    def test_skips_non_legislators(self):
+    def test_maps_governor(self):
         person = {
             "id": "ocd-person/gov",
             "name": "A Governor",
             "party": "Republican",
-            "current_role": {"title": "Governor", "org_classification": "executive"},
+            "current_role": {
+                "title": "Governor",
+                "org_classification": "executive",
+                "district": "Statewide",
+            },
+            "offices": [
+                {
+                    "classification": "capitol",
+                    "voice": "512-555-0199",
+                    "address": "1100 Congress Ave, Austin, TX",
+                }
+            ],
+            "links": [{"url": "https://gov.example.gov", "note": "official website"}],
         }
-        self.assertIsNone(official_from_person(person, "Texas"))
+        official = official_from_person(person, "Texas")
+        self.assertIsNotNone(official)
+        self.assertEqual(official.id, "ocd-person/gov")
+        self.assertEqual(official.openstates_id, "ocd-person/gov")
+        self.assertEqual(official.level, "state")
+        self.assertEqual(official.office, "Governor")
+        self.assertIsNone(official.district)
+        self.assertEqual(official.party, "Republican")
+        self.assertEqual(official.phone, "512-555-0199")
+        self.assertEqual(official.website_url, "https://gov.example.gov")
+        self.assertTrue(official.current_member)
+
+    def test_skips_non_governor_executives(self):
+        lieutenant = {
+            "id": "ocd-person/ltgov",
+            "name": "A Lieutenant Governor",
+            "party": "Republican",
+            "current_role": {
+                "title": "Lieutenant Governor",
+                "org_classification": "executive",
+            },
+        }
+        attorney_general = {
+            "id": "ocd-person/ag",
+            "name": "An Attorney General",
+            "party": "Democratic",
+            "current_role": {
+                "title": "Attorney General",
+                "org_classification": "executive",
+            },
+        }
+        self.assertIsNone(official_from_person(lieutenant, "Texas"))
+        self.assertIsNone(official_from_person(attorney_general, "Texas"))
 
     def test_bicameral_skips_legislature(self):
         self.assertEqual(classifications_for_state("TX"), ("upper", "lower"))
         self.assertEqual(classifications_for_state("Texas"), ("upper", "lower"))
+        self.assertEqual(
+            people_classifications_for_state("TX"),
+            ("upper", "lower", "executive"),
+        )
 
     def test_nebraska_uses_legislature(self):
         self.assertEqual(classifications_for_state("NE"), ("legislature",))
         self.assertEqual(classifications_for_state("Nebraska"), ("legislature",))
+        self.assertEqual(
+            people_classifications_for_state("NE"),
+            ("legislature", "executive"),
+        )
+
+
+class FetchPeopleTests(unittest.TestCase):
+    @patch("openstates_client.openstates_get")
+    def test_requests_executive_after_chambers(self, mock_get):
+        mock_get.return_value = {"results": [], "pagination": {"max_page": 1}}
+        fetch_state_legislators("TX")
+        classifications = [
+            call.kwargs["params"]["org_classification"]
+            for call in mock_get.call_args_list
+        ]
+        self.assertEqual(classifications, ["upper", "lower", "executive"])
+
+
+class LookupRoleTests(unittest.TestCase):
+    def test_governor_uses_state_level_without_legislator_roles(self):
+        levels, roles = _office_roles("Governor", "state")
+        self.assertEqual(levels, ["administrativeArea1"])
+        self.assertEqual(roles, [])
+
+    def test_state_legislators_keep_chamber_roles(self):
+        self.assertEqual(
+            _office_roles("State Senator", "state"),
+            (["administrativeArea1"], ["legislatorUpperBody"]),
+        )
+        self.assertEqual(
+            _office_roles("State Representative", "state"),
+            (["administrativeArea1"], ["legislatorLowerBody"]),
+        )
 
 
 class SyncAllStatesTests(unittest.TestCase):

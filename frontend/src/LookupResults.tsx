@@ -61,6 +61,16 @@ export default function LookupResults({
         )}
       </OfficeSection>
 
+      {grouped.governors.length ? (
+        <OfficeSection title="Governor">
+          <RepresentativeGrid
+            representatives={grouped.governors}
+            fallbackState={fallbackState}
+            onSelectOfficial={onSelectOfficial}
+          />
+        </OfficeSection>
+      ) : null}
+
       {grouped.stateSenators.length ? (
         <OfficeSection title="State Senate">
           <RepresentativeGrid
