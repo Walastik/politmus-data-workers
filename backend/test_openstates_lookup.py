@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -7,7 +8,13 @@ os.environ.setdefault(
 )
 
 from api.census import _legislative_district, _match_from_payload, _parse_sld_code
-from openstates_client import district_from_role, office_from_role, official_from_person
+from openstates_client import (
+    classifications_for_state,
+    district_from_role,
+    office_from_role,
+    official_from_person,
+    sync_all_states,
+)
 
 
 class ParseSldCodeTests(unittest.TestCase):
@@ -160,6 +167,41 @@ class OpenStatesMappingTests(unittest.TestCase):
             "current_role": {"title": "Governor", "org_classification": "executive"},
         }
         self.assertIsNone(official_from_person(person, "Texas"))
+
+    def test_bicameral_skips_legislature(self):
+        self.assertEqual(classifications_for_state("TX"), ("upper", "lower"))
+        self.assertEqual(classifications_for_state("Texas"), ("upper", "lower"))
+
+    def test_nebraska_uses_legislature(self):
+        self.assertEqual(classifications_for_state("NE"), ("legislature",))
+        self.assertEqual(classifications_for_state("Nebraska"), ("legislature",))
+
+
+class SyncAllStatesTests(unittest.TestCase):
+    @patch(
+        "openstates_client.STATE_NAME_BY_ABBR",
+        {"TX": "Texas", "NE": "Nebraska", "CA": "California"},
+    )
+    @patch("openstates_client.sync_state_members")
+    def test_continues_after_state_failure(self, mock_sync):
+        def fake_sync(state_code):
+            if state_code == "NE":
+                raise RuntimeError("rate limited")
+            return {
+                "state": state_code,
+                "fetched": 1,
+                "saved": 1,
+                "skipped": 0,
+            }
+
+        mock_sync.side_effect = fake_sync
+        results, failures = sync_all_states()
+        self.assertEqual([call.args[0] for call in mock_sync.call_args_list], ["CA", "NE", "TX"])
+        self.assertEqual(len(results), 2)
+        self.assertEqual({item["state"] for item in results}, {"CA", "TX"})
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["state"], "NE")
+        self.assertIn("rate limited", failures[0]["error"])
 
 
 if __name__ == "__main__":

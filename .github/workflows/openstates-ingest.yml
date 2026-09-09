@@ -1,0 +1,30 @@
+name: OpenStates Data Ingestion
+
+on:
+  schedule:
+    # Every 12 hours, offset from Congress (00/06/12/18 UTC) so SSH jobs
+    # do not share the API machine at the same minute.
+    - cron: '0 3,15 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: openstates-ingest
+  cancel-in-progress: false
+
+jobs:
+  sync_openstates_data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Scripts run on the API machine so they use Fly's private DATABASE_URL
+      # and OPENSTATES_API_KEY. Do not add the OpenStates key as a GitHub secret.
+      # Requires GitHub secret FLY_API_TOKEN (org or personal token, not a deploy-only token).
+      # -C execs the binary directly (no shell), so use an absolute python path.
+      - name: Run OpenStates legislator ingest (all states)
+        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/openstates_client.py members --all-states"

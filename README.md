@@ -88,12 +88,15 @@ All Congress.gov requests pause briefly between calls and retry with exponential
 
 Talks to the [OpenStates API](https://docs.openstates.org/api-v3/) and upserts active state legislators into `officials` with `level='state'` and an `openstates_id`. Re-running is idempotent.
 
-**Current state legislators** — fetches upper and lower chamber members (and unicameral legislatures) for one state:
+**Current state legislators** — fetches upper and lower chamber members for one state, or every postal abbreviation in `STATE_NAME_BY_ABBR`. Nebraska (unicameral) uses `org_classification=legislature`; other states skip that extra request. OpenStates requests retry with exponential backoff on HTTP 429 and 5xx.
 
 ```bash
 python openstates_client.py members --state TX
 python openstates_client.py members --state Texas
+python openstates_client.py members --all-states
 ```
+
+`--all-states` continues if a single state fails and prints a per-state summary. Free-tier OpenStates keys are often limited (~500 requests/day, ~10/min), so all-states ingest is meant for the 12-hour GitHub Action rather than frequent local runs.
 
 ## Deploy to Fly.io
 
@@ -130,17 +133,24 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 ### GitHub Actions ingest
 
-Scheduled ingest SSHs into `politmus-api` and runs `congress_client.py` there (private Postgres, no public DB URL). Add one GitHub Actions secret:
+Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours in a separate workflow and concurrency group so a long state ingest does not block Congress. Add one GitHub Actions secret:
 
 ```bash
 fly tokens create org
 gh secret set FLY_API_TOKEN
 ```
 
-Use an org or personal token, not a deploy-only token (`fly ssh` rejects those). Then run **Congress Data Ingestion** from the Actions tab, or load data once by hand:
+Use an org or personal token, not a deploy-only token (`fly ssh` rejects those). Set `OPENSTATES_API_KEY` on the Fly app (not as a GitHub secret):
+
+```bash
+fly secrets set OPENSTATES_API_KEY=your_key_here -a politmus-api
+```
+
+Then run **Congress Data Ingestion** or **OpenStates Data Ingestion** from the Actions tab, or load data once by hand:
 
 ```bash
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py members"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py bills"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py enrich"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 ```

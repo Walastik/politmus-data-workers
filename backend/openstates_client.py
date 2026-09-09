@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import time
 
 import requests
@@ -19,7 +20,12 @@ REQUEST_PAUSE_SECONDS = 0.2
 MAX_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 1.0
 
+# Bicameral states are upper + lower. Unicameral Nebraska is legislature only.
+# Skipping legislature elsewhere avoids an empty OpenStates call per state.
 LEGISLATIVE_CLASSIFICATIONS = ("upper", "lower", "legislature")
+BICAMERAL_CLASSIFICATIONS = ("upper", "lower")
+UNICAMERAL_STATES = frozenset({"NE"})
+UNICAMERAL_CLASSIFICATIONS = ("legislature",)
 STATE_UPPER_OFFICE = "State Senator"
 STATE_LOWER_OFFICE = "State Representative"
 
@@ -82,6 +88,14 @@ def openstates_get(path, params=None):
     if last_error:
         raise last_error
     raise RuntimeError(f"Failed to fetch {url}")
+
+
+def classifications_for_state(state_code):
+    """OpenStates org_classification values to fetch for a jurisdiction."""
+    abbr, _state_name = resolve_state(state_code)
+    if abbr in UNICAMERAL_STATES:
+        return UNICAMERAL_CLASSIFICATIONS
+    return BICAMERAL_CLASSIFICATIONS
 
 
 def resolve_state(state_code):
@@ -266,7 +280,7 @@ def fetch_state_legislators(state_code):
     abbr, _state_name = resolve_state(state_code)
     by_id = {}
 
-    for classification in LEGISLATIVE_CLASSIFICATIONS:
+    for classification in classifications_for_state(abbr):
         page = 1
         while True:
             print(
@@ -365,6 +379,49 @@ def _print_member_stats(stats):
     print(f"  Skipped:  {stats['skipped']}")
 
 
+def _print_all_states_summary(results, failures):
+    print("\nOpenStates all-states ingest summary")
+    print(f"  Succeeded: {len(results)}")
+    print(f"  Failed:    {len(failures)}")
+    print(f"  Fetched:   {sum(item['fetched'] for item in results)}")
+    print(f"  Upserted:  {sum(item['saved'] for item in results)}")
+    print(f"  Skipped:   {sum(item['skipped'] for item in results)}")
+    if results:
+        print("  States:")
+        for stats in results:
+            print(
+                f"    {stats['state']}: fetched={stats['fetched']} "
+                f"upserted={stats['saved']} skipped={stats['skipped']}"
+            )
+    if failures:
+        print("  Failures:")
+        for item in failures:
+            print(f"    {item['state']}: {item['error']}")
+
+
+def sync_all_states():
+    """Upsert legislators for every postal abbreviation in STATE_NAME_BY_ABBR."""
+    results = []
+    failures = []
+    abbreviations = sorted(STATE_NAME_BY_ABBR)
+    total = len(abbreviations)
+    print(f"Syncing OpenStates legislators for {total} jurisdictions...")
+
+    for index, abbr in enumerate(abbreviations, start=1):
+        state_name = STATE_NAME_BY_ABBR[abbr]
+        print(f"\n=== [{index}/{total}] {abbr} ({state_name}) ===")
+        try:
+            stats = sync_state_members(abbr)
+            _print_member_stats(stats)
+            results.append(stats)
+        except Exception as exc:
+            print(f"  FAILED {abbr} ({state_name}): {exc}")
+            failures.append({"state": abbr, "error": str(exc)})
+
+    _print_all_states_summary(results, failures)
+    return results, failures
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Ingest OpenStates state legislators into officials."
@@ -376,16 +433,29 @@ def main():
         default="members",
         help="members: current state legislators (default).",
     )
-    parser.add_argument(
+    state_group = parser.add_mutually_exclusive_group(required=True)
+    state_group.add_argument(
         "--state",
-        required=True,
         help="State postal abbreviation or name, e.g. TX or Texas.",
+    )
+    state_group.add_argument(
+        "--all-states",
+        action="store_true",
+        help=(
+            "Ingest every postal abbreviation in STATE_NAME_BY_ABBR. "
+            "Continues after a single-state failure."
+        ),
     )
     args = parser.parse_args()
 
     if args.command == "members":
-        stats = sync_state_members(args.state)
-        _print_member_stats(stats)
+        if args.all_states:
+            _results, failures = sync_all_states()
+            if failures:
+                sys.exit(1)
+        else:
+            stats = sync_state_members(args.state)
+            _print_member_stats(stats)
 
 
 if __name__ == "__main__":
