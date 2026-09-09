@@ -23,9 +23,10 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    ```
    DATABASE_URL=postgresql://postgres:postgres_password@localhost:5432/politmus_local
    CONGRESS_GOV_API_KEY=your_key_here
+   OPENSTATES_API_KEY=your_key_here
    ```
 
-   Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table; it does not need a Google API key.
+   Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Get an OpenStates API key from [openstates.org/accounts/signup](https://openstates.org/accounts/signup/). Address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table; it does not need a Google API key.
 
 4. Create (or update) tables:
 
@@ -82,6 +83,17 @@ python congress_client.py enrich
 ```
 
 All Congress.gov requests pause briefly between calls and retry with exponential backoff on HTTP 429 and 5xx responses. Re-running these commands is idempotent: existing bills are updated in place, and votes are upserted per official per bill.
+
+### `openstates_client.py`
+
+Talks to the [OpenStates API](https://docs.openstates.org/api-v3/) and upserts active state legislators into `officials` with `level='state'` and an `openstates_id`. Re-running is idempotent.
+
+**Current state legislators** — fetches upper and lower chamber members (and unicameral legislatures) for one state:
+
+```bash
+python openstates_client.py members --state TX
+python openstates_client.py members --state Texas
+```
 
 ## Deploy to Fly.io
 

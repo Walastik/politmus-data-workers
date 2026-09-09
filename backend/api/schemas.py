@@ -17,6 +17,8 @@ class OfficialOut(BaseModel):
     phone: Optional[str] = None
     office_address: Optional[str] = None
     website_url: Optional[str] = None
+    level: str = "federal"
+    openstates_id: Optional[str] = None
 
 
 class OfficialVoteOut(BaseModel):

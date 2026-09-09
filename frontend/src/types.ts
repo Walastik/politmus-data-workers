@@ -9,6 +9,8 @@ export interface Official {
   phone: string | null
   office_address: string | null
   website_url: string | null
+  level?: string | null
+  openstates_id?: string | null
 }
 
 export interface OfficialVote {
@@ -251,6 +253,10 @@ function officeKey(rep: CivicRepresentative) {
   return (rep.office || '').trim().toLowerCase()
 }
 
+export function isCivicStateLevel(rep: CivicRepresentative) {
+  return rep.levels.includes('administrativeArea1')
+}
+
 export function isCivicPresident(rep: CivicRepresentative) {
   const office = officeKey(rep)
   return (
@@ -261,10 +267,16 @@ export function isCivicPresident(rep: CivicRepresentative) {
 }
 
 export function isCivicSenator(rep: CivicRepresentative) {
+  if (isCivicStateLevel(rep)) {
+    return false
+  }
   return officeKey(rep) === 'senator' || rep.roles.includes('legislatorUpperBody')
 }
 
 export function isCivicHouseMember(rep: CivicRepresentative) {
+  if (isCivicStateLevel(rep)) {
+    return false
+  }
   const office = officeKey(rep)
   return (
     office === 'representative' ||
@@ -274,10 +286,37 @@ export function isCivicHouseMember(rep: CivicRepresentative) {
   )
 }
 
+export function isCivicStateSenator(rep: CivicRepresentative) {
+  if (!isCivicStateLevel(rep)) {
+    return false
+  }
+  const office = officeKey(rep)
+  return (
+    office === 'state senator' ||
+    office === 'senator' ||
+    rep.roles.includes('legislatorUpperBody')
+  )
+}
+
+export function isCivicStateHouseMember(rep: CivicRepresentative) {
+  if (!isCivicStateLevel(rep)) {
+    return false
+  }
+  const office = officeKey(rep)
+  return (
+    office === 'state representative' ||
+    office === 'representative' ||
+    office.includes('assembly') ||
+    rep.roles.includes('legislatorLowerBody')
+  )
+}
+
 export function groupCivicRepresentatives(reps: CivicRepresentative[]) {
   const president: CivicRepresentative[] = []
   const senators: CivicRepresentative[] = []
   const house: CivicRepresentative[] = []
+  const stateSenators: CivicRepresentative[] = []
+  const stateHouse: CivicRepresentative[] = []
   const other: CivicRepresentative[] = []
 
   for (const rep of reps) {
@@ -287,12 +326,16 @@ export function groupCivicRepresentatives(reps: CivicRepresentative[]) {
       senators.push(rep)
     } else if (isCivicHouseMember(rep)) {
       house.push(rep)
+    } else if (isCivicStateSenator(rep)) {
+      stateSenators.push(rep)
+    } else if (isCivicStateHouseMember(rep)) {
+      stateHouse.push(rep)
     } else {
       other.push(rep)
     }
   }
 
-  return { president, senators, house, other }
+  return { president, senators, house, stateSenators, stateHouse, other }
 }
 
 export function civicRepresentativeToOfficial(
@@ -302,7 +345,7 @@ export function civicRepresentativeToOfficial(
   if (!rep.id) {
     return null
   }
-  const districtMatch = rep.division_id?.match(/\/cd:(\d+)$/)
+  const districtMatch = rep.division_id?.match(/\/(?:cd|sldu|sldl):(\d+)$/)
   const district = districtMatch ? Number(districtMatch[1]) : null
   return {
     id: rep.id,
@@ -315,5 +358,7 @@ export function civicRepresentativeToOfficial(
     phone: rep.phones[0] ?? null,
     office_address: formatCivicAddress(rep.addresses[0]) ?? null,
     website_url: rep.urls[0] ?? null,
+    level: isCivicStateLevel(rep) ? 'state' : 'federal',
+    openstates_id: isCivicStateLevel(rep) ? rep.id : null,
   }
 }

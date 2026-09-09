@@ -31,6 +31,24 @@ def ensure_schema():
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS website_url VARCHAR"
         ))
         conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS level VARCHAR "
+            "NOT NULL DEFAULT 'federal'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS openstates_id VARCHAR"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_officials_openstates_id "
+            "ON officials (openstates_id) WHERE openstates_id IS NOT NULL"
+        ))
+        conn.execute(text(
+            """
+            UPDATE officials
+            SET level = 'federal'
+            WHERE level IS NULL OR level = ''
+            """
+        ))
+        conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_bioguide_id VARCHAR"
         ))
         conn.execute(text(

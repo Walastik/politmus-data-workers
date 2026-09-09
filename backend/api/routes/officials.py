@@ -1,4 +1,5 @@
 from typing import Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -31,6 +32,10 @@ def list_officials(
         default=None,
         description="If true, only current members. If false, only former members.",
     ),
+    level: Optional[str] = Query(
+        default=None,
+        description="If set, only officials at this level (federal or state).",
+    ),
     db: Session = Depends(get_db),
 ):
     query = db.query(Official)
@@ -45,13 +50,16 @@ def list_officials(
         query = query.filter(Official.name.ilike(name_pattern, escape="\\"))
     if current_member is not None:
         query = query.filter(Official.current_member.is_(current_member))
+    if level:
+        query = query.filter(Official.level.ilike(level.strip()))
 
     officials = query.order_by(Official.name).limit(limit).all()
     return officials
 
 
-@router.get("/{official_id}", response_model=OfficialDetailOut)
+@router.get("/{official_id:path}", response_model=OfficialDetailOut)
 def get_official(official_id: str, db: Session = Depends(get_db)):
+    official_id = unquote(official_id)
     official = db.query(Official).filter(Official.id == official_id).first()
     if not official:
         raise HTTPException(status_code=404, detail="Official not found")
@@ -75,6 +83,8 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         phone=official.phone,
         office_address=official.office_address,
         website_url=official.website_url,
+        level=official.level or "federal",
+        openstates_id=official.openstates_id,
         votes=[
             OfficialVoteOut(
                 bill_id=bill.id,

@@ -340,6 +340,7 @@ def official_from_member(member, bioguide_id=None, current_member=None):
         phone=_phone_from_member(member),
         office_address=_office_address_from_member(member),
         website_url=_website_url_from_member(member),
+        level="federal",
     )
 
 
@@ -360,6 +361,7 @@ def upsert_official(session, incoming):
     existing.office = incoming.office
     existing.district = incoming.district
     existing.current_member = incoming.current_member
+    existing.level = incoming.level or existing.level or "federal"
     if incoming.phone:
         existing.phone = incoming.phone
     if incoming.office_address:
@@ -419,6 +421,9 @@ def save_officials(members):
                 session.query(Official)
                 .filter(~Official.id.in_(current_ids))
                 .filter(Official.current_member.is_(True))
+                .filter(
+                    or_(Official.level == "federal", Official.level.is_(None))
+                )
                 .update(
                     {Official.current_member: False},
                     synchronize_session=False,
