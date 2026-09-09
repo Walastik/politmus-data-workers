@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, String, Integer, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, String, Integer, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -47,3 +47,29 @@ class Vote(Base):
 
     bill = relationship("Bill", back_populates="votes")
     official = relationship("Official")
+
+
+class SenateRollCall(Base):
+    """One Senate.gov roll call we have already looked at.
+
+    Incremental ingest compares this table to the Senate vote menu so we only
+    fetch XML for new votes, plus retries (missing bill, fetch failure).
+    """
+    __tablename__ = "senate_roll_calls"
+    __table_args__ = (
+        UniqueConstraint(
+            "congress",
+            "session",
+            "vote_number",
+            name="uq_senate_roll_calls_congress_session_vote",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    congress = Column(Integer, nullable=False)
+    session = Column(Integer, nullable=False)
+    vote_number = Column(Integer, nullable=False)
+    # Not an FK: skipped_no_bill rows are stored before the bill exists.
+    bill_id = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    processed_at = Column(DateTime, nullable=True)

@@ -1,25 +1,59 @@
 import argparse
 import os
+import re
 import time
-from datetime import date, datetime
+import xml.etree.ElementTree as ET
+from datetime import date, datetime, timezone
 
 import requests
 from dotenv import load_dotenv
 from sqlalchemy import and_, exists, or_
 
+from api.filters import normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
-from models import Bill, Official, Vote
+from models import Bill, Official, SenateRollCall, Vote
 
 load_dotenv()
 
 BASE_URL = "https://api.congress.gov/v3"
+SENATE_VOTE_URL = (
+    "https://www.senate.gov/legislative/LIS/roll_call_votes/"
+    "vote{congress}{session}/vote_{congress}_{session}_{vote_number}.xml"
+)
+SENATE_VOTE_MENU_URL = (
+    "https://www.senate.gov/legislative/LIS/roll_call_lists/"
+    "vote_menu_{congress}_{session}.xml"
+)
+SENATE_SESSIONS = (1, 2)
+SENATE_ROLL_CALL_INGESTED = "ingested"
+SENATE_ROLL_CALL_SKIPPED_NOMINATION = "skipped_nomination"
+SENATE_ROLL_CALL_SKIPPED_NO_BILL = "skipped_no_bill"
+SENATE_ROLL_CALL_NOT_FOUND = "not_found"
+SENATE_ROLL_CALL_FAILED = "failed"
+SENATE_ROLL_CALL_TERMINAL = {
+    SENATE_ROLL_CALL_INGESTED,
+    SENATE_ROLL_CALL_SKIPPED_NOMINATION,
+}
+SENATE_USER_AGENT = "politmus-data-workers (https://politmus.com)"
 API_KEY = os.getenv("CONGRESS_GOV_API_KEY")
 PAGE_SIZE = 250
 CURRENT_CONGRESS = 119
 REQUEST_PAUSE_SECONDS = 0.2
 MAX_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 1.0
+
+# Senate.gov <document_type> values, stripped of spaces and periods.
+SENATE_DOCUMENT_TYPE_MAP = {
+    "s": "s",
+    "hr": "hr",
+    "hjres": "hjres",
+    "sjres": "sjres",
+    "hconres": "hconres",
+    "sconres": "sconres",
+    "hres": "hres",
+    "sres": "sres",
+}
 
 POSITION_MAP = {
     "yea": "Yes",
@@ -118,8 +152,420 @@ def normalize_position(vote_cast):
     return str(vote_cast).strip()
 
 
+def _xml_text(element, tag):
+    if element is None:
+        return None
+    text = element.findtext(tag)
+    if text is None:
+        return None
+    stripped = text.strip()
+    return stripped or None
+
+
+def senate_vote_url(congress, session, vote_number):
+    """Build the Senate.gov roll-call XML URL (vote numbers are 5-digit padded)."""
+    padded = f"{int(vote_number):05d}"
+    return SENATE_VOTE_URL.format(
+        congress=int(congress),
+        session=int(session),
+        vote_number=padded,
+    )
+
+
+def senate_vote_menu_url(congress, session):
+    return SENATE_VOTE_MENU_URL.format(
+        congress=int(congress),
+        session=int(session),
+    )
+
+
+def map_senate_document_type(document_type):
+    """Map Senate.gov document_type (e.g. 'S.', 'H.R.') to a bills.id type."""
+    if not document_type:
+        return None
+    key = "".join(
+        ch for ch in str(document_type).strip().lower() if ch not in " ."
+    )
+    return SENATE_DOCUMENT_TYPE_MAP.get(key)
+
+
+def senate_document_to_bill_id(congress, document_type, document_number):
+    """Return a stored bill id like 119-s-5, or None for nominations/treaties."""
+    mapped = map_senate_document_type(document_type)
+    if congress in (None, "") or mapped is None or document_number in (None, ""):
+        return None
+    number = str(document_number).strip()
+    if not number:
+        return None
+    return make_bill_id(congress, mapped, number)
+
+
+SENATE_ISSUE_RE = re.compile(
+    r"^(?P<type>S\.J\.Res\.|H\.J\.Res\.|S\.Con\.Res\.|H\.Con\.Res\.|"
+    r"S\.Res\.|H\.Res\.|H\.R\.|S\.)\s*(?P<number>\d+)\s*$",
+    re.IGNORECASE,
+)
+
+
+def bill_id_from_senate_issue(congress, issue_text):
+    """Parse labels like 'S. 5' or 'H.R. 1' into a stored bill id."""
+    if not issue_text:
+        return None
+    text = re.sub(r"\s+", " ", str(issue_text).strip())
+    match = SENATE_ISSUE_RE.match(text)
+    if not match:
+        return None
+    return senate_document_to_bill_id(
+        congress, match.group("type"), match.group("number")
+    )
+
+
+def senate_menu_issues(vote_el):
+    """Collect issue labels from a vote_menu <vote>, including en_bloc matters."""
+    issues = []
+    issue = _xml_text(vote_el, "issue")
+    if issue:
+        issues.append(issue)
+    en_bloc = vote_el.find("en_bloc") if vote_el is not None else None
+    if en_bloc is not None:
+        for matter in en_bloc.findall("matter"):
+            matter_issue = _xml_text(matter, "issue")
+            if matter_issue:
+                issues.append(matter_issue)
+    return issues
+
+
+def senate_menu_bill_ids(congress, issues):
+    return [
+        bill_id
+        for bill_id in (bill_id_from_senate_issue(congress, issue) for issue in issues)
+        if bill_id
+    ]
+
+
+def senate_menu_has_legislation(issues, congress):
+    """Whether a menu row might map to a bill (skip nominations/treaties).
+
+    Empty issues are kept: amendment votes often omit <issue> on the menu
+    and only name the underlying bill in the roll-call XML.
+    """
+    if not issues:
+        return True
+    return bool(senate_menu_bill_ids(congress, issues))
+
+
+def parse_senate_vote_menu(xml_bytes, congress=None):
+    """Parse a Senate.gov vote_menu XML into oldest-first roll-call rows."""
+    root = ET.fromstring(xml_bytes)
+    xml_congress = _xml_text(root, "congress") or congress
+    xml_session = _xml_text(root, "session")
+    votes_el = root.find("votes")
+    rows = []
+    if votes_el is None:
+        return {
+            "congress": xml_congress,
+            "session": xml_session,
+            "votes": rows,
+        }
+    for vote_el in votes_el.findall("vote"):
+        raw_number = _xml_text(vote_el, "vote_number")
+        if not raw_number:
+            continue
+        try:
+            vote_number = int(raw_number)
+        except ValueError:
+            continue
+        issues = senate_menu_issues(vote_el)
+        rows.append(
+            {
+                "vote_number": vote_number,
+                "issue": issues[0] if issues else None,
+                "issues": issues,
+                "bill_ids": senate_menu_bill_ids(xml_congress, issues),
+            }
+        )
+    rows.sort(key=lambda item: item["vote_number"])
+    return {
+        "congress": xml_congress,
+        "session": xml_session,
+        "votes": rows,
+    }
+
+
+def bill_id_from_senate_document(document, congress=None):
+    if document is None:
+        return None
+    doc_congress = _xml_text(document, "document_congress") or congress
+    bill_id = senate_document_to_bill_id(
+        doc_congress,
+        _xml_text(document, "document_type"),
+        _xml_text(document, "document_number"),
+    )
+    if bill_id:
+        return bill_id
+    return bill_id_from_senate_issue(
+        doc_congress, _xml_text(document, "document_name")
+    )
+
+
+def parse_senate_vote_date(value):
+    """Parse Senate.gov vote_date strings such as 'January 9, 2025,  02:54 PM'."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = re.sub(r"\s+", " ", str(value).strip())
+    if not text:
+        return None
+    for fmt in ("%B %d, %Y, %I:%M %p", "%B %d, %Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def last_name_from_official_name(name):
+    """Last name from Congress.gov inverted names ('Cruz, Ted') or a display name."""
+    if not name:
+        return ""
+    text = str(name).strip()
+    if "," in text:
+        return text.split(",", 1)[0].strip()
+    parts = text.split()
+    return parts[-1] if parts else ""
+
+
+def senator_lookup_key(last_name, state):
+    """Match Senate XML last_name + 2-letter state to officials (full state names)."""
+    last = (last_name or "").strip()
+    state_name = normalize_state(state)
+    if not last or not state_name:
+        return None
+    return (last.casefold(), state_name.casefold())
+
+
+def load_senator_lookup(session):
+    """Map (last_name, full state name) -> bioguide id for federal senators."""
+    officials = (
+        session.query(Official)
+        .filter(Official.office == "Senator")
+        .filter(or_(Official.level == "federal", Official.level.is_(None)))
+        .all()
+    )
+    lookup = {}
+    for official in officials:
+        key = senator_lookup_key(
+            last_name_from_official_name(official.name),
+            official.state,
+        )
+        if key is None:
+            continue
+        existing_id = lookup.get(key)
+        if existing_id is None or official.current_member:
+            lookup[key] = official.id
+    return lookup
+
+
+def parse_senate_vote_xml(xml_bytes, congress=None):
+    """Parse a Senate.gov roll_call_vote XML document into a dict."""
+    root = ET.fromstring(xml_bytes)
+    xml_congress = _xml_text(root, "congress") or congress
+    document = root.find("document")
+    amendment = root.find("amendment")
+    members_el = root.find("members")
+    members = []
+    if members_el is not None:
+        for member in members_el.findall("member"):
+            members.append(
+                {
+                    "last_name": _xml_text(member, "last_name"),
+                    "first_name": _xml_text(member, "first_name"),
+                    "state": _xml_text(member, "state"),
+                    "vote_cast": _xml_text(member, "vote_cast"),
+                }
+            )
+    bill_id = bill_id_from_senate_document(document, congress=xml_congress)
+    if bill_id is None and amendment is not None:
+        bill_id = bill_id_from_senate_issue(
+            xml_congress,
+            _xml_text(amendment, "amendment_to_document_number"),
+        )
+    bill_title = None
+    if document is not None:
+        bill_title = _xml_text(document, "document_title")
+    if not bill_title:
+        bill_title = _xml_text(root, "vote_document_text") or _xml_text(
+            root, "vote_title"
+        )
+    return {
+        "congress": xml_congress,
+        "session": _xml_text(root, "session"),
+        "vote_number": _xml_text(root, "vote_number"),
+        "bill_id": bill_id,
+        "bill_title": bill_title,
+        "vote_date": parse_senate_vote_date(_xml_text(root, "vote_date")),
+        "members": members,
+    }
+
+
+def senate_get(url):
+    """GET bytes from Senate.gov with polite pacing and 429/5xx backoff."""
+    headers = {"User-Agent": SENATE_USER_AGENT}
+    delay = INITIAL_BACKOFF_SECONDS
+    last_error = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        time.sleep(REQUEST_PAUSE_SECONDS)
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+        except requests.RequestException as exc:
+            last_error = exc
+            print(f"  Request error ({exc}); retrying in {delay:.1f}s...")
+            time.sleep(delay)
+            delay *= 2
+            continue
+
+        if response.status_code == 404:
+            return None
+
+        if response.status_code == 429 or response.status_code >= 500:
+            wait = _retry_wait_seconds(response, delay)
+            print(
+                f"  HTTP {response.status_code} from Senate.gov; "
+                f"retrying in {wait:.1f}s (attempt {attempt}/{MAX_RETRIES})..."
+            )
+            time.sleep(wait)
+            delay *= 2
+            last_error = requests.HTTPError(
+                f"{response.status_code} for {url}", response=response
+            )
+            continue
+
+        response.raise_for_status()
+        return response.content
+
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Failed to fetch {url}")
+
+
+def fetch_senate_vote_xml(congress, session, vote_number):
+    """Download one Senate roll-call XML document, or None if it 404s."""
+    url = senate_vote_url(congress, session, vote_number)
+    return senate_get(url)
+
+
+def fetch_senate_vote_menu(congress, session):
+    """Download the Senate.gov vote menu for a congress/session, or None if 404."""
+    url = senate_vote_menu_url(congress, session)
+    return senate_get(url)
+
+
+def _apply_vote_positions(session, bill_id, latest_by_official):
+    """Upsert one vote row per official for a bill. Returns insert/update counts."""
+    stats = {"inserted": 0, "updated": 0, "unchanged": 0}
+    existing_votes = {
+        row.official_id: row
+        for row in session.query(Vote).filter_by(bill_id=bill_id).all()
+    }
+    for official_id, position in latest_by_official.items():
+        current = existing_votes.get(official_id)
+        if current is None:
+            session.add(
+                Vote(
+                    bill_id=bill_id,
+                    official_id=official_id,
+                    position=position,
+                )
+            )
+            stats["inserted"] += 1
+        elif current.position != position:
+            current.position = position
+            stats["updated"] += 1
+        else:
+            stats["unchanged"] += 1
+    return stats
+
+
+def _positions_from_senate_members(members, senator_lookup):
+    """Map Senate XML members to official_id -> position via last name + state."""
+    latest_by_official = {}
+    unknown = []
+    for member in members:
+        key = senator_lookup_key(member.get("last_name"), member.get("state"))
+        official_id = senator_lookup.get(key) if key else None
+        if not official_id:
+            unknown.append(
+                f"{member.get('last_name') or '?'} "
+                f"({member.get('state') or '?'})"
+            )
+            continue
+        position = normalize_position(member.get("vote_cast"))
+        if not position:
+            continue
+        latest_by_official[official_id] = position
+    return latest_by_official, unknown
+
+
 def load_official_ids(session):
     return {row[0] for row in session.query(Official.id).all()}
+
+
+def load_bill_ids(session):
+    return {row[0] for row in session.query(Bill.id).all()}
+
+
+def senate_roll_call_key(congress, session, vote_number):
+    return (int(congress), int(session), int(vote_number))
+
+
+def load_senate_roll_calls(session, congress, session_number):
+    """Map (congress, session, vote_number) -> SenateRollCall for one session."""
+    rows = (
+        session.query(SenateRollCall)
+        .filter_by(congress=int(congress), session=int(session_number))
+        .all()
+    )
+    return {senate_roll_call_key(row.congress, row.session, row.vote_number): row for row in rows}
+
+
+def _utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def upsert_senate_roll_call(
+    db_session,
+    roll_calls,
+    congress,
+    session,
+    vote_number,
+    status,
+    bill_id=None,
+):
+    """Insert or update a Senate.gov ingest cursor row."""
+    key = senate_roll_call_key(congress, session, vote_number)
+    row = roll_calls.get(key)
+    now = _utc_now_naive()
+    if row is None:
+        row = SenateRollCall(
+            congress=int(congress),
+            session=int(session),
+            vote_number=int(vote_number),
+            bill_id=bill_id,
+            status=status,
+            processed_at=now,
+        )
+        db_session.add(row)
+        roll_calls[key] = row
+        return row
+    row.status = status
+    if bill_id:
+        row.bill_id = bill_id
+    row.processed_at = now
+    return row
 
 
 TERRITORY_HOUSE_OFFICES = {
@@ -887,6 +1333,29 @@ def upsert_bill(
     session.flush()
 
 
+def ensure_bill_from_senate_vote(session, bill_id, title, voted_date=None):
+    """Create a bills row from Senate XML when Congress.gov has not ingested it.
+
+    Existing rows are left in place; voted_date is advanced if the roll call is
+    newer. Returns (bill, created).
+    """
+    existing = session.get(Bill, bill_id)
+    if existing is not None:
+        if voted_date is not None and (
+            existing.voted_date is None or voted_date > existing.voted_date
+        ):
+            existing.voted_date = voted_date
+        return existing, False
+    upsert_bill(
+        session,
+        bill_id,
+        title or bill_id,
+        sponsor_id=None,
+        voted_date=voted_date,
+    )
+    return session.get(Bill, bill_id), True
+
+
 def _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name):
     label = sponsor_name or "unknown name"
     print(
@@ -916,6 +1385,363 @@ def _recorded_votes_from_actions(actions):
     return recorded
 
 
+def sync_senate_votes(
+    congress,
+    session,
+    vote_number,
+    db_session=None,
+    senator_lookup=None,
+    expected_bill_id=None,
+    roll_calls=None,
+):
+    """Fetch one Senate.gov roll-call XML and upsert member positions.
+
+    Senators are matched to `officials` by last name and state (Senate XML
+    uses postal abbreviations; Congress.gov stores full state names).
+    Positions upsert on (official_id, bill_id) so re-runs are idempotent.
+    """
+    owns_session = db_session is None
+    if owns_session:
+        db_session = SessionLocal()
+    if roll_calls is None:
+        roll_calls = load_senate_roll_calls(db_session, congress, session)
+
+    stats = {
+        "congress": congress,
+        "session": session,
+        "vote_number": vote_number,
+        "bill_id": expected_bill_id,
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped_unknown_officials": 0,
+        "skipped_no_bill": False,
+        "bill_created": False,
+        "not_found": False,
+    }
+
+    try:
+        xml_bytes = fetch_senate_vote_xml(congress, session, vote_number)
+        if xml_bytes is None:
+            stats["not_found"] = True
+            upsert_senate_roll_call(
+                db_session,
+                roll_calls,
+                congress,
+                session,
+                vote_number,
+                SENATE_ROLL_CALL_NOT_FOUND,
+                bill_id=expected_bill_id,
+            )
+            print(
+                f"  Senate roll call {vote_number} "
+                f"(congress {congress}, session {session}) was not found."
+            )
+            if owns_session:
+                db_session.commit()
+            return stats
+
+        parsed = parse_senate_vote_xml(xml_bytes, congress=congress)
+        bill_id = expected_bill_id or parsed["bill_id"]
+        stats["bill_id"] = bill_id
+        if not bill_id:
+            stats["skipped_no_bill"] = True
+            upsert_senate_roll_call(
+                db_session,
+                roll_calls,
+                congress,
+                session,
+                vote_number,
+                SENATE_ROLL_CALL_SKIPPED_NO_BILL,
+            )
+            print(
+                f"  Skipping Senate roll call {vote_number}; "
+                "XML is not tied to a bill (nomination or treaty)."
+            )
+            if owns_session:
+                db_session.commit()
+            return stats
+
+        existing_bill, created = ensure_bill_from_senate_vote(
+            db_session,
+            bill_id,
+            parsed.get("bill_title"),
+            voted_date=parsed.get("vote_date"),
+        )
+        if existing_bill is None:
+            stats["skipped_no_bill"] = True
+            upsert_senate_roll_call(
+                db_session,
+                roll_calls,
+                congress,
+                session,
+                vote_number,
+                SENATE_ROLL_CALL_SKIPPED_NO_BILL,
+                bill_id=bill_id,
+            )
+            print(
+                f"  Skipping Senate roll call {vote_number}; "
+                f"could not create bills row {bill_id}."
+            )
+            if owns_session:
+                db_session.commit()
+            return stats
+        if created:
+            stats["bill_created"] = True
+            print(f"  Created bill {bill_id} from Senate XML.")
+
+        if senator_lookup is None:
+            senator_lookup = load_senator_lookup(db_session)
+
+        latest_by_official, unknown = _positions_from_senate_members(
+            parsed["members"],
+            senator_lookup,
+        )
+        stats["skipped_unknown_officials"] = len(unknown)
+        if unknown:
+            preview = ", ".join(unknown[:5])
+            extra = f" (+{len(unknown) - 5} more)" if len(unknown) > 5 else ""
+            print(
+                f"  Senate roll call {vote_number}: "
+                f"{len(unknown)} senator(s) not in officials: {preview}{extra}"
+            )
+
+        vote_stats = _apply_vote_positions(
+            db_session, bill_id, latest_by_official
+        )
+        stats.update(vote_stats)
+
+        vote_date = parsed.get("vote_date")
+        if vote_date is not None:
+            if existing_bill.voted_date is None or vote_date > existing_bill.voted_date:
+                existing_bill.voted_date = vote_date
+
+        upsert_senate_roll_call(
+            db_session,
+            roll_calls,
+            congress,
+            session,
+            vote_number,
+            SENATE_ROLL_CALL_INGESTED,
+            bill_id=bill_id,
+        )
+
+        if owns_session:
+            db_session.commit()
+        return stats
+    except Exception:
+        if owns_session:
+            db_session.rollback()
+        raise
+    finally:
+        if owns_session:
+            db_session.close()
+
+
+def _empty_senate_session_stats(congress, session):
+    return {
+        "congress": congress,
+        "session": session,
+        "menu_votes": 0,
+        "latest_vote_number": None,
+        "fetched": 0,
+        "already_done": 0,
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped_nominations": 0,
+        "skipped_no_bill": 0,
+        "bills_created": 0,
+        "skipped_unknown_officials": 0,
+        "not_found": 0,
+        "failed": 0,
+        "menu_missing": False,
+    }
+
+
+def _senate_menu_row_needs_fetch(row, tracked, congress):
+    """Return (should_fetch, skip_reason) for one vote-menu row.
+
+    skip_reason is 'done', 'nomination', or None if we should fetch XML.
+    Missing bills are no longer skipped: Senate XML creates a stub row.
+    """
+    if tracked is not None and tracked.status in SENATE_ROLL_CALL_TERMINAL:
+        return False, "done"
+
+    if not senate_menu_has_legislation(row["issues"], congress):
+        return False, "nomination"
+
+    return True, None
+
+
+def sync_senate_session_votes(
+    congress,
+    session,
+    db_session=None,
+    senator_lookup=None,
+    bill_ids=None,
+    roll_calls=None,
+):
+    """Ingest new Senate member votes for one congress/session.
+
+    Compares the Senate.gov vote menu to `senate_roll_calls`. Nominations are
+    recorded without fetching XML. Legislation roll calls are fetched if they
+    are new, previously failed, or were skipped because the bill was missing.
+    Missing bills are created from the Senate XML. Oldest-first so the latest
+    roll call on a bill wins.
+    """
+    owns_session = db_session is None
+    if owns_session:
+        db_session = SessionLocal()
+
+    stats = _empty_senate_session_stats(congress, session)
+
+    try:
+        menu_xml = fetch_senate_vote_menu(congress, session)
+        if menu_xml is None:
+            stats["menu_missing"] = True
+            print(
+                f"  Senate vote menu for congress {congress} session {session} "
+                "was not found."
+            )
+            return stats
+
+        menu = parse_senate_vote_menu(menu_xml, congress=congress)
+        rows = menu["votes"]
+        stats["menu_votes"] = len(rows)
+        if rows:
+            stats["latest_vote_number"] = rows[-1]["vote_number"]
+        print(
+            f"Senate vote menu: congress {congress} session {session} "
+            f"has {len(rows)} roll calls"
+            + (
+                f" (latest #{stats['latest_vote_number']})."
+                if stats["latest_vote_number"]
+                else "."
+            )
+        )
+
+        if senator_lookup is None:
+            senator_lookup = load_senator_lookup(db_session)
+        if bill_ids is None:
+            bill_ids = load_bill_ids(db_session)
+        if roll_calls is None:
+            roll_calls = load_senate_roll_calls(db_session, congress, session)
+
+        to_fetch = []
+        for row in rows:
+            key = senate_roll_call_key(congress, session, row["vote_number"])
+            tracked = roll_calls.get(key)
+            should_fetch, skip_reason = _senate_menu_row_needs_fetch(
+                row, tracked, congress
+            )
+            if skip_reason == "done":
+                stats["already_done"] += 1
+                continue
+            if skip_reason == "nomination":
+                stats["skipped_nominations"] += 1
+                upsert_senate_roll_call(
+                    db_session,
+                    roll_calls,
+                    congress,
+                    session,
+                    row["vote_number"],
+                    SENATE_ROLL_CALL_SKIPPED_NOMINATION,
+                )
+                continue
+            if should_fetch:
+                to_fetch.append(row)
+
+        print(
+            f"  Fetching {len(to_fetch)} new/retry roll calls "
+            f"(already done={stats['already_done']}, "
+            f"nominations={stats['skipped_nominations']})."
+        )
+        if owns_session:
+            db_session.commit()
+
+        if not to_fetch:
+            print("  Caught up; no Senate.gov XML to request.")
+            return stats
+
+        for index, row in enumerate(to_fetch, start=1):
+            vote_number = row["vote_number"]
+            issue = row["issue"] or "unlisted measure"
+            print(
+                f"[{index}/{len(to_fetch)}] Senate roll call {vote_number} "
+                f"({issue})..."
+            )
+            try:
+                vote_stats = sync_senate_votes(
+                    congress,
+                    session,
+                    vote_number,
+                    db_session=db_session,
+                    senator_lookup=senator_lookup,
+                    roll_calls=roll_calls,
+                )
+            except (requests.RequestException, RuntimeError, ET.ParseError) as exc:
+                print(f"  FAILED vote {vote_number}: {exc}")
+                stats["failed"] += 1
+                if owns_session:
+                    db_session.rollback()
+                roll_calls.pop(
+                    senate_roll_call_key(congress, session, vote_number), None
+                )
+                upsert_senate_roll_call(
+                    db_session,
+                    roll_calls,
+                    congress,
+                    session,
+                    vote_number,
+                    SENATE_ROLL_CALL_FAILED,
+                    bill_id=row["bill_ids"][0] if row["bill_ids"] else None,
+                )
+                if owns_session:
+                    db_session.commit()
+                continue
+
+            stats["fetched"] += 1
+            stats["inserted"] += vote_stats["inserted"]
+            stats["updated"] += vote_stats["updated"]
+            stats["unchanged"] += vote_stats["unchanged"]
+            stats["skipped_unknown_officials"] += vote_stats[
+                "skipped_unknown_officials"
+            ]
+            if vote_stats["not_found"]:
+                stats["not_found"] += 1
+            if vote_stats["skipped_no_bill"]:
+                stats["skipped_no_bill"] += 1
+            if vote_stats.get("bill_created"):
+                stats["bills_created"] += 1
+            if owns_session:
+                db_session.commit()
+
+        return stats
+    except Exception:
+        if owns_session:
+            db_session.rollback()
+        raise
+    finally:
+        if owns_session:
+            db_session.close()
+
+
+def sync_senate_congress_votes(congress, sessions=SENATE_SESSIONS):
+    """Backfill Senate member votes for every session of a congress."""
+    results = []
+    for index, session in enumerate(sessions, start=1):
+        print(
+            f"\n=== [{index}/{len(sessions)}] Senate congress {congress} "
+            f"session {session} ==="
+        )
+        stats = sync_senate_session_votes(congress, session)
+        results.append(stats)
+        if stats["menu_missing"]:
+            print(f"  No vote menu for session {session}; skipping.")
+    return results
+
+
 def sync_bill_votes(
     congress,
     bill_type,
@@ -924,12 +1750,12 @@ def sync_bill_votes(
     official_ids=None,
     ensure_bill=True,
 ):
-    """Ingest House roll-call positions for a bill into `votes`.
+    """Ingest House and Senate roll-call positions for a bill into `votes`.
 
-    Senate roll calls are skipped: Congress.gov has no Senate member-vote
-    endpoint, and Senate XML uses LIS ids rather than bioguide ids.
-    Multiple House roll calls on the same bill collapse to one row per
-    official; the latest roll call's position is kept.
+    House member votes come from Congress.gov. Senate member votes come from
+    Senate.gov roll-call XML, matched to officials by last name and state.
+    Multiple roll calls on the same bill collapse to one row per official;
+    the latest roll call's position is kept.
     """
     owns_session = session is None
     if owns_session:
@@ -938,6 +1764,7 @@ def sync_bill_votes(
     stats = {
         "bill_id": make_bill_id(congress, bill_type, bill_number),
         "house_roll_calls": 0,
+        "senate_roll_calls": 0,
         "senate_roll_calls_skipped": 0,
         "inserted": 0,
         "updated": 0,
@@ -981,19 +1808,51 @@ def sync_bill_votes(
         recorded = _recorded_votes_from_actions(actions)
         latest_by_official = {}
         unknown_officials = set()
+        senator_lookup = None
 
         for vote in recorded:
-            chamber = (vote.get("chamber") or "").strip()
-            if chamber.lower() != "house":
+            session_number = vote.get("sessionNumber")
+            roll_number = vote.get("rollNumber")
+            chamber = (vote.get("chamber") or "").strip().lower()
+
+            if chamber == "senate":
+                if session_number is None or roll_number is None:
+                    stats["senate_roll_calls_skipped"] += 1
+                    continue
+                if senator_lookup is None:
+                    senator_lookup = load_senator_lookup(session)
+                stats["senate_roll_calls"] += 1
+                print(
+                    f"  Senate roll call {roll_number} "
+                    f"(congress {vote.get('congress') or congress}, "
+                    f"session {session_number})"
+                )
+                senate_stats = sync_senate_votes(
+                    vote.get("congress") or congress,
+                    session_number,
+                    roll_number,
+                    db_session=session,
+                    senator_lookup=senator_lookup,
+                    expected_bill_id=bill_id,
+                )
+                stats["inserted"] += senate_stats["inserted"]
+                stats["updated"] += senate_stats["updated"]
+                stats["unchanged"] += senate_stats["unchanged"]
+                stats["skipped_unknown_officials"] += senate_stats[
+                    "skipped_unknown_officials"
+                ]
+                if senate_stats["not_found"] or senate_stats["skipped_no_bill"]:
+                    stats["senate_roll_calls_skipped"] += 1
+                continue
+
+            if chamber != "house":
                 stats["senate_roll_calls_skipped"] += 1
                 print(
-                    f"  Skipping {chamber} roll call {vote.get('rollNumber')} "
-                    f"on {bill_id} (no Senate member-vote API)."
+                    f"  Skipping {vote.get('chamber')} roll call "
+                    f"{vote.get('rollNumber')} on {bill_id}."
                 )
                 continue
 
-            session_number = vote.get("sessionNumber")
-            roll_number = vote.get("rollNumber")
             if session_number is None or roll_number is None:
                 continue
 
@@ -1019,28 +1878,14 @@ def sync_bill_votes(
                     continue
                 latest_by_official[bioguide_id] = position
 
-        stats["skipped_unknown_officials"] = len(unknown_officials)
+        stats["skipped_unknown_officials"] += len(unknown_officials)
 
-        existing_votes = {
-            row.official_id: row
-            for row in session.query(Vote).filter_by(bill_id=bill_id).all()
-        }
-        for official_id, position in latest_by_official.items():
-            current = existing_votes.get(official_id)
-            if current is None:
-                session.add(
-                    Vote(
-                        bill_id=bill_id,
-                        official_id=official_id,
-                        position=position,
-                    )
-                )
-                stats["inserted"] += 1
-            elif current.position != position:
-                current.position = position
-                stats["updated"] += 1
-            else:
-                stats["unchanged"] += 1
+        house_stats = _apply_vote_positions(
+            session, bill_id, latest_by_official
+        )
+        stats["inserted"] += house_stats["inserted"]
+        stats["updated"] += house_stats["updated"]
+        stats["unchanged"] += house_stats["unchanged"]
 
         if owns_session:
             session.commit()
@@ -1070,6 +1915,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
         "votes_updated": 0,
         "votes_unchanged": 0,
         "votes_skipped_unknown_officials": 0,
+        "senate_roll_calls": 0,
         "senate_roll_calls_skipped": 0,
         "house_roll_calls": 0,
     }
@@ -1146,6 +1992,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                 stats["votes_skipped_unknown_officials"] += vote_stats[
                     "skipped_unknown_officials"
                 ]
+                stats["senate_roll_calls"] += vote_stats.get("senate_roll_calls", 0)
                 stats["senate_roll_calls_skipped"] += vote_stats[
                     "senate_roll_calls_skipped"
                 ]
@@ -1181,6 +2028,7 @@ def _print_bill_stats(stats):
                 f"({missing['name'] or 'unknown name'})"
             )
     print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
+    print(f"  Senate roll calls ingested: {stats.get('senate_roll_calls', 0)}")
     print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
     print(f"  Votes inserted:             {stats['votes_inserted']}")
     print(f"  Votes updated:              {stats['votes_updated']}")
@@ -1194,11 +2042,80 @@ def _print_vote_stats(stats):
     print("\nVote ingest summary")
     print(f"  Bill:                       {stats['bill_id']}")
     print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
+    print(f"  Senate roll calls ingested: {stats.get('senate_roll_calls', 0)}")
     print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
     print(f"  Votes inserted:             {stats['inserted']}")
     print(f"  Votes updated:              {stats['updated']}")
     print(f"  Votes unchanged:            {stats['unchanged']}")
     print(f"  Votes skipped (no official): {stats['skipped_unknown_officials']}")
+
+
+def _print_senate_vote_stats(stats):
+    print("\nSenate vote ingest summary")
+    print(f"  Congress:                   {stats['congress']}")
+    print(f"  Session:                    {stats['session']}")
+    print(f"  Vote number:                {stats['vote_number']}")
+    print(f"  Bill:                       {stats['bill_id'] or 'none'}")
+    if stats["not_found"]:
+        print("  Result:                     XML not found")
+        return
+    if stats["skipped_no_bill"]:
+        print("  Result:                     skipped (no matching bill)")
+        return
+    print(f"  Votes inserted:             {stats['inserted']}")
+    print(f"  Votes updated:              {stats['updated']}")
+    print(f"  Votes unchanged:            {stats['unchanged']}")
+    print(f"  Votes skipped (no official): {stats['skipped_unknown_officials']}")
+
+
+def _print_senate_session_stats(stats):
+    print(f"\nSenate session {stats['session']} ingest summary")
+    print(f"  Congress:                   {stats['congress']}")
+    if stats["menu_missing"]:
+        print("  Result:                     vote menu not found")
+        return
+    print(f"  Menu roll calls:            {stats['menu_votes']}")
+    print(f"  Latest vote number:         {stats.get('latest_vote_number') or 'none'}")
+    print(f"  Already ingested/skipped:   {stats.get('already_done', 0)}")
+    print(f"  XML fetched:                {stats['fetched']}")
+    print(f"  Bills created from XML:     {stats.get('bills_created', 0)}")
+    print(f"  Skipped nominations:        {stats['skipped_nominations']}")
+    print(f"  Skipped (no matching bill): {stats['skipped_no_bill']}")
+    print(f"  XML not found:              {stats['not_found']}")
+    print(f"  Fetch/parse failures:       {stats['failed']}")
+    print(f"  Votes inserted:             {stats['inserted']}")
+    print(f"  Votes updated:              {stats['updated']}")
+    print(f"  Votes unchanged:            {stats['unchanged']}")
+    print(f"  Votes skipped (no official): {stats['skipped_unknown_officials']}")
+
+
+def _print_senate_congress_stats(results):
+    print("\nSenate congress ingest summary")
+    print(f"  Sessions:                   {len(results)}")
+    print(f"  Menu roll calls:            {sum(item['menu_votes'] for item in results)}")
+    print(
+        f"  Already ingested/skipped:   "
+        f"{sum(item.get('already_done', 0) for item in results)}"
+    )
+    print(f"  XML fetched:                {sum(item['fetched'] for item in results)}")
+    print(
+        f"  Bills created from XML:     "
+        f"{sum(item.get('bills_created', 0) for item in results)}"
+    )
+    print(
+        f"  Skipped nominations:        "
+        f"{sum(item['skipped_nominations'] for item in results)}"
+    )
+    print(
+        f"  Skipped (no matching bill): "
+        f"{sum(item['skipped_no_bill'] for item in results)}"
+    )
+    print(f"  Fetch/parse failures:       {sum(item['failed'] for item in results)}")
+    print(f"  Votes inserted:             {sum(item['inserted'] for item in results)}")
+    print(f"  Votes updated:              {sum(item['updated'] for item in results)}")
+    print(f"  Votes unchanged:            {sum(item['unchanged'] for item in results)}")
+    for item in results:
+        _print_senate_session_stats(item)
 
 
 def _print_sponsor_stats(stats):
@@ -1231,13 +2148,16 @@ def main():
             "members",
             "bills",
             "votes",
+            "senate-votes",
             "sponsors",
             "backfill-sponsors",
             "enrich",
         ],
         default="bills",
         help="members: current roster. bills: recent bills (default). "
-        "votes: roll calls for one bill. "
+        "votes: House and Senate roll calls for one bill. "
+        "senate-votes: Senate.gov roll-call XML (one vote, one session, "
+        "an entire congress, or incremental catch-up). "
         "backfill-sponsors: insert missing historical sponsors. "
         "enrich: fill policy area, CRS summary, and dates on existing bills.",
     )
@@ -1247,6 +2167,30 @@ def main():
         type=int,
         default=CURRENT_CONGRESS,
         help=f"Congress number for bill/vote sync (default {CURRENT_CONGRESS}).",
+    )
+    parser.add_argument(
+        "--session",
+        type=int,
+        default=1,
+        help="Senate session number for senate-votes (1 or 2, default 1).",
+    )
+    parser.add_argument(
+        "--all-sessions",
+        action="store_true",
+        help="When using senate-votes without --vote-number, ingest sessions "
+        "1 and 2 for the congress.",
+    )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Catch up Senate.gov roll calls using the vote menu and "
+        "senate_roll_calls cursor. Only fetches new or retryable votes.",
+    )
+    parser.add_argument(
+        "--vote-number",
+        type=int,
+        help="Senate roll-call number for a single senate-votes ingest. "
+        "Omit to backfill every legislation roll call in the session.",
     )
     parser.add_argument(
         "--skip-votes",
@@ -1279,6 +2223,27 @@ def main():
         ensure_schema()
         vote_stats = sync_bill_votes(args.congress, args.bill_type, args.bill_number)
         _print_vote_stats(vote_stats)
+        return
+
+    if args.command == "senate-votes":
+        if args.vote_number is not None and (args.all_sessions or args.incremental):
+            parser.error(
+                "senate-votes --vote-number cannot be combined with "
+                "--all-sessions or --incremental"
+            )
+        ensure_schema()
+        if args.vote_number is not None:
+            senate_stats = sync_senate_votes(
+                args.congress, args.session, args.vote_number
+            )
+            _print_senate_vote_stats(senate_stats)
+            return
+        if args.all_sessions or args.incremental:
+            congress_stats = sync_senate_congress_votes(args.congress)
+            _print_senate_congress_stats(congress_stats)
+            return
+        session_stats = sync_senate_session_votes(args.congress, args.session)
+        _print_senate_session_stats(session_stats)
         return
 
     bill_stats = sync_recent_bills(

@@ -81,6 +81,11 @@ def ensure_schema():
             WHERE b.sponsor_id = o.id AND b.sponsor_name IS NULL
             """
         ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_senate_roll_calls_congress_session_vote "
+            "ON senate_roll_calls (congress, session, vote_number)"
+        ))
 
 
 def main():

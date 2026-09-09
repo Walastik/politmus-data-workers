@@ -1,0 +1,34 @@
+name: Senate Votes Ingestion
+
+on:
+  schedule:
+    # Every 6 hours at :45 UTC, offset from Congress ingest (minute 0)
+    # and OpenStates (03:00/15:00). Also runs after Congress ingest so
+    # newly stored bills can unlock previously skipped Senate votes.
+    - cron: '45 */6 * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Congress Data Ingestion"]
+    types: [completed]
+
+concurrency:
+  group: senate-votes-ingest
+  cancel-in-progress: false
+
+jobs:
+  sync_senate_votes:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Scripts run on the API machine so they use Fly's private DATABASE_URL.
+      # Compares the Senate.gov vote menu to senate_roll_calls and only
+      # fetches XML for new roll calls or retries (bill now present, prior failure).
+      - name: Catch up Senate.gov roll-call votes
+        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/congress_client.py senate-votes --incremental"

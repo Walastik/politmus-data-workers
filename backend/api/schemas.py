@@ -47,7 +47,7 @@ class BillOut(BaseModel):
 
 
 class BillDetailOut(BillOut):
-    votes_summary: dict[str, int] = Field(default_factory=dict)
+    votes_summary: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 class HealthOut(BaseModel):

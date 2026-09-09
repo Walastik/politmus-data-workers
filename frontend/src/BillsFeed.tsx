@@ -2,12 +2,8 @@ import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer, { BillDates, PolicyAreaTag } from './BillDrawer'
-import VoteTallyBar from './VoteTallyBar'
+import VoteTallyBar, { voteTotal } from './VoteTallyBar'
 import type { Bill } from './types'
-
-function voteTotal(summary: Bill['votes_summary']) {
-  return Object.values(summary).reduce((sum, count) => sum + count, 0)
-}
 
 export default function BillsFeed() {
   const [bills, setBills] = useState<Bill[]>([])

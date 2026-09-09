@@ -59,7 +59,7 @@ Talks to Congress.gov and writes into Postgres. Commands:
 python congress_client.py members
 ```
 
-**Recent bills and House roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date and latest recorded-vote date), then loads House member votes into `votes` when a bill has roll calls:
+**Recent bills and roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date and latest recorded-vote date), then loads House member votes from Congress.gov and Senate member votes from Senate.gov XML:
 
 ```bash
 python congress_client.py
@@ -70,10 +70,31 @@ python congress_client.py bills --congress 119 --limit 20
 
 If a bill has a sponsor who is not in `officials`, the row is still saved. `sponsor_id` is left null (so the foreign key stays valid), and the Congress.gov name and Bioguide ID are stored on the bill. The script logs a warning and lists those gaps in the summary.
 
-**Votes for one bill** — loads House roll-call positions for a specific bill. Senate roll calls are skipped (Congress.gov has no Senate member-vote API):
+**Votes for one bill** — loads House roll-call positions from Congress.gov and Senate member votes from Senate.gov XML:
 
 ```bash
 python congress_client.py votes --congress 119 --bill-type hr --bill-number 1
+```
+
+**One Senate roll call** — fetches the official Senate.gov XML for a specific vote, matches senators in `officials` by last name and state, and upserts positions into `votes`:
+
+```bash
+python congress_client.py senate-votes --congress 119 --session 1 --vote-number 1
+```
+
+**Backfill / incremental Senate votes** — reads the Senate.gov vote menu (the list of every roll call in a session), compares it to the `senate_roll_calls` cursor table, and only fetches XML for votes we have not already handled. Nominations are recorded without a member-vote download. If a legislation vote names a bill that is not in Postgres yet, the script creates that bill from the Senate XML (title and vote date) and stores the member votes on it. Run `enrich` afterward to fill CRS summaries and policy areas. Oldest-first so the latest roll call on a bill wins.
+
+One-time production backfill (SSH into the API machine after deploying this code):
+
+```bash
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py senate-votes --congress 119 --all-sessions"
+```
+
+Catch-up after that (same command the GitHub Action runs):
+
+```bash
+python congress_client.py senate-votes --incremental
+python congress_client.py senate-votes --congress 119 --session 1
 ```
 
 **Enrich existing bills** — fills missing policy area, CRS summary, introduced date, and latest recorded-vote date:
@@ -133,7 +154,7 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 ### GitHub Actions ingest
 
-Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours in a separate workflow and concurrency group so a long state ingest does not block Congress. Add one GitHub Actions secret:
+Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. Add one GitHub Actions secret:
 
 ```bash
 fly tokens create org
@@ -146,11 +167,12 @@ Use an org or personal token, not a deploy-only token (`fly ssh` rejects those).
 fly secrets set OPENSTATES_API_KEY=your_key_here -a politmus-api
 ```
 
-Then run **Congress Data Ingestion** or **OpenStates Data Ingestion** from the Actions tab, or load data once by hand:
+Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, or **Senate Votes Ingestion** from the Actions tab, or load data once by hand:
 
 ```bash
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py members"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py bills"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py enrich"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py senate-votes --congress 119 --all-sessions"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 ```

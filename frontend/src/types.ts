@@ -24,6 +24,19 @@ export interface OfficialDetail extends Official {
   votes: OfficialVote[]
 }
 
+export interface ChamberVoteSummary {
+  Yes?: number
+  No?: number
+  Present?: number
+  'Not Voting'?: number
+  [position: string]: number | undefined
+}
+
+export interface BillVoteSummary {
+  house: ChamberVoteSummary
+  senate: ChamberVoteSummary
+}
+
 export interface Bill {
   id: string
   title: string | null
@@ -34,7 +47,7 @@ export interface Bill {
   summary: string | null
   introduced_date: string | null
   voted_date: string | null
-  votes_summary: Record<string, number>
+  votes_summary: BillVoteSummary
 }
 
 export interface CivicAddress {
