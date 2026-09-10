@@ -13,6 +13,10 @@ PARTY_ALIASES = {
     "I": "Independent",
     "IND": "Independent",
     "INDEPENDENT": "Independent",
+    "ID": "Independent",
+    "L": "Libertarian",
+    "LIB": "Libertarian",
+    "LIBERTARIAN": "Libertarian",
 }
 
 # Congress.gov stores full state names. Accept postal abbreviations too.

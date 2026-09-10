@@ -1,4 +1,5 @@
 from sqlalchemy import Boolean, Column, Date, DateTime, String, Integer, ForeignKey, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -29,6 +30,11 @@ class Bill(Base):
     # Congress.gov sponsor identity, kept even when the member is not in officials.
     sponsor_bioguide_id = Column(String, nullable=True)
     sponsor_name = Column(String, nullable=True)
+    sponsor_party = Column(String, nullable=True)
+    # Current (non-withdrawn) cosponsor counts by party, e.g. {"Democratic": 12, "Republican": 3}.
+    cosponsor_party_breakdown = Column(JSONB, nullable=True)
+    # single_party, bipartisan (both major parties), or tripartisan (includes Independent).
+    bipartisan_type = Column(String, nullable=True)
     policy_area = Column(String, nullable=True)
     summary = Column(Text, nullable=True)
     introduced_date = Column(Date, nullable=True)

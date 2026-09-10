@@ -43,6 +43,9 @@ export interface Bill {
   sponsor_id: string | null
   sponsor_bioguide_id: string | null
   sponsor_name: string | null
+  sponsor_party: string | null
+  cosponsor_party_breakdown: Record<string, number> | null
+  bipartisan_type: 'single_party' | 'bipartisan' | 'tripartisan' | null
   policy_area: string | null
   summary: string | null
   introduced_date: string | null
@@ -175,7 +178,27 @@ export function partyShort(party: string) {
   if (party === 'Democratic') return 'D'
   if (party === 'Republican') return 'R'
   if (party === 'Independent') return 'I'
+  if (party === 'Libertarian') return 'L'
   return party
+}
+
+export function bipartisanTypeLabel(type: Bill['bipartisan_type']) {
+  if (type === 'single_party') return 'Single party'
+  if (type === 'bipartisan') return 'Bipartisan'
+  if (type === 'tripartisan') return 'Tripartisan'
+  return null
+}
+
+export function formatCosponsorBreakdown(
+  breakdown: Record<string, number> | null | undefined,
+) {
+  if (!breakdown) {
+    return null
+  }
+  const parts = Object.entries(breakdown)
+    .filter(([, count]) => count > 0)
+    .map(([party, count]) => `${partyShort(party)} ${count}`)
+  return parts.length ? parts.join(' · ') : 'No cosponsors'
 }
 
 export function rosterStatusLabel(official: Official) {

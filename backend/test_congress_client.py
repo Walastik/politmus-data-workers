@@ -418,5 +418,142 @@ class EnsureSenateBillTests(unittest.TestCase):
         session.merge.assert_not_called()
 
 
+class CosponsorPartisanshipTests(unittest.TestCase):
+    def test_maps_congress_party_codes(self):
+        from congress_client import _party_name_from_code
+
+        self.assertEqual(_party_name_from_code("D"), "Democratic")
+        self.assertEqual(_party_name_from_code("R"), "Republican")
+        self.assertEqual(_party_name_from_code("I"), "Independent")
+        self.assertEqual(_party_name_from_code("ID"), "Independent")
+        self.assertEqual(_party_name_from_code("L"), "Libertarian")
+        self.assertEqual(_party_name_from_code("Democratic"), "Democratic")
+        self.assertIsNone(_party_name_from_code(None))
+        self.assertIsNone(_party_name_from_code("  "))
+
+    def test_counts_current_cosponsors_and_skips_withdrawn(self):
+        from congress_client import _cosponsor_party_breakdown
+
+        breakdown = _cosponsor_party_breakdown(
+            [
+                {"party": "D"},
+                {"party": "D"},
+                {"party": "R"},
+                {"party": "I"},
+                {"party": "D", "sponsorshipWithdrawnDate": "2025-02-01"},
+                {"party": None},
+            ]
+        )
+        self.assertEqual(
+            breakdown,
+            {"Democratic": 2, "Independent": 1, "Republican": 1},
+        )
+
+    def test_empty_cosponsor_list_is_empty_breakdown(self):
+        from congress_client import _cosponsor_party_breakdown
+
+        self.assertEqual(_cosponsor_party_breakdown([]), {})
+        self.assertEqual(_cosponsor_party_breakdown(None), {})
+
+    def test_classifies_single_party_bipartisan_and_tripartisan(self):
+        from congress_client import classify_bipartisan_type
+
+        self.assertEqual(
+            classify_bipartisan_type("Democratic", {}),
+            "single_party",
+        )
+        self.assertEqual(
+            classify_bipartisan_type("Democratic", {"Republican": 3}),
+            "bipartisan",
+        )
+        self.assertEqual(
+            classify_bipartisan_type(
+                "Democratic",
+                {"Democratic": 12, "Republican": 3},
+            ),
+            "bipartisan",
+        )
+        self.assertEqual(
+            classify_bipartisan_type(
+                "Democratic",
+                {"Democratic": 10, "Independent": 1},
+            ),
+            "tripartisan",
+        )
+        self.assertEqual(
+            classify_bipartisan_type(
+                "Democratic",
+                {"Democratic": 10, "Republican": 2, "Independent": 1},
+            ),
+            "tripartisan",
+        )
+        self.assertIsNone(classify_bipartisan_type(None, {}))
+        self.assertIsNone(classify_bipartisan_type(None, None))
+
+    def test_sponsorship_fields_combine_sponsor_and_cosponsors(self):
+        from congress_client import _sponsorship_fields
+
+        sponsor_party, breakdown, bipartisan_type = _sponsorship_fields(
+            {"sponsors": [{"party": "R", "fullName": "Rep. Example"}]},
+            [{"party": "D"}, {"party": "D"}, {"party": "R"}],
+        )
+        self.assertEqual(sponsor_party, "Republican")
+        self.assertEqual(breakdown, {"Democratic": 2, "Republican": 1})
+        self.assertEqual(bipartisan_type, "bipartisan")
+
+    @patch("congress_client.congress_get")
+    def test_fetch_bill_cosponsors_follows_pagination(self, mock_get):
+        from congress_client import fetch_bill_cosponsors
+
+        mock_get.side_effect = [
+            {
+                "cosponsors": [{"party": "D"}],
+                "pagination": {"next": "https://api.congress.gov/v3/next"},
+            },
+            {
+                "cosponsors": [{"party": "R"}],
+                "pagination": {},
+            },
+        ]
+        cosponsors = fetch_bill_cosponsors(119, "hr", 1)
+        self.assertEqual(len(cosponsors), 2)
+        self.assertEqual(mock_get.call_count, 2)
+        first_url = mock_get.call_args_list[0].args[0]
+        self.assertIn("/bill/119/hr/1/cosponsors", first_url)
+
+    @patch("congress_client.fetch_bill_cosponsors")
+    def test_load_sponsorship_fields_records_counts(self, mock_fetch):
+        from congress_client import _load_sponsorship_fields
+
+        mock_fetch.return_value = [{"party": "D"}, {"party": "R"}]
+        sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
+            119,
+            "hr",
+            1,
+            {"sponsors": [{"party": "D"}]},
+        )
+        self.assertEqual(sponsor_party, "Democratic")
+        self.assertEqual(breakdown, {"Democratic": 1, "Republican": 1})
+        self.assertEqual(bipartisan_type, "bipartisan")
+        mock_fetch.assert_called_once_with(119, "hr", 1)
+
+    @patch("congress_client.fetch_bill_cosponsors")
+    def test_load_sponsorship_fields_keeps_sponsor_when_fetch_fails(
+        self, mock_fetch
+    ):
+        from congress_client import _load_sponsorship_fields
+
+        mock_fetch.side_effect = RuntimeError("rate limited")
+        sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
+            119,
+            "s",
+            5,
+            {"sponsors": [{"party": "R"}]},
+        )
+        self.assertEqual(sponsor_party, "Republican")
+        self.assertIsNone(breakdown)
+        self.assertIsNone(bipartisan_type)
+
+
 if __name__ == "__main__":
     unittest.main()

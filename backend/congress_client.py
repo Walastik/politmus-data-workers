@@ -9,7 +9,7 @@ import requests
 from dotenv import load_dotenv
 from sqlalchemy import and_, exists, or_
 
-from api.filters import normalize_state
+from api.filters import normalize_party, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Bill, Official, SenateRollCall, Vote
@@ -1069,7 +1069,7 @@ def _latest_summary_text(summaries):
 
 
 def sync_bill_enrichment():
-    """Fill missing policy area, summary, and bill dates from Congress.gov."""
+    """Fill missing policy area, summary, dates, and sponsorship fields."""
     _require_api_key()
     ensure_schema()
     session = SessionLocal()
@@ -1079,6 +1079,8 @@ def sync_bill_enrichment():
         "summaries_set": 0,
         "introduced_dates_set": 0,
         "voted_dates_set": 0,
+        "sponsor_party_set": 0,
+        "cosponsor_breakdowns_set": 0,
         "bills_failed": 0,
         "bills_unchanged": 0,
     }
@@ -1092,6 +1094,9 @@ def sync_bill_enrichment():
                     Bill.policy_area.is_(None),
                     Bill.summary.is_(None),
                     Bill.introduced_date.is_(None),
+                    Bill.sponsor_party.is_(None),
+                    Bill.cosponsor_party_breakdown.is_(None),
+                    Bill.bipartisan_type.is_(None),
                     and_(Bill.voted_date.is_(None), has_votes),
                 )
             )
@@ -1101,7 +1106,7 @@ def sync_bill_enrichment():
         stats["bills_pending"] = len(bills)
         print(
             f"Found {len(bills)} bill(s) missing policy area, summary, "
-            "introduced date, and/or vote date."
+            "dates, and/or sponsorship fields."
         )
 
         for index, bill in enumerate(bills, start=1):
@@ -1114,28 +1119,60 @@ def sync_bill_enrichment():
             congress, bill_type, number = parsed
             print(f"[{index}/{len(bills)}] {bill.id} — enriching...")
             changed = False
+            detail = None
 
-            if bill.introduced_date is None:
+            needs_detail = (
+                bill.introduced_date is None
+                or bill.sponsor_party is None
+                or bill.cosponsor_party_breakdown is None
+                or bill.bipartisan_type is None
+            )
+            if needs_detail:
                 try:
                     detail = fetch_bill_detail(congress, bill_type, number)
-                    introduced_date = _introduced_date_from_detail(detail)
-                    if introduced_date:
-                        bill.introduced_date = introduced_date
-                        stats["introduced_dates_set"] += 1
-                        changed = True
-                        print(f"  introduced_date={introduced_date.isoformat()}")
-                    else:
-                        print("  No introducedDate on bill detail.")
                 except requests.HTTPError as exc:
                     status = getattr(exc.response, "status_code", "?")
                     print(
                         f"  HTTP {status} fetching bill detail; "
-                        "skipping introduced date."
+                        "skipping introduced date and sponsorship."
                     )
                     stats["bills_failed"] += 1
                 except (requests.RequestException, RuntimeError) as exc:
                     print(f"  Failed to fetch bill detail: {exc}")
                     stats["bills_failed"] += 1
+
+            if bill.introduced_date is None and detail is not None:
+                introduced_date = _introduced_date_from_detail(detail)
+                if introduced_date:
+                    bill.introduced_date = introduced_date
+                    stats["introduced_dates_set"] += 1
+                    changed = True
+                    print(f"  introduced_date={introduced_date.isoformat()}")
+                else:
+                    print("  No introducedDate on bill detail.")
+
+            if detail is not None and (
+                bill.sponsor_party is None
+                or bill.cosponsor_party_breakdown is None
+                or bill.bipartisan_type is None
+            ):
+                sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
+                    congress, bill_type, number, detail
+                )
+                if bill.sponsor_party is None and sponsor_party:
+                    bill.sponsor_party = sponsor_party
+                    stats["sponsor_party_set"] += 1
+                    changed = True
+                    print(f"  sponsor_party={sponsor_party!r}")
+                if bill.cosponsor_party_breakdown is None and breakdown is not None:
+                    bill.cosponsor_party_breakdown = breakdown
+                    stats["cosponsor_breakdowns_set"] += 1
+                    changed = True
+                    print(f"  cosponsor_party_breakdown={breakdown}")
+                if bill.bipartisan_type is None and bipartisan_type:
+                    bill.bipartisan_type = bipartisan_type
+                    changed = True
+                    print(f"  bipartisan_type={bipartisan_type}")
 
             if bill.policy_area is None:
                 try:
@@ -1260,11 +1297,111 @@ def fetch_house_vote_members(congress, session_number, roll_number):
     return members
 
 
+BIPARTISAN_SINGLE_PARTY = "single_party"
+BIPARTISAN_BIPARTISAN = "bipartisan"
+BIPARTISAN_TRIPARTISAN = "tripartisan"
+MAJOR_PARTIES = frozenset({"Democratic", "Republican"})
+
+
 def _sponsor_record(detail):
     sponsors = detail.get("sponsors") or []
     if not sponsors:
         return {}
     return sponsors[0] or {}
+
+
+def _party_name_from_code(value):
+    """Map Congress.gov party codes (D, R, I) to stored full names."""
+    if not value:
+        return None
+    stripped = str(value).strip()
+    if not stripped:
+        return None
+    return normalize_party(stripped)
+
+
+def _is_withdrawn_cosponsor(cosponsor):
+    return bool(cosponsor.get("sponsorshipWithdrawnDate"))
+
+
+def _cosponsor_party_breakdown(cosponsors):
+    """Count current (non-withdrawn) cosponsors by party name."""
+    counts = {}
+    for item in cosponsors or []:
+        if _is_withdrawn_cosponsor(item):
+            continue
+        party = _party_name_from_code(item.get("party") or item.get("partyName"))
+        if not party:
+            continue
+        counts[party] = counts.get(party, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def classify_bipartisan_type(sponsor_party, party_breakdown):
+    """Classify a measure from its sponsor party plus cosponsor parties.
+
+    Both major parties (Democratic and Republican) → bipartisan.
+    Any Independent (or other non-major party) → tripartisan.
+    Otherwise → single_party. Returns None when no party data is present.
+    """
+    parties = set()
+    if sponsor_party:
+        parties.add(sponsor_party)
+    parties.update((party_breakdown or {}).keys())
+    if not parties:
+        return None
+    has_third_party = bool(parties - MAJOR_PARTIES)
+    if has_third_party:
+        return BIPARTISAN_TRIPARTISAN
+    if "Democratic" in parties and "Republican" in parties:
+        return BIPARTISAN_BIPARTISAN
+    return BIPARTISAN_SINGLE_PARTY
+
+
+def _sponsorship_fields(detail, cosponsors):
+    sponsor = _sponsor_record(detail)
+    sponsor_party = _party_name_from_code(
+        sponsor.get("party") or sponsor.get("partyName")
+    )
+    breakdown = _cosponsor_party_breakdown(cosponsors)
+    return sponsor_party, breakdown, classify_bipartisan_type(sponsor_party, breakdown)
+
+
+def _load_sponsorship_fields(congress, bill_type, number, detail):
+    """Sponsor party from bill detail; cosponsor counts from /cosponsors.
+
+    If the cosponsors request fails, still save sponsor_party and leave
+    cosponsor counts / bipartisan_type unset so we do not mis-classify.
+    """
+    sponsor = _sponsor_record(detail)
+    sponsor_party = _party_name_from_code(
+        sponsor.get("party") or sponsor.get("partyName")
+    )
+    try:
+        cosponsors = fetch_bill_cosponsors(congress, bill_type, number)
+    except requests.HTTPError as exc:
+        status = getattr(exc.response, "status_code", "?")
+        print(f"  HTTP {status} fetching cosponsors; skipping party breakdown.")
+        return sponsor_party, None, None
+    except (requests.RequestException, RuntimeError) as exc:
+        print(f"  Failed to fetch cosponsors: {exc}")
+        return sponsor_party, None, None
+    return _sponsorship_fields(detail, cosponsors)
+
+
+def fetch_bill_cosponsors(congress, bill_type, number):
+    """All cosponsors for a bill, following Congress.gov pagination."""
+    url = f"{BASE_URL}/bill/{congress}/{str(bill_type).lower()}/{number}/cosponsors"
+    params = {"limit": PAGE_SIZE, "format": "json"}
+    cosponsors = []
+
+    while url:
+        payload = congress_get(url, params=params)
+        cosponsors.extend(payload.get("cosponsors") or [])
+        url = (payload.get("pagination") or {}).get("next")
+        params = None
+
+    return cosponsors
 
 
 def _sponsor_display_name(sponsor):
@@ -1297,6 +1434,9 @@ def upsert_bill(
     sponsor_id,
     sponsor_bioguide_id=None,
     sponsor_name=None,
+    sponsor_party=None,
+    cosponsor_party_breakdown=None,
+    bipartisan_type=None,
     policy_area=None,
     summary=None,
     introduced_date=None,
@@ -1310,6 +1450,21 @@ def upsert_bill(
             sponsor_id=sponsor_id,
             sponsor_bioguide_id=sponsor_bioguide_id,
             sponsor_name=sponsor_name,
+            sponsor_party=(
+                sponsor_party
+                if sponsor_party is not None
+                else (existing.sponsor_party if existing else None)
+            ),
+            cosponsor_party_breakdown=(
+                cosponsor_party_breakdown
+                if cosponsor_party_breakdown is not None
+                else (existing.cosponsor_party_breakdown if existing else None)
+            ),
+            bipartisan_type=(
+                bipartisan_type
+                if bipartisan_type is not None
+                else (existing.bipartisan_type if existing else None)
+            ),
             policy_area=(
                 policy_area
                 if policy_area is not None
@@ -1786,6 +1941,9 @@ def sync_bill_votes(
             sponsor_id = _resolve_sponsor_id(bioguide_id, official_ids)
             if bioguide_id and sponsor_id is None:
                 _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name)
+            sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
+                congress, bill_type, bill_number, detail
+            )
             upsert_bill(
                 session,
                 bill_id,
@@ -1793,6 +1951,9 @@ def sync_bill_votes(
                 sponsor_id,
                 sponsor_bioguide_id=bioguide_id,
                 sponsor_name=sponsor_name,
+                sponsor_party=sponsor_party,
+                cosponsor_party_breakdown=breakdown,
+                bipartisan_type=bipartisan_type,
                 introduced_date=_introduced_date_from_detail(detail),
             )
         elif existing_bill is None:
@@ -1910,6 +2071,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
         "bills_with_sponsor": 0,
         "bills_without_sponsor": 0,
         "bills_missing_official": 0,
+        "bills_with_cosponsors": 0,
         "missing_sponsors": [],
         "votes_inserted": 0,
         "votes_updated": 0,
@@ -1955,6 +2117,9 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                     }
                 )
 
+            sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
+                item_congress, bill_type, number, detail
+            )
             upsert_bill(
                 session,
                 bill_id,
@@ -1962,6 +2127,9 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                 sponsor_id,
                 sponsor_bioguide_id=bioguide_id,
                 sponsor_name=sponsor_name,
+                sponsor_party=sponsor_party,
+                cosponsor_party_breakdown=breakdown,
+                bipartisan_type=bipartisan_type,
                 introduced_date=_introduced_date_from_detail(detail),
             )
             stats["bills_upserted"] += 1
@@ -1969,11 +2137,16 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                 stats["bills_with_sponsor"] += 1
             elif not bioguide_id:
                 stats["bills_without_sponsor"] += 1
+            if breakdown is not None:
+                stats["bills_with_cosponsors"] += 1
 
             title_preview = (title or "")[:80]
             print(
                 f"  Upserted {bill_id} sponsor={sponsor_id or 'NULL'} "
                 f"sponsor_name={sponsor_name or 'NULL'!r} "
+                f"sponsor_party={sponsor_party or 'NULL'!r} "
+                f"bipartisan_type={bipartisan_type or 'NULL'} "
+                f"cosponsors={breakdown if breakdown is not None else 'NULL'} "
                 f"title={title_preview!r}"
             )
 
@@ -2020,6 +2193,7 @@ def _print_bill_stats(stats):
     print(f"  Bills with linked official: {stats['bills_with_sponsor']}")
     print(f"  Bills with no sponsor:      {stats['bills_without_sponsor']}")
     print(f"  Sponsors missing from roster: {stats['bills_missing_official']}")
+    print(f"  Bills with cosponsor counts: {stats.get('bills_with_cosponsors', 0)}")
     if stats["missing_sponsors"]:
         print("  Missing roster members:")
         for missing in stats["missing_sponsors"]:
@@ -2133,6 +2307,8 @@ def _print_enrichment_stats(stats):
     print(f"  Summaries set:          {stats['summaries_set']}")
     print(f"  Introduced dates set:   {stats['introduced_dates_set']}")
     print(f"  Vote dates set:         {stats['voted_dates_set']}")
+    print(f"  Sponsor parties set:    {stats.get('sponsor_party_set', 0)}")
+    print(f"  Cosponsor breakdowns:   {stats.get('cosponsor_breakdowns_set', 0)}")
     print(f"  Unchanged (no data):    {stats['bills_unchanged']}")
     print(f"  Fetch/parse failures:   {stats['bills_failed']}")
 
@@ -2159,7 +2335,8 @@ def main():
         "senate-votes: Senate.gov roll-call XML (one vote, one session, "
         "an entire congress, or incremental catch-up). "
         "backfill-sponsors: insert missing historical sponsors. "
-        "enrich: fill policy area, CRS summary, and dates on existing bills.",
+        "enrich: fill policy area, CRS summary, dates, and sponsorship "
+        "on existing bills.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(

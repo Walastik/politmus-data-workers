@@ -40,6 +40,9 @@ class BillOut(BaseModel):
     sponsor_id: Optional[str] = None
     sponsor_bioguide_id: Optional[str] = None
     sponsor_name: Optional[str] = None
+    sponsor_party: Optional[str] = None
+    cosponsor_party_breakdown: Optional[dict[str, int]] = None
+    bipartisan_type: Optional[str] = None
     policy_area: Optional[str] = None
     summary: Optional[str] = None
     introduced_date: Optional[date] = None

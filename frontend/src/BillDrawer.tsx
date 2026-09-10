@@ -3,7 +3,13 @@ import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
 import VoteTallyBar from './VoteTallyBar'
-import { formatBillDate, sanitizeCrsHtml, type Bill } from './types'
+import {
+  bipartisanTypeLabel,
+  formatBillDate,
+  formatCosponsorBreakdown,
+  sanitizeCrsHtml,
+  type Bill,
+} from './types'
 
 export default function BillDrawer({
   bill,
@@ -85,8 +91,10 @@ export default function BillDrawer({
             </h2>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <PolicyAreaTag area={view.policy_area} />
+              <BipartisanTag type={view.bipartisan_type} />
               <SponsorTag bill={view} />
             </div>
+            <CosponsorLine bill={view} className="mt-2" />
             <BillDates bill={view} className="mt-3" />
           </div>
           <button
@@ -131,6 +139,56 @@ export function PolicyAreaTag({ area }: { area: string | null }) {
     <span className="rounded-full bg-blue-900/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-300">
       {area}
     </span>
+  )
+}
+
+export function BipartisanTag({
+  type,
+}: {
+  type: Bill['bipartisan_type']
+}) {
+  const label = bipartisanTypeLabel(type)
+  if (!label) {
+    return null
+  }
+  const color =
+    type === 'tripartisan'
+      ? 'bg-emerald-900/50 text-emerald-300'
+      : type === 'bipartisan'
+        ? 'bg-violet-900/50 text-violet-300'
+        : 'bg-slate-700/80 text-slate-300'
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${color}`}
+    >
+      {label}
+    </span>
+  )
+}
+
+function CosponsorLine({
+  bill,
+  className = '',
+}: {
+  bill: Bill
+  className?: string
+}) {
+  const hasBreakdown = bill.cosponsor_party_breakdown != null
+  const breakdown = formatCosponsorBreakdown(bill.cosponsor_party_breakdown)
+  if (!bill.sponsor_party && !hasBreakdown) {
+    return null
+  }
+  const cosponsorText = hasBreakdown
+    ? breakdown === 'No cosponsors'
+      ? 'No cosponsors'
+      : `Cosponsors ${breakdown}`
+    : null
+  return (
+    <p className={`text-xs text-slate-400 ${className}`.trim()}>
+      {bill.sponsor_party ? `Sponsor ${bill.sponsor_party}` : null}
+      {bill.sponsor_party && cosponsorText ? ' · ' : null}
+      {cosponsorText}
+    </p>
   )
 }
 

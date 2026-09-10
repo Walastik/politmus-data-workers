@@ -55,6 +55,16 @@ def ensure_schema():
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_name VARCHAR"
         ))
         conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS sponsor_party VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS "
+            "cosponsor_party_breakdown JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS bipartisan_type VARCHAR"
+        ))
+        conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS policy_area VARCHAR"
         ))
         conn.execute(text(
