@@ -89,6 +89,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
             OfficialVoteOut(
                 bill_id=bill.id,
                 bill_title=bill.title,
+                bill_summary=bill.summary,
                 position=vote.position,
                 sponsor_name=bill.sponsor_name,
             )

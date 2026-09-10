@@ -24,6 +24,7 @@ class OfficialOut(BaseModel):
 class OfficialVoteOut(BaseModel):
     bill_id: str
     bill_title: Optional[str] = None
+    bill_summary: Optional[str] = None
     position: Optional[str] = None
     sponsor_name: Optional[str] = None
 

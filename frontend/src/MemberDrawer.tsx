@@ -1,5 +1,5 @@
-import { Globe, MapPin, Phone, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Globe, MapPin, Phone, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
@@ -26,6 +26,7 @@ export default function MemberDrawer({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
+  const [voteQuery, setVoteQuery] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -33,6 +34,7 @@ export default function MemberDrawer({
     setError(null)
     setDetail(null)
     setSelectedBill(null)
+    setVoteQuery('')
 
     fetch(apiUrl(`/api/officials/${encodeURIComponent(official.id)}`), { signal: controller.signal })
       .then(async (res) => {
@@ -68,6 +70,10 @@ export default function MemberDrawer({
   }, [onClose, selectedBill])
 
   const votes = detail?.votes ?? []
+  const filteredVotes = useMemo(
+    () => votes.filter((vote) => voteMatchesSearch(vote, voteQuery)),
+    [votes, voteQuery],
+  )
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
@@ -128,35 +134,65 @@ export default function MemberDrawer({
               No recorded votes in the ingested bills.
             </p>
           ) : (
-            <ul className="mt-3 space-y-3">
-              {votes.map((vote) => (
-                <li key={`${vote.bill_id}-${vote.position}`}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedBill(billFromVote(vote))}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-800/60 p-3 text-left transition hover:border-slate-500 hover:bg-slate-800"
-                    aria-label={`Open details for ${vote.bill_title || vote.bill_id}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="font-mono text-xs text-slate-400">{vote.bill_id}</p>
-                      <span
-                        className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${positionBadgeClass(vote.position)}`}
+            <>
+              <label className="relative mt-3 block">
+                <span className="sr-only">
+                  Search recorded votes by bill title, CRS summary, bill ID, or yes/no
+                </span>
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+                  aria-hidden="true"
+                />
+                <input
+                  type="search"
+                  value={voteQuery}
+                  onChange={(event) => setVoteQuery(event.target.value)}
+                  placeholder="Title, summary, bill ID, or yes/no"
+                  className="w-full rounded border border-slate-700 bg-slate-800 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+                />
+              </label>
+              {voteQuery.trim() ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Showing {filteredVotes.length} of {votes.length}{' '}
+                  {votes.length === 1 ? 'vote' : 'votes'}
+                </p>
+              ) : null}
+              {filteredVotes.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-400">
+                  No recorded votes match this search.
+                </p>
+              ) : (
+                <ul className="mt-3 space-y-3">
+                  {filteredVotes.map((vote) => (
+                    <li key={`${vote.bill_id}-${vote.position}`}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBill(billFromVote(vote))}
+                        className="w-full rounded-lg border border-slate-800 bg-slate-800/60 p-3 text-left transition hover:border-slate-500 hover:bg-slate-800"
+                        aria-label={`Open details for ${vote.bill_title || vote.bill_id}`}
                       >
-                        {vote.position ?? 'Unknown'}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm font-medium leading-snug">
-                      {vote.bill_title || 'Untitled bill'}
-                    </p>
-                    {vote.sponsor_name ? (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Sponsor: {vote.sponsor_name}
-                      </p>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="font-mono text-xs text-slate-400">{vote.bill_id}</p>
+                          <span
+                            className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${positionBadgeClass(vote.position)}`}
+                          >
+                            {vote.position ?? 'Unknown'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm font-medium leading-snug">
+                          {vote.bill_title || 'Untitled bill'}
+                        </p>
+                        {vote.sponsor_name ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Sponsor: {vote.sponsor_name}
+                          </p>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </div>
       </aside>
@@ -243,6 +279,79 @@ function websiteLabel(url: string) {
   }
 }
 
+function compactAlphanumeric(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function isVotePositionQuery(query: string) {
+  return query === 'yes' || query === 'no'
+}
+
+function billIdMatches(billId: string, query: string) {
+  const id = billId.toLowerCase()
+  const q = query.toLowerCase()
+  if (id === q) {
+    return true
+  }
+  const compactId = compactAlphanumeric(billId)
+  const compactQuery = compactAlphanumeric(query)
+  if (!compactQuery) {
+    return false
+  }
+  if (compactId === compactQuery) {
+    return true
+  }
+  return /\d/.test(compactQuery) && compactId.includes(compactQuery)
+}
+
+function searchableText(value: string | null) {
+  if (!value) {
+    return ''
+  }
+  return value.replace(/<[^>]+>/g, ' ')
+}
+
+function looksLikeBillIdQuery(query: string) {
+  return /^\d+[a-z]+\d+$/.test(compactAlphanumeric(query))
+}
+
+function fuzzyTextMatch(value: string | null, query: string) {
+  const haystack = normalizeSearchText(searchableText(value))
+  if (!haystack) {
+    return false
+  }
+  const needle = normalizeSearchText(query)
+  if (!needle) {
+    return true
+  }
+  if (haystack.includes(needle)) {
+    return true
+  }
+  const tokens = needle.split(/\s+/).filter(Boolean)
+  return tokens.length > 0 && tokens.every((token) => haystack.includes(token))
+}
+
+function voteMatchesSearch(vote: OfficialVote, rawQuery: string) {
+  const query = rawQuery.trim().toLowerCase()
+  if (!query) {
+    return true
+  }
+  if (isVotePositionQuery(query)) {
+    return (vote.position ?? '').toLowerCase() === query
+  }
+  if (billIdMatches(vote.bill_id, query)) {
+    return true
+  }
+  if (looksLikeBillIdQuery(query)) {
+    return false
+  }
+  return fuzzyTextMatch(vote.bill_title, query) || fuzzyTextMatch(vote.bill_summary, query)
+}
+
 function billFromVote(vote: OfficialVote): Bill {
   return {
     id: vote.bill_id,
@@ -254,7 +363,7 @@ function billFromVote(vote: OfficialVote): Bill {
     cosponsor_party_breakdown: null,
     bipartisan_type: null,
     policy_area: null,
-    summary: null,
+    summary: vote.bill_summary,
     introduced_date: null,
     voted_date: null,
     votes_summary: { house: {}, senate: {} },

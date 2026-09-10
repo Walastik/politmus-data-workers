@@ -16,6 +16,7 @@ export interface Official {
 export interface OfficialVote {
   bill_id: string
   bill_title: string | null
+  bill_summary: string | null
   position: string | null
   sponsor_name: string | null
 }
