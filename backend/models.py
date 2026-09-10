@@ -73,3 +73,16 @@ class SenateRollCall(Base):
     bill_id = Column(String, nullable=True)
     status = Column(String, nullable=False)
     processed_at = Column(DateTime, nullable=True)
+
+
+class StateSyncLog(Base):
+    """Last successful OpenStates ingest per standard US state.
+
+    Incremental runs (`--limit N`) pick the N rows with the oldest
+    `last_synced_at` so we round-robin instead of hitting every jurisdiction
+    in one batch.
+    """
+    __tablename__ = "state_sync_log"
+
+    state_code = Column(String, primary_key=True)
+    last_synced_at = Column(DateTime, nullable=True)

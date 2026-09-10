@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import time
+from datetime import datetime, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 from api.filters import STATE_ABBR_BY_NAME, STATE_NAME_BY_ABBR, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
-from models import Official
+from models import Official, StateSyncLog
 
 load_dotenv()
 
@@ -32,6 +33,18 @@ STATE_UPPER_OFFICE = "State Senator"
 STATE_LOWER_OFFICE = "State Representative"
 GOVERNOR_OFFICE = "Governor"
 
+# Standard 50 US states only. DC and territories (AS, GU, MP, PR, VI) are
+# excluded so all-states / --limit ingest stays within OpenStates rate limits.
+TARGET_STATES = [
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+]
+TARGET_STATE_SET = frozenset(TARGET_STATES)
+EXCLUDED_JURISDICTIONS = frozenset({"AS", "GU", "MP", "PR", "VI", "DC"})
+
 
 def _require_api_key():
     if not API_KEY:
@@ -48,23 +61,26 @@ def _retry_wait_seconds(response, delay):
     return delay
 
 
-def openstates_get(path, params=None):
-    """GET JSON from OpenStates v3 with polite pacing and 429 backoff."""
-    _require_api_key()
-    url = path if path.startswith("http") else BASE_URL + path
+def _utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
-    headers = {"X-API-KEY": API_KEY}
-    query = {"apikey": API_KEY}
-    if params:
-        query.update(params)
 
+def request_with_backoff(url, headers=None, params=None):
+    """GET with exponential backoff on HTTP 429 and 5xx.
+
+    Honors `Retry-After` when OpenStates sends it; otherwise doubles the wait
+    after each retry. Exhausting MAX_RETRIES still raises so a single-state
+    failure can be recorded without aborting the rest of a batch.
+    """
     delay = INITIAL_BACKOFF_SECONDS
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         time.sleep(REQUEST_PAUSE_SECONDS)
         try:
-            response = requests.get(url, headers=headers, params=query, timeout=30)
+            response = requests.get(
+                url, headers=headers, params=params, timeout=30
+            )
         except requests.RequestException as exc:
             last_error = exc
             print(f"  Request error ({exc}); retrying in {delay:.1f}s...")
@@ -86,11 +102,24 @@ def openstates_get(path, params=None):
             continue
 
         response.raise_for_status()
-        return response.json()
+        return response
 
     if last_error:
         raise last_error
     raise RuntimeError(f"Failed to fetch {url}")
+
+
+def openstates_get(path, params=None):
+    """GET JSON from OpenStates v3 with polite pacing and 429 backoff."""
+    _require_api_key()
+    url = path if path.startswith("http") else BASE_URL + path
+
+    headers = {"X-API-KEY": API_KEY}
+    query = {"apikey": API_KEY}
+    if params:
+        query.update(params)
+
+    return request_with_backoff(url, headers=headers, params=query).json()
 
 
 def classifications_for_state(state_code):
@@ -119,6 +148,17 @@ def resolve_state(state_code):
         abbr = stripped.upper()
         return abbr, STATE_NAME_BY_ABBR.get(abbr, abbr)
     return stripped.upper(), stripped
+
+
+def require_target_state(state_code):
+    """Resolve a jurisdiction and reject DC / territories."""
+    abbr, state_name = resolve_state(state_code)
+    if abbr in EXCLUDED_JURISDICTIONS or abbr not in TARGET_STATE_SET:
+        raise ValueError(
+            f"{abbr} is not a standard US state; "
+            "OpenStates ingest skips DC and territories (AS, GU, MP, PR, VI)."
+        )
+    return abbr, state_name
 
 
 def _text_or_none(value):
@@ -351,10 +391,52 @@ def fetch_state_legislators(state_code):
     return list(by_id.values())
 
 
+def mark_state_synced(session, state_code):
+    """Record a successful ingest so --limit can round-robin stale states."""
+    abbr, _state_name = resolve_state(state_code)
+    now = _utc_now_naive()
+    row = session.get(StateSyncLog, abbr)
+    if row is None:
+        session.add(StateSyncLog(state_code=abbr, last_synced_at=now))
+    else:
+        row.last_synced_at = now
+
+
+def states_due_for_sync(limit=None):
+    """TARGET_STATES ordered by oldest last_synced_at, optionally capped.
+
+    Never-synced states (missing or null timestamps) come first so a new
+    `--limit` run fills gaps before refreshing recently synced states.
+    """
+    if limit is not None and limit < 1:
+        raise ValueError("--limit must be a positive integer")
+
+    ensure_schema()
+    session = SessionLocal()
+    try:
+        logs = {
+            row.state_code: row.last_synced_at
+            for row in session.query(StateSyncLog).all()
+        }
+        ranked = sorted(
+            TARGET_STATES,
+            key=lambda abbr: (
+                logs.get(abbr) is not None,
+                logs.get(abbr) or datetime.min,
+                abbr,
+            ),
+        )
+        if limit is None:
+            return ranked
+        return ranked[:limit]
+    finally:
+        session.close()
+
+
 def sync_state_members(state_code):
     """Upsert active state legislators and the governor into `officials`."""
     _require_api_key()
-    abbr, state_name = resolve_state(state_code)
+    abbr, state_name = require_target_state(state_code)
     ensure_schema()
     people = fetch_state_legislators(abbr)
     session = SessionLocal()
@@ -398,6 +480,7 @@ def sync_state_members(state_code):
         elif saved == 0:
             print(f"  No current state officials saved for {state_name}.")
 
+        mark_state_synced(session, abbr)
         session.commit()
         return {
             "state": state_name,
@@ -440,13 +523,19 @@ def _print_all_states_summary(results, failures):
             print(f"    {item['state']}: {item['error']}")
 
 
-def sync_all_states():
-    """Upsert legislators and governors for every postal abbreviation."""
+def sync_all_states(limit=None):
+    """Upsert legislators and governors for standard US states.
+
+    When `limit` is set, only the N states with the oldest `last_synced_at`
+    timestamps are processed (round-robin). DC and territories are never
+    included.
+    """
     results = []
     failures = []
-    abbreviations = sorted(STATE_NAME_BY_ABBR)
+    abbreviations = states_due_for_sync(limit)
     total = len(abbreviations)
-    print(f"Syncing OpenStates legislators and governors for {total} jurisdictions...")
+    scope = f"{total} state(s)" if limit else f"{total} states"
+    print(f"Syncing OpenStates legislators and governors for {scope}...")
 
     for index, abbr in enumerate(abbreviations, start=1):
         state_name = STATE_NAME_BY_ABBR[abbr]
@@ -483,8 +572,17 @@ def main():
         "--all-states",
         action="store_true",
         help=(
-            "Ingest every postal abbreviation in STATE_NAME_BY_ABBR. "
-            "Continues after a single-state failure."
+            "Ingest every standard US state in TARGET_STATES "
+            "(excludes DC and territories). Continues after a single-state failure."
+        ),
+    )
+    state_group.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help=(
+            "Ingest the N standard US states with the oldest last_synced_at "
+            "timestamps (round-robin). Example: --limit 5."
         ),
     )
     args = parser.parse_args()
@@ -492,6 +590,12 @@ def main():
     if args.command == "members":
         if args.all_states:
             _results, failures = sync_all_states()
+            if failures:
+                sys.exit(1)
+        elif args.limit is not None:
+            if args.limit < 1:
+                parser.error("--limit must be a positive integer")
+            _results, failures = sync_all_states(limit=args.limit)
             if failures:
                 sys.exit(1)
         else:

@@ -26,5 +26,5 @@ jobs:
       # and OPENSTATES_API_KEY. Do not add the OpenStates key as a GitHub secret.
       # Requires GitHub secret FLY_API_TOKEN (org or personal token, not a deploy-only token).
       # -C execs the binary directly (no shell), so use an absolute python path.
-      - name: Run OpenStates legislator and governor ingest (all states)
-        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
+      - name: Run OpenStates legislator and governor ingest (oldest 5 states)
+        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/openstates_client.py members --limit 5"

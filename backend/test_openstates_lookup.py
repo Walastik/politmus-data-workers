@@ -1,6 +1,8 @@
 import os
+import sys
 import unittest
-from unittest.mock import patch
+from datetime import datetime
+from unittest.mock import MagicMock, call, patch
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -8,14 +10,23 @@ os.environ.setdefault(
 )
 
 from api.census import _legislative_district, _match_from_payload, _parse_sld_code
+from api.filters import STATE_NAME_BY_ABBR
 from api.routes.lookup import _office_roles
 from openstates_client import (
+    EXCLUDED_JURISDICTIONS,
+    TARGET_STATES,
     classifications_for_state,
     district_from_role,
     fetch_state_legislators,
+    main,
+    mark_state_synced,
     office_from_role,
     official_from_person,
+    openstates_get,
     people_classifications_for_state,
+    request_with_backoff,
+    require_target_state,
+    states_due_for_sync,
     sync_all_states,
 )
 
@@ -275,13 +286,111 @@ class LookupRoleTests(unittest.TestCase):
         )
 
 
+class TargetStatesTests(unittest.TestCase):
+    def test_fifty_standard_states_without_territories(self):
+        self.assertEqual(len(TARGET_STATES), 50)
+        self.assertEqual(len(set(TARGET_STATES)), 50)
+        for abbr in EXCLUDED_JURISDICTIONS:
+            self.assertNotIn(abbr, TARGET_STATES)
+        expected = [
+            abbr
+            for abbr in STATE_NAME_BY_ABBR
+            if abbr not in EXCLUDED_JURISDICTIONS
+        ]
+        self.assertEqual(sorted(TARGET_STATES), sorted(expected))
+
+    def test_rejects_dc_and_territories(self):
+        for abbr in ("DC", "PR", "GU", "AS", "MP", "VI"):
+            with self.assertRaises(ValueError):
+                require_target_state(abbr)
+
+
+class StatesDueForSyncTests(unittest.TestCase):
+    @patch("openstates_client.ensure_schema")
+    @patch("openstates_client.SessionLocal")
+    @patch(
+        "openstates_client.TARGET_STATES",
+        ["CA", "TX", "NE", "AL", "NY"],
+    )
+    def test_limit_selects_never_synced_then_oldest(self, mock_session_cls, _schema):
+        session = MagicMock()
+        mock_session_cls.return_value = session
+        now = datetime(2026, 1, 10)
+        session.query.return_value.all.return_value = [
+            MagicMock(state_code="CA", last_synced_at=now),
+            MagicMock(state_code="TX", last_synced_at=datetime(2026, 1, 1)),
+            MagicMock(state_code="NE", last_synced_at=datetime(2026, 1, 5)),
+        ]
+
+        result = states_due_for_sync(limit=3)
+
+        self.assertEqual(result, ["AL", "NY", "TX"])
+        session.close.assert_called_once()
+
+    def test_rejects_non_positive_limit(self):
+        with self.assertRaises(ValueError):
+            states_due_for_sync(limit=0)
+
+    @patch("openstates_client._utc_now_naive", return_value=datetime(2026, 1, 15, 12, 0, 0))
+    def test_mark_state_synced_inserts_and_updates(self, _now):
+        session = MagicMock()
+        session.get.return_value = None
+        mark_state_synced(session, "TX")
+        added = session.add.call_args[0][0]
+        self.assertEqual(added.state_code, "TX")
+        self.assertEqual(added.last_synced_at, datetime(2026, 1, 15, 12, 0, 0))
+
+        existing = MagicMock()
+        session.get.return_value = existing
+        mark_state_synced(session, "tx")
+        self.assertEqual(existing.last_synced_at, datetime(2026, 1, 15, 12, 0, 0))
+
+
+class RequestBackoffTests(unittest.TestCase):
+    @patch("openstates_client.time.sleep")
+    @patch("openstates_client.requests.get")
+    def test_retries_429_using_retry_after(self, mock_get, mock_sleep):
+        limited = MagicMock()
+        limited.status_code = 429
+        limited.headers = {"Retry-After": "3"}
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.json.return_value = {"ok": True}
+        ok.raise_for_status = MagicMock()
+        mock_get.side_effect = [limited, ok]
+
+        response = request_with_backoff("https://v3.openstates.org/people")
+
+        self.assertIs(response, ok)
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertIn(call(3.0), mock_sleep.call_args_list)
+
+    @patch("openstates_client.API_KEY", "test-key")
+    @patch("openstates_client.time.sleep")
+    @patch("openstates_client.requests.get")
+    def test_openstates_get_retries_then_returns_json(self, mock_get, _sleep):
+        limited = MagicMock()
+        limited.status_code = 429
+        limited.headers = {}
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.json.return_value = {"results": []}
+        ok.raise_for_status = MagicMock()
+        mock_get.side_effect = [limited, ok]
+
+        payload = openstates_get("/people")
+
+        self.assertEqual(payload, {"results": []})
+        self.assertEqual(mock_get.call_count, 2)
+
+
 class SyncAllStatesTests(unittest.TestCase):
     @patch(
-        "openstates_client.STATE_NAME_BY_ABBR",
-        {"TX": "Texas", "NE": "Nebraska", "CA": "California"},
+        "openstates_client.states_due_for_sync",
+        return_value=["CA", "NE", "TX"],
     )
     @patch("openstates_client.sync_state_members")
-    def test_continues_after_state_failure(self, mock_sync):
+    def test_continues_after_state_failure(self, mock_sync, _due):
         def fake_sync(state_code):
             if state_code == "NE":
                 raise RuntimeError("rate limited")
@@ -294,12 +403,43 @@ class SyncAllStatesTests(unittest.TestCase):
 
         mock_sync.side_effect = fake_sync
         results, failures = sync_all_states()
-        self.assertEqual([call.args[0] for call in mock_sync.call_args_list], ["CA", "NE", "TX"])
+        self.assertEqual(
+            [call.args[0] for call in mock_sync.call_args_list],
+            ["CA", "NE", "TX"],
+        )
         self.assertEqual(len(results), 2)
         self.assertEqual({item["state"] for item in results}, {"CA", "TX"})
         self.assertEqual(len(failures), 1)
         self.assertEqual(failures[0]["state"], "NE")
         self.assertIn("rate limited", failures[0]["error"])
+
+    @patch(
+        "openstates_client.states_due_for_sync",
+        return_value=["AL", "AK", "AZ", "AR", "CA"],
+    )
+    @patch("openstates_client.sync_state_members")
+    def test_limit_syncs_only_selected_states(self, mock_sync, mock_due):
+        mock_sync.return_value = {
+            "state": "X",
+            "fetched": 1,
+            "saved": 1,
+            "skipped": 0,
+        }
+        results, failures = sync_all_states(limit=5)
+        mock_due.assert_called_once_with(5)
+        self.assertEqual(mock_sync.call_count, 5)
+        self.assertEqual(len(results), 5)
+        self.assertEqual(failures, [])
+
+
+class OpenStatesCliTests(unittest.TestCase):
+    @patch("openstates_client.sync_all_states", return_value=([], []))
+    def test_limit_flag_syncs_n_states(self, mock_sync_all):
+        with patch.object(
+            sys, "argv", ["openstates_client.py", "members", "--limit", "5"]
+        ):
+            main()
+        mock_sync_all.assert_called_once_with(limit=5)
 
 
 if __name__ == "__main__":
