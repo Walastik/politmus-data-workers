@@ -1,11 +1,12 @@
 from collections import defaultdict
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.filters import classify_bipartisan_type, normalize_party
-from api.schemas import BillDetailOut
+from api.schemas import BillDetailOut, BillVoterOut, BillVotersOut
 from database import get_db
 from models import Bill, Official, Vote
 
@@ -14,6 +15,12 @@ router = APIRouter()
 HOUSE_OFFICES = ("Representative", "Delegate", "Resident Commissioner")
 SENATE_OFFICES = ("Senator",)
 CHAMBERS = ("house", "senate")
+VOTE_SORT_ORDER = {
+    "Yes": 0,
+    "No": 1,
+    "Present": 2,
+    "Not Voting": 3,
+}
 
 
 def _chamber_for_office(office: str | None) -> str | None:
@@ -34,6 +41,31 @@ def _empty_party_summaries() -> dict[str, dict[str, dict[str, int]]]:
 
 def _party_bucket(party: str | None) -> str:
     return normalize_party(party) or "Unknown"
+
+
+def last_name_from_official_name(name: str | None) -> str:
+    """Last name from inverted Congress.gov names ('Adams, Alma S.') or a display name."""
+    if not name:
+        return ""
+    text = str(name).strip()
+    if "," in text:
+        return text.split(",", 1)[0].strip()
+    parts = text.split()
+    return parts[-1] if parts else ""
+
+
+def _vote_sort_key(position: str | None, name: str | None) -> tuple[int, str, str]:
+    order = VOTE_SORT_ORDER.get(position or "", 9)
+    last = last_name_from_official_name(name).casefold()
+    full = (name or "").strip().casefold()
+    return (order, last, full)
+
+
+def sort_bill_voters(voters: list[BillVoterOut]) -> list[BillVoterOut]:
+    return sorted(
+        voters,
+        key=lambda voter: _vote_sort_key(voter.position, voter.name),
+    )
 
 
 def _record_vote_count(
@@ -138,6 +170,42 @@ def list_bills(
         )
         for bill in bills
     ]
+
+
+@router.get("/{bill_id}/votes", response_model=BillVotersOut)
+def list_bill_votes(
+    bill_id: str,
+    chamber: Literal["house", "senate"] = Query(...),
+    party: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    bill = db.query(Bill).filter(Bill.id == bill_id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    wanted_party = _party_bucket(party)
+    rows = (
+        db.query(Official.id, Official.name, Official.office, Official.party, Vote.position)
+        .join(Vote, Vote.official_id == Official.id)
+        .filter(Vote.bill_id == bill_id)
+        .all()
+    )
+    voters = [
+        BillVoterOut(
+            official_id=official_id,
+            name=name or official_id,
+            position=position,
+        )
+        for official_id, name, office, member_party, position in rows
+        if _chamber_for_office(office) == chamber
+        and _party_bucket(member_party) == wanted_party
+    ]
+    return BillVotersOut(
+        bill_id=bill_id,
+        chamber=chamber,
+        party=wanted_party,
+        voters=sort_bill_voters(voters),
+    )
 
 
 @router.get("/{bill_id}", response_model=BillDetailOut)

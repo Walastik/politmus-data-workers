@@ -13,7 +13,10 @@ from api.routes.bills import (
     _empty_chamber_summaries,
     _empty_party_summaries,
     _record_vote_count,
+    last_name_from_official_name,
+    sort_bill_voters,
 )
+from api.schemas import BillVoterOut
 from models import Bill
 
 
@@ -73,6 +76,41 @@ class VotePartySummaryTests(unittest.TestCase):
         )
         self.assertEqual(detail.votes_summary["house"]["Yes"], 10)
         self.assertEqual(detail.votes_by_party["house"]["Democratic"]["Yes"], 10)
+
+
+class BillVoterSortTests(unittest.TestCase):
+    def test_last_name_from_inverted_and_display_names(self):
+        self.assertEqual(last_name_from_official_name("Adams, Alma S."), "Adams")
+        self.assertEqual(
+            last_name_from_official_name("Blunt Rochester, Lisa"),
+            "Blunt Rochester",
+        )
+        self.assertEqual(last_name_from_official_name("Pete Aguilar"), "Aguilar")
+        self.assertEqual(last_name_from_official_name(""), "")
+
+    def test_orders_yes_then_no_then_not_voting_then_last_name(self):
+        voters = [
+            BillVoterOut(official_id="1", name="Smith, John", position="No"),
+            BillVoterOut(official_id="2", name="Adams, Alma S.", position="Yes"),
+            BillVoterOut(official_id="3", name="Aderholt, Robert B.", position="No"),
+            BillVoterOut(official_id="4", name="Young, Don", position="Not Voting"),
+            BillVoterOut(official_id="5", name="Aguilar, Pete", position="Not Voting"),
+            BillVoterOut(
+                official_id="6", name="Blunt Rochester, Lisa", position="Yes"
+            ),
+        ]
+        ordered = [voter.name for voter in sort_bill_voters(voters)]
+        self.assertEqual(
+            ordered,
+            [
+                "Adams, Alma S.",
+                "Blunt Rochester, Lisa",
+                "Aderholt, Robert B.",
+                "Smith, John",
+                "Aguilar, Pete",
+                "Young, Don",
+            ],
+        )
 
 
 class BipartisanTypeTests(unittest.TestCase):

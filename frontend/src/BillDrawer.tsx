@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
+import VotePartyList from './VotePartyList'
 import VoteTallyBar from './VoteTallyBar'
 import {
   bipartisanTypeFromParties,
@@ -12,6 +13,7 @@ import {
   partyBadgeClass,
   sanitizeCrsHtml,
   type Bill,
+  type VoteChamber,
 } from './types'
 
 export default function BillDrawer({
@@ -24,6 +26,10 @@ export default function BillDrawer({
   const [detail, setDetail] = useState<Bill | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [voterList, setVoterList] = useState<{
+    chamber: VoteChamber
+    party: string
+  } | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -57,14 +63,22 @@ export default function BillDrawer({
   }, [bill.id])
 
   useEffect(() => {
+    setVoterList(null)
+  }, [bill.id])
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        if (voterList) {
+          setVoterList(null)
+          return
+        }
         onClose()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [onClose, voterList])
 
   const view = detail ?? bill
   const summary = view.summary
@@ -75,7 +89,13 @@ export default function BillDrawer({
         type="button"
         className="absolute inset-0 bg-slate-950/70"
         aria-label="Close bill details"
-        onClick={onClose}
+        onClick={() => {
+          if (voterList) {
+            setVoterList(null)
+            return
+          }
+          onClose()
+        }}
       />
       <aside
         role="dialog"
@@ -110,27 +130,40 @@ export default function BillDrawer({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-5">
-          <div className="mb-5">
-            <VoteTallyBar
-              summary={view.votes_summary}
-              byParty={view.votes_by_party}
-            />
+        <div className="relative min-h-0 flex-1">
+          <div className="h-full overflow-y-auto p-5">
+            <div className="mb-5">
+              <VoteTallyBar
+                summary={view.votes_summary}
+                byParty={view.votes_by_party}
+                onPartyClick={(chamber, party) =>
+                  setVoterList({ chamber, party })
+                }
+              />
+            </div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              CRS summary
+            </h3>
+            {error ? (
+              <p className="mt-3 text-sm text-red-400">{error}</p>
+            ) : summary ? (
+              <CrsSummary text={summary} />
+            ) : loading ? (
+              <p className="mt-3 text-sm text-slate-400">Loading bill details...</p>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">
+                No CRS summary has been ingested for this bill.
+              </p>
+            )}
           </div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            CRS summary
-          </h3>
-          {error ? (
-            <p className="mt-3 text-sm text-red-400">{error}</p>
-          ) : summary ? (
-            <CrsSummary text={summary} />
-          ) : loading ? (
-            <p className="mt-3 text-sm text-slate-400">Loading bill details...</p>
-          ) : (
-            <p className="mt-3 text-sm text-slate-400">
-              No CRS summary has been ingested for this bill.
-            </p>
-          )}
+          {voterList ? (
+            <VotePartyList
+              billId={view.id}
+              chamber={voterList.chamber}
+              party={voterList.party}
+              onClose={() => setVoterList(null)}
+            />
+          ) : null}
         </div>
       </aside>
     </div>

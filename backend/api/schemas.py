@@ -57,6 +57,19 @@ class BillDetailOut(BillOut):
     )
 
 
+class BillVoterOut(BaseModel):
+    official_id: str
+    name: str
+    position: Optional[str] = None
+
+
+class BillVotersOut(BaseModel):
+    bill_id: str
+    chamber: str
+    party: str
+    voters: list[BillVoterOut] = Field(default_factory=list)
+
+
 class HealthOut(BaseModel):
     status: str
     service: str

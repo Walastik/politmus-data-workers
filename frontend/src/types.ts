@@ -43,6 +43,14 @@ export interface BillVotePartySummary {
   senate: Record<string, ChamberVoteSummary>
 }
 
+export type VoteChamber = 'house' | 'senate'
+
+export interface BillVoter {
+  official_id: string
+  name: string
+  position: string | null
+}
+
 export interface Bill {
   id: string
   title: string | null
@@ -253,6 +261,21 @@ export function bipartisanTypeLabel(
   }
   if (type === 'tripartisan') return 'Tripartisan'
   return null
+}
+
+export function voteShort(position: string | null | undefined) {
+  if (position === 'Yes') return 'Y'
+  if (position === 'No') return 'N'
+  if (position === 'Present') return 'P'
+  if (position === 'Not Voting') return 'NV'
+  return position || '—'
+}
+
+export function voteTextClass(position: string | null | undefined) {
+  if (position === 'Yes') return 'text-emerald-400'
+  if (position === 'No') return 'text-red-400'
+  if (position === 'Present') return 'text-amber-400'
+  return 'text-slate-400'
 }
 
 export function formatCosponsorBreakdown(

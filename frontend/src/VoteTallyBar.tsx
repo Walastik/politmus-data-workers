@@ -5,6 +5,7 @@ import {
   type Bill,
   type BillVotePartySummary,
   type ChamberVoteSummary,
+  type VoteChamber,
 } from './types'
 
 function chamberTotal(summary: ChamberVoteSummary | undefined) {
@@ -22,25 +23,43 @@ export function voteTotal(summary: Bill['votes_summary'] | undefined) {
 }
 
 function PartyTally({
+  chamber,
   party,
   summary,
+  onPartyClick,
 }: {
+  chamber: VoteChamber
   party: string
   summary: ChamberVoteSummary
+  onPartyClick?: (chamber: VoteChamber, party: string) => void
 }) {
   const yes = summary.Yes ?? 0
   const no = summary.No ?? 0
   const recorded = yes + no
   const yesPct = recorded === 0 ? 0 : (yes / recorded) * 100
   const noPct = recorded === 0 ? 0 : (no / recorded) * 100
+  const badge = (
+    <span
+      className={`w-5 shrink-0 rounded px-1 py-px text-center text-[10px] font-semibold ${partyBadgeClass(party)}`}
+    >
+      {partyShort(party)}
+    </span>
+  )
 
   return (
     <div className="flex items-center gap-2">
-      <span
-        className={`w-5 shrink-0 rounded px-1 py-px text-center text-[10px] font-semibold ${partyBadgeClass(party)}`}
-      >
-        {partyShort(party)}
-      </span>
+      {onPartyClick ? (
+        <button
+          type="button"
+          onClick={() => onPartyClick(chamber, party)}
+          className="rounded hover:ring-1 hover:ring-slate-400"
+          aria-label={`Show ${party} ${chamber} votes`}
+        >
+          {badge}
+        </button>
+      ) : (
+        badge
+      )}
       <div className="flex h-1.5 min-w-0 flex-1 overflow-hidden rounded bg-slate-700">
         <div className="bg-emerald-500" style={{ width: `${yesPct}%` }} />
         <div className="bg-red-500" style={{ width: `${noPct}%` }} />
@@ -56,12 +75,16 @@ function PartyTally({
 
 function ChamberTally({
   label,
+  chamber,
   summary,
   byParty,
+  onPartyClick,
 }: {
   label: string
+  chamber: VoteChamber
   summary: ChamberVoteSummary | undefined
   byParty: Record<string, ChamberVoteSummary> | undefined
+  onPartyClick?: (chamber: VoteChamber, party: string) => void
 }) {
   const yes = summary?.Yes ?? 0
   const no = summary?.No ?? 0
@@ -105,7 +128,13 @@ function ChamberTally({
       {parties.length > 0 ? (
         <div className="mt-2 space-y-1">
           {parties.map((party) => (
-            <PartyTally key={party} party={party} summary={byParty?.[party] || {}} />
+            <PartyTally
+              key={party}
+              chamber={chamber}
+              party={party}
+              summary={byParty?.[party] || {}}
+              onPartyClick={onPartyClick}
+            />
           ))}
         </div>
       ) : null}
@@ -116,9 +145,11 @@ function ChamberTally({
 export default function VoteTallyBar({
   summary,
   byParty,
+  onPartyClick,
 }: {
   summary: Bill['votes_summary']
   byParty?: BillVotePartySummary
+  onPartyClick?: (chamber: VoteChamber, party: string) => void
 }) {
   const house = summary?.house
   const senate = summary?.senate
@@ -128,8 +159,20 @@ export default function VoteTallyBar({
 
   return (
     <div className="space-y-3">
-      <ChamberTally label="House" summary={house} byParty={byParty?.house} />
-      <ChamberTally label="Senate" summary={senate} byParty={byParty?.senate} />
+      <ChamberTally
+        label="House"
+        chamber="house"
+        summary={house}
+        byParty={byParty?.house}
+        onPartyClick={onPartyClick}
+      />
+      <ChamberTally
+        label="Senate"
+        chamber="senate"
+        summary={senate}
+        byParty={byParty?.senate}
+        onPartyClick={onPartyClick}
+      />
       <p className="text-[10px] text-slate-600">
         Latest roll call stored for each chamber
       </p>
