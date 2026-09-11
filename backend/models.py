@@ -39,6 +39,10 @@ class Bill(Base):
     summary = Column(Text, nullable=True)
     introduced_date = Column(Date, nullable=True)
     voted_date = Column(Date, nullable=True)
+    # Days from introduced_date to the stored recorded-vote date.
+    days_to_vote = Column(Integer, nullable=True)
+    # very_fast, fast, average, slow, or very_slow vs the corpus distribution.
+    velocity_bucket = Column(String, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     votes = relationship("Vote", back_populates="bill")

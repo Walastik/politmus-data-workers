@@ -147,6 +147,17 @@ class BipartisanTypeTests(unittest.TestCase):
         detail = _bill_detail(bill, _empty_chamber_summaries())
         self.assertEqual(detail.bipartisan_type, "bipartisan")
 
+    def test_bill_detail_includes_velocity_fields(self):
+        bill = Bill(
+            id="119-hr-1",
+            title="Test",
+            days_to_vote=12,
+            velocity_bucket="fast",
+        )
+        detail = _bill_detail(bill, _empty_chamber_summaries())
+        self.assertEqual(detail.days_to_vote, 12)
+        self.assertEqual(detail.velocity_bucket, "fast")
+
 
 if __name__ == "__main__":
     unittest.main()
