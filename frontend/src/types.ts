@@ -38,6 +38,11 @@ export interface BillVoteSummary {
   senate: ChamberVoteSummary
 }
 
+export interface BillVotePartySummary {
+  house: Record<string, ChamberVoteSummary>
+  senate: Record<string, ChamberVoteSummary>
+}
+
 export interface Bill {
   id: string
   title: string | null
@@ -52,6 +57,7 @@ export interface Bill {
   introduced_date: string | null
   voted_date: string | null
   votes_summary: BillVoteSummary
+  votes_by_party?: BillVotePartySummary
 }
 
 export interface CivicAddress {
@@ -180,6 +186,7 @@ export function partyShort(party: string) {
   if (party === 'Republican') return 'R'
   if (party === 'Independent') return 'I'
   if (party === 'Libertarian') return 'L'
+  if (party === 'Unknown') return '?'
   return party
 }
 
@@ -190,19 +197,7 @@ const PARTY_DISPLAY_ORDER = [
   'Libertarian',
 ]
 
-export function involvedParties(
-  sponsorParty: string | null | undefined,
-  breakdown: Record<string, number> | null | undefined,
-) {
-  const parties = new Set<string>()
-  if (sponsorParty) {
-    parties.add(sponsorParty)
-  }
-  for (const [party, count] of Object.entries(breakdown || {})) {
-    if (count > 0) {
-      parties.add(party)
-    }
-  }
+export function sortParties(parties: Iterable<string>) {
   return [...parties].sort((a, b) => {
     const aIndex = PARTY_DISPLAY_ORDER.indexOf(a)
     const bIndex = PARTY_DISPLAY_ORDER.indexOf(b)
@@ -217,6 +212,22 @@ export function involvedParties(
     }
     return aIndex - bIndex
   })
+}
+
+export function involvedParties(
+  sponsorParty: string | null | undefined,
+  breakdown: Record<string, number> | null | undefined,
+) {
+  const parties = new Set<string>()
+  if (sponsorParty) {
+    parties.add(sponsorParty)
+  }
+  for (const [party, count] of Object.entries(breakdown || {})) {
+    if (count > 0) {
+      parties.add(party)
+    }
+  }
+  return sortParties(parties)
 }
 
 export function bipartisanTypeFromParties(

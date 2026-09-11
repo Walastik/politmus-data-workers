@@ -7,7 +7,13 @@ os.environ.setdefault(
 )
 
 from api.filters import classify_bipartisan_type
-from api.routes.bills import _bill_detail, _chamber_for_office, _empty_chamber_summaries
+from api.routes.bills import (
+    _bill_detail,
+    _chamber_for_office,
+    _empty_chamber_summaries,
+    _empty_party_summaries,
+    _record_vote_count,
+)
 from models import Bill
 
 
@@ -28,6 +34,45 @@ class ChamberVoteSummaryTests(unittest.TestCase):
         self.assertEqual(set(empty), {"house", "senate"})
         self.assertEqual(empty["house"], {})
         self.assertEqual(empty["senate"], {})
+
+
+class VotePartySummaryTests(unittest.TestCase):
+    def test_groups_counts_by_chamber_and_party(self):
+        totals = {"119-hr-1": _empty_chamber_summaries()}
+        by_party = {"119-hr-1": _empty_party_summaries()}
+        _record_vote_count(
+            totals, by_party, "119-hr-1", "Representative", "Democratic", "Yes", 210
+        )
+        _record_vote_count(
+            totals, by_party, "119-hr-1", "Representative", "Republican", "No", 201
+        )
+        _record_vote_count(
+            totals, by_party, "119-hr-1", "Representative", "D", "No", 2
+        )
+        _record_vote_count(
+            totals, by_party, "119-hr-1", "Senator", "Independent", "Yes", 1
+        )
+        _record_vote_count(
+            totals, by_party, "119-hr-1", "Governor", "Democratic", "Yes", 1
+        )
+
+        self.assertEqual(totals["119-hr-1"]["house"]["Yes"], 210)
+        self.assertEqual(totals["119-hr-1"]["house"]["No"], 203)
+        self.assertEqual(by_party["119-hr-1"]["house"]["Democratic"]["Yes"], 210)
+        self.assertEqual(by_party["119-hr-1"]["house"]["Democratic"]["No"], 2)
+        self.assertEqual(by_party["119-hr-1"]["house"]["Republican"]["No"], 201)
+        self.assertEqual(by_party["119-hr-1"]["senate"]["Independent"]["Yes"], 1)
+        self.assertEqual(by_party["119-hr-1"]["senate"].get("Democratic"), None)
+
+    def test_bill_detail_includes_party_breakdown(self):
+        bill = Bill(id="119-hr-1", title="Test")
+        detail = _bill_detail(
+            bill,
+            {"house": {"Yes": 10}, "senate": {}},
+            {"house": {"Democratic": {"Yes": 10}}, "senate": {}},
+        )
+        self.assertEqual(detail.votes_summary["house"]["Yes"], 10)
+        self.assertEqual(detail.votes_by_party["house"]["Democratic"]["Yes"], 10)
 
 
 class BipartisanTypeTests(unittest.TestCase):

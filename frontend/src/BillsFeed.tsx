@@ -97,7 +97,10 @@ export default function BillsFeed() {
               ) : null}
               <BillDates bill={bill} className="mt-2" />
               <div className="mt-3">
-                <VoteTallyBar summary={bill.votes_summary} />
+                <VoteTallyBar
+                  summary={bill.votes_summary}
+                  byParty={bill.votes_by_party}
+                />
               </div>
             </button>
           </article>

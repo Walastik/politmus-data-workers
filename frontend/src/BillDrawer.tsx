@@ -112,7 +112,10 @@ export default function BillDrawer({
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="mb-5">
-            <VoteTallyBar summary={view.votes_summary} />
+            <VoteTallyBar
+              summary={view.votes_summary}
+              byParty={view.votes_by_party}
+            />
           </div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             CRS summary

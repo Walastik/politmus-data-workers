@@ -367,5 +367,6 @@ function billFromVote(vote: OfficialVote): Bill {
     introduced_date: null,
     voted_date: null,
     votes_summary: { house: {}, senate: {} },
+    votes_by_party: { house: {}, senate: {} },
   }
 }
