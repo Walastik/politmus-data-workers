@@ -2,6 +2,10 @@ from sqlalchemy import text
 
 from database import engine, Base
 from models import *
+from services.bill_classification import (
+    DEFAULT_GUIDELINES_NAME,
+    DEFAULT_GUIDELINES_PROMPT,
+)
 
 def ensure_schema():
     """Create tables and add columns that create_all will not alter in place."""
@@ -82,6 +86,22 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS velocity_bucket VARCHAR"
         ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS classification JSONB"
+        ))
+        conn.execute(text(
+            """
+            INSERT INTO classification_guidelines
+                (name, is_active, prompt, updated_at)
+            SELECT :name, TRUE, :prompt, (NOW() AT TIME ZONE 'utc')
+            WHERE NOT EXISTS (
+                SELECT 1 FROM classification_guidelines WHERE name = :name
+            )
+            """
+        ), {
+            "name": DEFAULT_GUIDELINES_NAME,
+            "prompt": DEFAULT_GUIDELINES_PROMPT,
+        })
         conn.execute(text(
             """
             UPDATE bills

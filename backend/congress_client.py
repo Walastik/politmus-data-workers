@@ -1471,6 +1471,7 @@ def upsert_bill(
             ),
             days_to_vote=existing.days_to_vote if existing else None,
             velocity_bucket=existing.velocity_bucket if existing else None,
+            classification=existing.classification if existing else None,
         )
     )
     session.flush()
@@ -2323,6 +2324,7 @@ def main():
             "sponsors",
             "backfill-sponsors",
             "enrich",
+            "classify",
         ],
         default="bills",
         help="members: current roster. bills: recent bills (default). "
@@ -2331,7 +2333,8 @@ def main():
         "an entire congress, or incremental catch-up). "
         "backfill-sponsors: insert missing historical sponsors. "
         "enrich: fill policy area, CRS summary, dates, sponsorship, "
-        "and vote-velocity on existing bills.",
+        "and vote-velocity on existing bills. "
+        "classify: score bill summaries with the local Ollama classifier.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(
@@ -2387,6 +2390,13 @@ def main():
     if args.command == "enrich":
         enrichment_stats = sync_bill_enrichment()
         _print_enrichment_stats(enrichment_stats)
+        return
+
+    if args.command == "classify":
+        from llm_classifier import run_classification, print_classification_stats
+
+        classification_stats = run_classification(limit=args.limit)
+        print_classification_stats(classification_stats)
         return
 
     if args.command == "votes":

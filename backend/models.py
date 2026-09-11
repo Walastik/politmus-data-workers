@@ -43,9 +43,27 @@ class Bill(Base):
     days_to_vote = Column(Integer, nullable=True)
     # very_fast, fast, average, slow, or very_slow vs the corpus distribution.
     velocity_bucket = Column(String, nullable=True)
+    # Structured LLM classification of the CRS summary (impact scores + metadata).
+    classification = Column(JSONB, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     votes = relationship("Vote", back_populates="bill")
+
+
+class ClassificationGuideline(Base):
+    """Prompt text that tells the local LLM how to classify bills.
+
+    Stored in Postgres so guidelines can change without redeploying the worker.
+    The classifier loads the newest active row each run.
+    """
+    __tablename__ = "classification_guidelines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    prompt = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
 
 class Vote(Base):
     __tablename__ = 'votes'

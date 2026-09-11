@@ -24,9 +24,12 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    DATABASE_URL=postgresql://postgres:postgres_password@localhost:5432/politmus_local
    CONGRESS_GOV_API_KEY=your_key_here
    OPENSTATES_API_KEY=your_key_here
+   OLLAMA_HOST=http://localhost:11434
+   OLLAMA_MODEL=qwen2.5-coder:32b
+   OLLAMA_TIMEOUT_SECONDS=180
    ```
 
-   Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Get an OpenStates API key from [openstates.org/accounts/signup](https://openstates.org/accounts/signup/). Address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table; it does not need a Google API key.
+   Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Get an OpenStates API key from [openstates.org/accounts/signup](https://openstates.org/accounts/signup/). Address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table; it does not need a Google API key. `OLLAMA_*` is only required for the local bill classifier.
 
 4. Create (or update) tables:
 
@@ -35,7 +38,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    python init_db.py
    ```
 
-   This creates `officials`, `bills`, and `votes`, and adds any new bill columns that an older database is missing.
+   This creates `officials`, `bills`, `votes`, and `classification_guidelines`, and adds any new bill columns that an older database is missing.
 
 ## Scripts
 
@@ -101,6 +104,36 @@ python congress_client.py senate-votes --congress 119 --session 1
 
 ```bash
 python congress_client.py enrich
+```
+
+**Classify bill summaries** — sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores structured JSON on `bills.classification` (`funding_impact`, `regulatory_impact`, `reasoning`, plus model metadata). Only bills with a summary and no classification are processed, unless you pass `--force`. Classification rules live in the `classification_guidelines` table so you can update the prompt in Postgres without changing worker code.
+
+Requires a running Ollama instance (default `http://localhost:11434`) and a pulled model such as `qwen2.5-coder:32b`. The worker is meant to run on the Mac Mini that hosts Ollama, pointed at the same `DATABASE_URL` as the rest of the pipeline.
+
+```bash
+python llm_classifier.py
+python llm_classifier.py --limit 20
+python llm_classifier.py --bill-id 119-hr-1
+python llm_classifier.py --dry-run
+python llm_classifier.py --force --limit 5
+python congress_client.py classify --limit 20
+```
+
+`--limit 0` classifies every matching bill. On timeout or a bad model response the worker logs the error, leaves that row unclassified, and continues.
+
+To change the scoring rules, update the active row in `classification_guidelines` (the worker loads the newest `is_active` prompt each run):
+
+```sql
+UPDATE classification_guidelines
+SET prompt = 'your new instructions',
+    updated_at = NOW() AT TIME ZONE 'utc'
+WHERE name = 'default';
+```
+
+On a Mac Mini, an hourly cron is enough:
+
+```
+0 * * * * cd /path/to/politmus-data-workers/backend && /path/to/venv/bin/python llm_classifier.py --limit 50
 ```
 
 All Congress.gov requests pause briefly between calls and retry with exponential backoff on HTTP 429 and 5xx responses. Re-running these commands is idempotent: existing bills are updated in place, and votes are upserted per official per bill.
