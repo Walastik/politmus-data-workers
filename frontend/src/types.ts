@@ -45,6 +45,13 @@ export interface BillVotePartySummary {
 
 export type VoteChamber = 'house' | 'senate'
 
+export type VelocityBucket =
+  | 'very_fast'
+  | 'fast'
+  | 'average'
+  | 'slow'
+  | 'very_slow'
+
 export interface BillVoter {
   official_id: string
   name: string
@@ -64,6 +71,8 @@ export interface Bill {
   summary: string | null
   introduced_date: string | null
   voted_date: string | null
+  days_to_vote: number | null
+  velocity_bucket: VelocityBucket | null
   votes_summary: BillVoteSummary
   votes_by_party?: BillVotePartySummary
 }
@@ -307,6 +316,41 @@ export function formatBillDate(value: string | null | undefined) {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+const VELOCITY_DISPLAY: Record<
+  VelocityBucket,
+  { emoji: string; label: string }
+> = {
+  very_fast: { emoji: '🚀', label: 'Very fast' },
+  fast: { emoji: '🏃', label: 'Fast' },
+  average: { emoji: '🚶', label: 'Average' },
+  slow: { emoji: '🐢', label: 'Slow' },
+  very_slow: { emoji: '🐌', label: 'Very slow' },
+}
+
+export function velocityDisplay(bucket: VelocityBucket | null | undefined) {
+  if (!bucket) {
+    return null
+  }
+  return VELOCITY_DISPLAY[bucket] ?? null
+}
+
+export function formatVoteVelocity(
+  days: number | null | undefined,
+  bucket: VelocityBucket | null | undefined,
+) {
+  const display = velocityDisplay(bucket)
+  if (days == null || !display) {
+    return null
+  }
+  const unit = days === 1 || days === -1 ? 'day' : 'days'
+  return {
+    emoji: display.emoji,
+    label: display.label,
+    days,
+    text: `${display.emoji} ${days} ${unit}`,
+  }
 }
 
 export function sanitizeCrsHtml(html: string) {

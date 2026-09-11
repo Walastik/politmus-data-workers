@@ -150,6 +150,8 @@ def _bill_detail(
         summary=bill.summary,
         introduced_date=bill.introduced_date,
         voted_date=bill.voted_date,
+        days_to_vote=bill.days_to_vote,
+        velocity_bucket=bill.velocity_bucket,
         votes_summary=votes_summary or _empty_chamber_summaries(),
         votes_by_party=votes_by_party or _empty_party_summaries(),
     )

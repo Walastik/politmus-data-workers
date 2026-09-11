@@ -77,6 +77,12 @@ def ensure_schema():
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS voted_date DATE"
         ))
         conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS days_to_vote INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS velocity_bucket VARCHAR"
+        ))
+        conn.execute(text(
             """
             UPDATE bills
             SET sponsor_bioguide_id = sponsor_id

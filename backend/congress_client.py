@@ -13,6 +13,7 @@ from api.filters import classify_bipartisan_type, normalize_party, normalize_sta
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Bill, Official, SenateRollCall, Vote
+from services.bill_analytics import refresh_bill_velocity
 
 load_dotenv()
 
@@ -1069,7 +1070,7 @@ def _latest_summary_text(summaries):
 
 
 def sync_bill_enrichment():
-    """Fill missing policy area, summary, dates, and sponsorship fields."""
+    """Fill missing policy area, summary, dates, sponsorship, and vote velocity."""
     _require_api_key()
     ensure_schema()
     session = SessionLocal()
@@ -1083,6 +1084,11 @@ def sync_bill_enrichment():
         "cosponsor_breakdowns_set": 0,
         "bills_failed": 0,
         "bills_unchanged": 0,
+        "velocity_bills_scored": 0,
+        "days_to_vote_set": 0,
+        "velocity_buckets_set": 0,
+        "velocity_mean": None,
+        "velocity_std": None,
     }
 
     try:
@@ -1244,6 +1250,13 @@ def sync_bill_enrichment():
             else:
                 stats["bills_unchanged"] += 1
 
+        velocity_stats = refresh_bill_velocity(session)
+        session.commit()
+        stats["velocity_bills_scored"] = velocity_stats["bills_scored"]
+        stats["days_to_vote_set"] = velocity_stats["days_to_vote_set"]
+        stats["velocity_buckets_set"] = velocity_stats["velocity_buckets_set"]
+        stats["velocity_mean"] = velocity_stats["mean"]
+        stats["velocity_std"] = velocity_stats["std"]
         return stats
     except Exception:
         session.rollback()
@@ -1456,6 +1469,8 @@ def upsert_bill(
                 if voted_date is not None
                 else (existing.voted_date if existing else None)
             ),
+            days_to_vote=existing.days_to_vote if existing else None,
+            velocity_bucket=existing.velocity_bucket if existing else None,
         )
     )
     session.flush()
@@ -2284,6 +2299,13 @@ def _print_enrichment_stats(stats):
     print(f"  Cosponsor breakdowns:   {stats.get('cosponsor_breakdowns_set', 0)}")
     print(f"  Unchanged (no data):    {stats['bills_unchanged']}")
     print(f"  Fetch/parse failures:   {stats['bills_failed']}")
+    print(f"  Velocity bills scored:  {stats.get('velocity_bills_scored', 0)}")
+    print(f"  Days-to-vote set:       {stats.get('days_to_vote_set', 0)}")
+    print(f"  Velocity buckets set:   {stats.get('velocity_buckets_set', 0)}")
+    mean = stats.get("velocity_mean")
+    std = stats.get("velocity_std")
+    if mean is not None and std is not None:
+        print(f"  Velocity μ/σ:           {mean:.1f} / {std:.1f} days")
 
 
 def main():
@@ -2308,8 +2330,8 @@ def main():
         "senate-votes: Senate.gov roll-call XML (one vote, one session, "
         "an entire congress, or incremental catch-up). "
         "backfill-sponsors: insert missing historical sponsors. "
-        "enrich: fill policy area, CRS summary, dates, and sponsorship "
-        "on existing bills.",
+        "enrich: fill policy area, CRS summary, dates, sponsorship, "
+        "and vote-velocity on existing bills.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(

@@ -48,6 +48,8 @@ class BillOut(BaseModel):
     summary: Optional[str] = None
     introduced_date: Optional[date] = None
     voted_date: Optional[date] = None
+    days_to_vote: Optional[int] = None
+    velocity_bucket: Optional[str] = None
 
 
 class BillDetailOut(BillOut):

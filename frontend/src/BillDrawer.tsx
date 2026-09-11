@@ -9,6 +9,7 @@ import {
   bipartisanTypeLabel,
   formatBillDate,
   formatCosponsorBreakdown,
+  formatVoteVelocity,
   involvedParties,
   partyBadgeClass,
   sanitizeCrsHtml,
@@ -243,9 +244,15 @@ export function BillDates({
 }) {
   const introduced = formatBillDate(bill.introduced_date)
   const voted = formatBillDate(bill.voted_date)
-  if (!introduced && !voted) {
+  const velocity = formatVoteVelocity(bill.days_to_vote, bill.velocity_bucket)
+  if (!introduced && !voted && !velocity) {
     return null
   }
+  const velocityDescription = velocity
+    ? `${velocity.label}: ${velocity.days} ${
+        velocity.days === 1 || velocity.days === -1 ? 'day' : 'days'
+      } from introduction to vote`
+    : null
 
   return (
     <dl className={`flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400 ${className}`.trim()}>
@@ -259,6 +266,14 @@ export function BillDates({
         <div>
           <dt className="inline text-slate-500">Voted </dt>
           <dd className="inline text-slate-300">{voted}</dd>
+        </div>
+      ) : null}
+      {velocity && velocityDescription ? (
+        <div title={velocityDescription}>
+          <dt className="sr-only">{velocityDescription}</dt>
+          <dd className="inline text-slate-300" aria-hidden="true">
+            {velocity.text}
+          </dd>
         </div>
       ) : null}
     </dl>
