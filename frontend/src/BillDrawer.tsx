@@ -4,9 +4,12 @@ import { useEffect, useState } from 'react'
 import { apiUrl } from './api'
 import VoteTallyBar from './VoteTallyBar'
 import {
+  bipartisanTypeFromParties,
   bipartisanTypeLabel,
   formatBillDate,
   formatCosponsorBreakdown,
+  involvedParties,
+  partyBadgeClass,
   sanitizeCrsHtml,
   type Bill,
 } from './types'
@@ -91,7 +94,7 @@ export default function BillDrawer({
             </h2>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <PolicyAreaTag area={view.policy_area} />
-              <BipartisanTag type={view.bipartisan_type} />
+              <BipartisanTag bill={view} />
               <SponsorTag bill={view} />
             </div>
             <CosponsorLine bill={view} className="mt-2" />
@@ -142,12 +145,13 @@ export function PolicyAreaTag({ area }: { area: string | null }) {
   )
 }
 
-export function BipartisanTag({
-  type,
-}: {
-  type: Bill['bipartisan_type']
-}) {
-  const label = bipartisanTypeLabel(type)
+export function BipartisanTag({ bill }: { bill: Bill }) {
+  const parties = involvedParties(
+    bill.sponsor_party,
+    bill.cosponsor_party_breakdown,
+  )
+  const type = bipartisanTypeFromParties(parties) ?? bill.bipartisan_type
+  const label = bipartisanTypeLabel(type, parties)
   if (!label) {
     return null
   }
@@ -156,7 +160,9 @@ export function BipartisanTag({
       ? 'bg-emerald-900/50 text-emerald-300'
       : type === 'bipartisan'
         ? 'bg-violet-900/50 text-violet-300'
-        : 'bg-slate-700/80 text-slate-300'
+        : parties[0]
+          ? partyBadgeClass(parties[0])
+          : 'bg-slate-700/80 text-slate-300'
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${color}`}

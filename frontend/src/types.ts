@@ -183,9 +183,63 @@ export function partyShort(party: string) {
   return party
 }
 
-export function bipartisanTypeLabel(type: Bill['bipartisan_type']) {
-  if (type === 'single_party') return 'Single party'
-  if (type === 'bipartisan') return 'Bipartisan'
+const PARTY_DISPLAY_ORDER = [
+  'Democratic',
+  'Republican',
+  'Independent',
+  'Libertarian',
+]
+
+export function involvedParties(
+  sponsorParty: string | null | undefined,
+  breakdown: Record<string, number> | null | undefined,
+) {
+  const parties = new Set<string>()
+  if (sponsorParty) {
+    parties.add(sponsorParty)
+  }
+  for (const [party, count] of Object.entries(breakdown || {})) {
+    if (count > 0) {
+      parties.add(party)
+    }
+  }
+  return [...parties].sort((a, b) => {
+    const aIndex = PARTY_DISPLAY_ORDER.indexOf(a)
+    const bIndex = PARTY_DISPLAY_ORDER.indexOf(b)
+    if (aIndex === -1 && bIndex === -1) {
+      return a.localeCompare(b)
+    }
+    if (aIndex === -1) {
+      return 1
+    }
+    if (bIndex === -1) {
+      return -1
+    }
+    return aIndex - bIndex
+  })
+}
+
+export function bipartisanTypeFromParties(
+  parties: string[],
+): Bill['bipartisan_type'] {
+  if (parties.length >= 3) return 'tripartisan'
+  if (parties.length === 2) return 'bipartisan'
+  if (parties.length === 1) return 'single_party'
+  return null
+}
+
+export function bipartisanTypeLabel(
+  type: Bill['bipartisan_type'],
+  parties: string[] = [],
+) {
+  if (type === 'single_party') {
+    const party = parties[0]
+    return party ? `Single party ${partyShort(party)}` : 'Single party'
+  }
+  if (type === 'bipartisan') {
+    const shorts = parties.map(partyShort)
+    return shorts.length ? `Bipartisan ${shorts.join('/')}` : 'Bipartisan'
+  }
   if (type === 'tripartisan') return 'Tripartisan'
   return null
 }

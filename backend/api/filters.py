@@ -81,11 +81,37 @@ STATE_NAME_BY_ABBR = {
 
 STATE_ABBR_BY_NAME = {name.lower(): abbr for abbr, name in STATE_NAME_BY_ABBR.items()}
 
+BIPARTISAN_SINGLE_PARTY = "single_party"
+BIPARTISAN_BIPARTISAN = "bipartisan"
+BIPARTISAN_TRIPARTISAN = "tripartisan"
+
 
 def normalize_party(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     return PARTY_ALIASES.get(value.strip().upper(), value.strip())
+
+
+def classify_bipartisan_type(sponsor_party, party_breakdown):
+    """Classify a measure by how many distinct parties sponsored or cosponsored it.
+
+    One party → single_party, two → bipartisan, three or more → tripartisan.
+    Independent next to one other party is bipartisan, not tripartisan.
+    Returns None when no party data is present.
+    """
+    parties = set()
+    if sponsor_party:
+        parties.add(sponsor_party)
+    for party, count in (party_breakdown or {}).items():
+        if count:
+            parties.add(party)
+    if not parties:
+        return None
+    if len(parties) >= 3:
+        return BIPARTISAN_TRIPARTISAN
+    if len(parties) == 2:
+        return BIPARTISAN_BIPARTISAN
+    return BIPARTISAN_SINGLE_PARTY
 
 
 def normalize_state(value: Optional[str]) -> Optional[str]:

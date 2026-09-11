@@ -92,7 +92,7 @@ export default function BillsFeed() {
                   {bill.policy_area ? (
                     <PolicyAreaTag area={bill.policy_area} />
                   ) : null}
-                  <BipartisanTag type={bill.bipartisan_type} />
+                  <BipartisanTag bill={bill} />
                 </div>
               ) : null}
               <BillDates bill={bill} className="mt-2" />

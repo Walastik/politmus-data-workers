@@ -9,7 +9,7 @@ import requests
 from dotenv import load_dotenv
 from sqlalchemy import and_, exists, or_
 
-from api.filters import normalize_party, normalize_state
+from api.filters import classify_bipartisan_type, normalize_party, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Bill, Official, SenateRollCall, Vote
@@ -1297,12 +1297,6 @@ def fetch_house_vote_members(congress, session_number, roll_number):
     return members
 
 
-BIPARTISAN_SINGLE_PARTY = "single_party"
-BIPARTISAN_BIPARTISAN = "bipartisan"
-BIPARTISAN_TRIPARTISAN = "tripartisan"
-MAJOR_PARTIES = frozenset({"Democratic", "Republican"})
-
-
 def _sponsor_record(detail):
     sponsors = detail.get("sponsors") or []
     if not sponsors:
@@ -1335,27 +1329,6 @@ def _cosponsor_party_breakdown(cosponsors):
             continue
         counts[party] = counts.get(party, 0) + 1
     return dict(sorted(counts.items()))
-
-
-def classify_bipartisan_type(sponsor_party, party_breakdown):
-    """Classify a measure from its sponsor party plus cosponsor parties.
-
-    Both major parties (Democratic and Republican) → bipartisan.
-    Any Independent (or other non-major party) → tripartisan.
-    Otherwise → single_party. Returns None when no party data is present.
-    """
-    parties = set()
-    if sponsor_party:
-        parties.add(sponsor_party)
-    parties.update((party_breakdown or {}).keys())
-    if not parties:
-        return None
-    has_third_party = bool(parties - MAJOR_PARTIES)
-    if has_third_party:
-        return BIPARTISAN_TRIPARTISAN
-    if "Democratic" in parties and "Republican" in parties:
-        return BIPARTISAN_BIPARTISAN
-    return BIPARTISAN_SINGLE_PARTY
 
 
 def _sponsorship_fields(detail, cosponsors):

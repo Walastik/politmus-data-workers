@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from api.filters import classify_bipartisan_type
 from api.schemas import BillDetailOut
 from database import get_db
 from models import Bill, Official, Vote
@@ -61,7 +62,12 @@ def _bill_detail(bill: Bill, votes_summary: dict[str, dict[str, int]]) -> BillDe
         sponsor_name=bill.sponsor_name,
         sponsor_party=bill.sponsor_party,
         cosponsor_party_breakdown=bill.cosponsor_party_breakdown,
-        bipartisan_type=bill.bipartisan_type,
+        bipartisan_type=(
+            classify_bipartisan_type(
+                bill.sponsor_party, bill.cosponsor_party_breakdown
+            )
+            or bill.bipartisan_type
+        ),
         policy_area=bill.policy_area,
         summary=bill.summary,
         introduced_date=bill.introduced_date,

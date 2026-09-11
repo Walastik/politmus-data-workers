@@ -33,7 +33,7 @@ class Bill(Base):
     sponsor_party = Column(String, nullable=True)
     # Current (non-withdrawn) cosponsor counts by party, e.g. {"Democratic": 12, "Republican": 3}.
     cosponsor_party_breakdown = Column(JSONB, nullable=True)
-    # single_party, bipartisan (both major parties), or tripartisan (includes Independent).
+    # single_party (1), bipartisan (2), or tripartisan (3+ distinct parties).
     bipartisan_type = Column(String, nullable=True)
     policy_area = Column(String, nullable=True)
     summary = Column(Text, nullable=True)

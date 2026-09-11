@@ -478,7 +478,14 @@ class CosponsorPartisanshipTests(unittest.TestCase):
                 "Democratic",
                 {"Democratic": 10, "Independent": 1},
             ),
-            "tripartisan",
+            "bipartisan",
+        )
+        self.assertEqual(
+            classify_bipartisan_type(
+                "Republican",
+                {"Independent": 1},
+            ),
+            "bipartisan",
         )
         self.assertEqual(
             classify_bipartisan_type(
