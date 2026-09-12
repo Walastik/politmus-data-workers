@@ -1,4 +1,4 @@
-"""Classify unenriched bill summaries with a local Ollama model."""
+"""Extract policy effects from bill summaries with a local Ollama model."""
 
 from __future__ import annotations
 
@@ -11,11 +11,12 @@ from dotenv import load_dotenv
 
 from database import SessionLocal
 from init_db import ensure_schema
-from services.bill_classification import (
-    classify_one_bill,
+from services.bill_effects import (
+    extract_one_bill,
     ensure_default_guidelines,
     load_active_guidelines,
-    pending_classification_query,
+    pending_extraction_query,
+    persist_bill_effects,
     plain_summary,
 )
 
@@ -58,7 +59,7 @@ def ollama_chat_fn(client, model: str):
     return chat_fn
 
 
-def run_classification(
+def run_extraction(
     *,
     limit: int = 50,
     force: bool = False,
@@ -68,14 +69,17 @@ def run_classification(
     host: str | None = None,
     timeout: float | None = None,
     chat_fn=None,
+    persist_fn=None,
     session_factory=None,
 ) -> dict:
-    """Classify bills that have a summary but no classification yet."""
+    """Extract effects for bills that have a summary but no bill_effects yet."""
     ensure_schema()
     model_name = model or DEFAULT_MODEL
+    persist = persist_fn or persist_bill_effects
     stats = {
         "bills_pending": 0,
-        "classified": 0,
+        "extracted": 0,
+        "effects_saved": 0,
         "skipped": 0,
         "failed": 0,
         "dry_run": dry_run,
@@ -93,7 +97,7 @@ def run_classification(
         stats["guidelines_id"] = guideline.id
         stats["guidelines_name"] = guideline.name
 
-        query = pending_classification_query(
+        query = pending_extraction_query(
             session, force=force, bill_id=bill_id
         )
         if limit and limit > 0:
@@ -101,7 +105,7 @@ def run_classification(
         bills = query.all()
         stats["bills_pending"] = len(bills)
         print(
-            f"Found {len(bills)} bill(s) to classify "
+            f"Found {len(bills)} bill(s) to extract "
             f"(model={model_name}, guidelines={guideline.name!r})."
         )
         if not bills:
@@ -125,10 +129,12 @@ def run_classification(
             chat_fn = ollama_chat_fn(client, model_name)
 
         for index, bill in enumerate(bills, start=1):
-            print(f"[{index}/{len(bills)}] {bill.id} — classifying...")
+            print(f"[{index}/{len(bills)}] {bill.id} — extracting...")
             try:
-                payload = classify_one_bill(bill, guideline, model_name, chat_fn)
-                bill.classification = payload
+                output = extract_one_bill(bill, guideline.prompt, chat_fn)
+                rows = persist(
+                    session, bill, output, replace_existing=force
+                )
                 session.commit()
             except Exception as exc:
                 print(f"  Failed: {exc}")
@@ -136,20 +142,19 @@ def run_classification(
                 session.rollback()
                 guideline = load_active_guidelines(session) or guideline
                 continue
-            stats["classified"] += 1
-            print(
-                f"  funding={payload['funding_impact']} "
-                f"regulation={payload['regulatory_impact']}"
-            )
+            stats["extracted"] += 1
+            stats["effects_saved"] += len(rows)
+            print(f"  {len(rows)} effect(s)")
         return stats
     finally:
         session.close()
 
 
-def print_classification_stats(stats: dict) -> None:
-    print("\nBill classification summary")
+def print_extraction_stats(stats: dict) -> None:
+    print("\nBill effect extraction summary")
     print(f"  Pending considered: {stats['bills_pending']}")
-    print(f"  Classified:         {stats['classified']}")
+    print(f"  Bills extracted:    {stats['extracted']}")
+    print(f"  Effects saved:      {stats['effects_saved']}")
     print(f"  Skipped:            {stats['skipped']}")
     print(f"  Failed:             {stats['failed']}")
     print(f"  Model:              {stats['model']}")
@@ -165,24 +170,24 @@ def print_classification_stats(stats: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Classify bill CRS summaries with a local Ollama model and "
-            "store structured JSON on each bill."
+            "Extract policy effects from bill CRS summaries with a local "
+            "Ollama model and store them on bill_effects / policy_targets."
         )
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=50,
-        help="Maximum bills to classify this run (default 50). Use 0 for all.",
+        help="Maximum bills to extract this run (default 50). Use 0 for all.",
     )
     parser.add_argument(
         "--bill-id",
-        help="Classify a single bill by id (e.g. 119-hr-1).",
+        help="Extract a single bill by id (e.g. 119-hr-1).",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Reclassify bills that already have a classification.",
+        help="Re-extract bills that already have effects (replaces existing rows).",
     )
     parser.add_argument(
         "--dry-run",
@@ -210,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        stats = run_classification(
+        stats = run_extraction(
             limit=args.limit,
             force=args.force,
             bill_id=args.bill_id,
@@ -220,9 +225,9 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
         )
     except Exception as exc:
-        print(f"Classification failed: {exc}", file=sys.stderr)
+        print(f"Extraction failed: {exc}", file=sys.stderr)
         return 1
-    print_classification_stats(stats)
+    print_extraction_stats(stats)
     return 0 if stats["failed"] == 0 else 1
 
 

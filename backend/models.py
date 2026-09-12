@@ -43,20 +43,68 @@ class Bill(Base):
     days_to_vote = Column(Integer, nullable=True)
     # very_fast, fast, average, slow, or very_slow vs the corpus distribution.
     velocity_bucket = Column(String, nullable=True)
-    # Structured LLM classification of the CRS summary (impact scores + metadata).
-    classification = Column(JSONB, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     votes = relationship("Vote", back_populates="bill")
+    effects = relationship(
+        "BillEffect", back_populates="bill", cascade="all, delete-orphan"
+    )
 
 
-class ClassificationGuideline(Base):
-    """Prompt text that tells the local LLM how to classify bills.
+class PolicyTarget(Base):
+    """Reusable noun the accountability engine can join bills and claims against.
+
+    Grows as the extractor (and later member claims) mention new agencies,
+    programs, or rights. parent_id is for optional rollups (ICE -> DHS).
+    """
+    __tablename__ = "policy_targets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    slug = Column(String, unique=True, nullable=False)
+    parent_id = Column(Integer, ForeignKey("policy_targets.id"), nullable=True)
+
+    parent = relationship(
+        "PolicyTarget", remote_side=[id], back_populates="children"
+    )
+    children = relationship("PolicyTarget", back_populates="parent")
+    effects = relationship("BillEffect", back_populates="target")
+
+
+class BillEffect(Base):
+    """One extracted policy fact on a bill (target + mechanism + direction)."""
+    __tablename__ = "bill_effects"
+    __table_args__ = (
+        UniqueConstraint(
+            "bill_id",
+            "target_id",
+            "mechanism",
+            name="uq_bill_effects_bill_target_mechanism",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_id = Column(String, ForeignKey("bills.id"), nullable=False)
+    target_id = Column(Integer, ForeignKey("policy_targets.id"), nullable=False)
+    # funding | regulation | oversight | taxation
+    mechanism = Column(String, nullable=False)
+    # increase | decrease | maintain | mixed
+    direction = Column(String, nullable=False)
+    # low | medium | high
+    magnitude = Column(String, nullable=False)
+    rationale = Column(Text, nullable=True)
+
+    bill = relationship("Bill", back_populates="effects")
+    target = relationship("PolicyTarget", back_populates="effects")
+
+
+class ExtractionGuideline(Base):
+    """Prompt text that tells the local LLM how to extract bill effects.
 
     Stored in Postgres so guidelines can change without redeploying the worker.
-    The classifier loads the newest active row each run.
+    The extractor loads the newest active row each run.
     """
-    __tablename__ = "classification_guidelines"
+    __tablename__ = "extraction_guidelines"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, unique=True, nullable=False)

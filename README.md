@@ -38,7 +38,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    python init_db.py
    ```
 
-   This creates `officials`, `bills`, `votes`, and `classification_guidelines`, and adds any new bill columns that an older database is missing.
+   This creates `officials`, `bills`, `votes`, `policy_targets`, `bill_effects`, and `extraction_guidelines`, and adds any new bill columns that an older database is missing.
 
 ## Scripts
 
@@ -106,25 +106,25 @@ python congress_client.py senate-votes --congress 119 --session 1
 python congress_client.py enrich
 ```
 
-**Classify bill summaries** — sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores structured JSON on `bills.classification` (`funding_impact`, `regulatory_impact`, `reasoning`, plus model metadata). Only bills with a summary and no classification are processed, unless you pass `--force`. Classification rules live in the `classification_guidelines` table so you can update the prompt in Postgres without changing worker code.
+**Extract bill effects** — sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores normalized policy facts: a growing `policy_targets` catalog (the nouns, e.g. ICE, Voting Eligibility) and one `bill_effects` row per fact (`mechanism`, `direction`, `magnitude`, `rationale`). Only bills with a summary and no effects yet are processed, unless you pass `--force`. Extraction rules live in `extraction_guidelines` so you can update the prompt in Postgres without changing worker code.
 
 Requires a running Ollama instance (default `http://localhost:11434`) and a pulled model such as `qwen2.5-coder:32b`. The worker is meant to run on the Mac Mini that hosts Ollama, pointed at the same `DATABASE_URL` as the rest of the pipeline.
 
 ```bash
-python llm_classifier.py
-python llm_classifier.py --limit 20
-python llm_classifier.py --bill-id 119-hr-1
-python llm_classifier.py --dry-run
-python llm_classifier.py --force --limit 5
-python congress_client.py classify --limit 20
+python llm_extractor.py
+python llm_extractor.py --limit 20
+python llm_extractor.py --bill-id 119-hr-1
+python llm_extractor.py --dry-run
+python llm_extractor.py --force --limit 5
+python congress_client.py extract --limit 20
 ```
 
-`--limit 0` classifies every matching bill. On timeout or a bad model response the worker logs the error, leaves that row unclassified, and continues.
+`--limit 0` extracts every matching bill. On timeout or a bad model response the worker logs the error, leaves that bill untouched, and continues. New target names are slugified and reused when the slug already exists.
 
-To change the scoring rules, update the active row in `classification_guidelines` (the worker loads the newest `is_active` prompt each run):
+To change the extraction rules, update the active row in `extraction_guidelines` (the worker loads the newest `is_active` prompt each run):
 
 ```sql
-UPDATE classification_guidelines
+UPDATE extraction_guidelines
 SET prompt = 'your new instructions',
     updated_at = NOW() AT TIME ZONE 'utc'
 WHERE name = 'default';
@@ -133,7 +133,7 @@ WHERE name = 'default';
 On a Mac Mini, an hourly cron is enough:
 
 ```
-0 * * * * cd /path/to/politmus-data-workers/backend && /path/to/venv/bin/python llm_classifier.py --limit 50
+0 * * * * cd /path/to/politmus-data-workers/backend && /path/to/venv/bin/python llm_extractor.py --limit 50
 ```
 
 All Congress.gov requests pause briefly between calls and retry with exponential backoff on HTTP 429 and 5xx responses. Re-running these commands is idempotent: existing bills are updated in place, and votes are upserted per official per bill.

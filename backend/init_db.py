@@ -2,9 +2,9 @@ from sqlalchemy import text
 
 from database import engine, Base
 from models import *
-from services.bill_classification import (
+from services.bill_effects import (
     DEFAULT_GUIDELINES_NAME,
-    DEFAULT_GUIDELINES_PROMPT,
+    DEFAULT_EXTRACTION_PROMPT,
 )
 
 def ensure_schema():
@@ -87,21 +87,31 @@ def ensure_schema():
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS velocity_bucket VARCHAR"
         ))
         conn.execute(text(
-            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS classification JSONB"
+            "ALTER TABLE bills DROP COLUMN IF EXISTS classification"
         ))
+        conn.execute(text("DROP TABLE IF EXISTS classification_guidelines"))
         conn.execute(text(
             """
-            INSERT INTO classification_guidelines
+            INSERT INTO extraction_guidelines
                 (name, is_active, prompt, updated_at)
             SELECT :name, TRUE, :prompt, (NOW() AT TIME ZONE 'utc')
             WHERE NOT EXISTS (
-                SELECT 1 FROM classification_guidelines WHERE name = :name
+                SELECT 1 FROM extraction_guidelines WHERE name = :name
             )
             """
         ), {
             "name": DEFAULT_GUIDELINES_NAME,
-            "prompt": DEFAULT_GUIDELINES_PROMPT,
+            "prompt": DEFAULT_EXTRACTION_PROMPT,
         })
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_policy_targets_slug "
+            "ON policy_targets (slug)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_bill_effects_bill_target_mechanism "
+            "ON bill_effects (bill_id, target_id, mechanism)"
+        ))
         conn.execute(text(
             """
             UPDATE bills

@@ -1471,7 +1471,6 @@ def upsert_bill(
             ),
             days_to_vote=existing.days_to_vote if existing else None,
             velocity_bucket=existing.velocity_bucket if existing else None,
-            classification=existing.classification if existing else None,
         )
     )
     session.flush()
@@ -2324,6 +2323,7 @@ def main():
             "sponsors",
             "backfill-sponsors",
             "enrich",
+            "extract",
             "classify",
         ],
         default="bills",
@@ -2334,7 +2334,8 @@ def main():
         "backfill-sponsors: insert missing historical sponsors. "
         "enrich: fill policy area, CRS summary, dates, sponsorship, "
         "and vote-velocity on existing bills. "
-        "classify: score bill summaries with the local Ollama classifier.",
+        "extract: pull policy effects from bill summaries with Ollama. "
+        "classify: alias for extract.",
     )
     parser.add_argument("--limit", type=int, default=50, help="Bills to fetch (default 50).")
     parser.add_argument(
@@ -2392,11 +2393,11 @@ def main():
         _print_enrichment_stats(enrichment_stats)
         return
 
-    if args.command == "classify":
-        from llm_classifier import run_classification, print_classification_stats
+    if args.command in {"extract", "classify"}:
+        from llm_extractor import run_extraction, print_extraction_stats
 
-        classification_stats = run_classification(limit=args.limit)
-        print_classification_stats(classification_stats)
+        extraction_stats = run_extraction(limit=args.limit)
+        print_extraction_stats(extraction_stats)
         return
 
     if args.command == "votes":
