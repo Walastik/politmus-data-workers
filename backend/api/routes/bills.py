@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import desc, func, nulls_first, nulls_last
 from sqlalchemy.orm import Session
 
 from api.filters import classify_bipartisan_type, normalize_party
@@ -66,6 +66,25 @@ def sort_bill_voters(voters: list[BillVoterOut]) -> list[BillVoterOut]:
         voters,
         key=lambda voter: _vote_sort_key(voter.position, voter.name),
     )
+
+
+def bills_feed_order():
+    """Unvoted bills first (by introduced date desc), then most recent vote."""
+    return (
+        nulls_first(desc(Bill.voted_date)),
+        nulls_last(desc(Bill.introduced_date)),
+        desc(Bill.id),
+    )
+
+
+def bill_feed_sort_key(bill: Bill) -> tuple:
+    """Python equivalent of `bills_feed_order` for unit tests."""
+    unvoted = 0 if bill.voted_date is None else 1
+    voted_desc = -bill.voted_date.toordinal() if bill.voted_date else 0
+    introduced_desc = (
+        -bill.introduced_date.toordinal() if bill.introduced_date else 0
+    )
+    return (unvoted, voted_desc, introduced_desc, bill.id or "")
 
 
 def _record_vote_count(
@@ -162,7 +181,7 @@ def list_bills(
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    bills = db.query(Bill).order_by(Bill.id.desc()).limit(limit).all()
+    bills = db.query(Bill).order_by(*bills_feed_order()).limit(limit).all()
     summaries, party_summaries = _vote_summaries(db, [bill.id for bill in bills])
     return [
         _bill_detail(

@@ -1,3 +1,4 @@
+from datetime import date
 import os
 import unittest
 
@@ -13,6 +14,8 @@ from api.routes.bills import (
     _empty_chamber_summaries,
     _empty_party_summaries,
     _record_vote_count,
+    bill_feed_sort_key,
+    bills_feed_order,
     last_name_from_official_name,
     sort_bill_voters,
 )
@@ -157,6 +160,70 @@ class BipartisanTypeTests(unittest.TestCase):
         detail = _bill_detail(bill, _empty_chamber_summaries())
         self.assertEqual(detail.days_to_vote, 12)
         self.assertEqual(detail.velocity_bucket, "fast")
+
+
+class BillFeedSortTests(unittest.TestCase):
+    def test_unvoted_bills_precede_voted_then_dates_desc(self):
+        unvoted_new = Bill(
+            id="119-hr-3",
+            title="Unvoted new",
+            introduced_date=date(2026, 3, 1),
+        )
+        unvoted_old = Bill(
+            id="119-hr-2",
+            title="Unvoted old",
+            introduced_date=date(2026, 1, 1),
+        )
+        unvoted_no_intro = Bill(id="119-hr-1", title="Unvoted no intro")
+        voted_recent_later_intro = Bill(
+            id="119-hr-6",
+            title="Voted Sep later intro",
+            introduced_date=date(2026, 2, 1),
+            voted_date=date(2026, 9, 1),
+        )
+        voted_recent_earlier_intro = Bill(
+            id="119-hr-5",
+            title="Voted Sep earlier intro",
+            introduced_date=date(2026, 1, 1),
+            voted_date=date(2026, 9, 1),
+        )
+        voted_older = Bill(
+            id="119-hr-4",
+            title="Voted Jun",
+            introduced_date=date(2026, 5, 1),
+            voted_date=date(2026, 6, 1),
+        )
+        ordered = sorted(
+            [
+                voted_older,
+                unvoted_no_intro,
+                voted_recent_earlier_intro,
+                unvoted_old,
+                voted_recent_later_intro,
+                unvoted_new,
+            ],
+            key=bill_feed_sort_key,
+        )
+        self.assertEqual(
+            [bill.id for bill in ordered],
+            [
+                "119-hr-3",
+                "119-hr-2",
+                "119-hr-1",
+                "119-hr-6",
+                "119-hr-5",
+                "119-hr-4",
+            ],
+        )
+
+    def test_sql_order_puts_null_voted_dates_first(self):
+        from sqlalchemy.dialects import postgresql
+        from sqlalchemy.sql import select
+
+        stmt = select(Bill).order_by(*bills_feed_order())
+        sql = str(stmt.compile(dialect=postgresql.dialect())).lower()
+        self.assertIn("voted_date desc nulls first", sql)
+        self.assertIn("introduced_date desc nulls last", sql)
 
 
 if __name__ == "__main__":

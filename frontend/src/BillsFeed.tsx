@@ -2,8 +2,40 @@ import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer, { BillDates, BipartisanTag, PolicyAreaTag } from './BillDrawer'
-import VoteTallyBar, { voteTotal } from './VoteTallyBar'
+import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
+
+function compareDatesDesc(a: string | null, b: string | null) {
+  if (a === b) {
+    return 0
+  }
+  if (!a) {
+    return 1
+  }
+  if (!b) {
+    return -1
+  }
+  return b.localeCompare(a)
+}
+
+function compareBillsForFeed(a: Bill, b: Bill) {
+  const aUnvoted = a.voted_date == null
+  const bUnvoted = b.voted_date == null
+  if (aUnvoted !== bUnvoted) {
+    return aUnvoted ? -1 : 1
+  }
+  if (!aUnvoted) {
+    const voted = compareDatesDesc(a.voted_date, b.voted_date)
+    if (voted !== 0) {
+      return voted
+    }
+  }
+  const introduced = compareDatesDesc(a.introduced_date, b.introduced_date)
+  if (introduced !== 0) {
+    return introduced
+  }
+  return b.id.localeCompare(a.id)
+}
 
 export default function BillsFeed() {
   const [bills, setBills] = useState<Bill[]>([])
@@ -54,14 +86,7 @@ export default function BillsFeed() {
     return <p className="text-slate-400">No bills have been ingested yet.</p>
   }
 
-  const ordered = [...bills].sort((a, b) => {
-    const aVotes = voteTotal(a.votes_summary)
-    const bVotes = voteTotal(b.votes_summary)
-    if (aVotes !== bVotes) {
-      return bVotes - aVotes
-    }
-    return b.id.localeCompare(a.id)
-  })
+  const ordered = [...bills].sort(compareBillsForFeed)
 
   return (
     <>
