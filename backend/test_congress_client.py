@@ -11,6 +11,7 @@ os.environ.setdefault(
 from congress_client import (
     bill_id_from_senate_issue,
     last_name_from_official_name,
+    make_source_roll_call_id,
     map_senate_document_type,
     normalize_position,
     parse_senate_vote_date,
@@ -20,6 +21,7 @@ from congress_client import (
     senate_menu_has_legislation,
     senate_vote_menu_url,
     senate_vote_url,
+    _house_roll_call_metadata,
     _positions_from_senate_members,
     senator_lookup_key,
 )
@@ -31,6 +33,9 @@ SAMPLE_SENATE_VOTE_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
   <session>1</session>
   <vote_number>1</vote_number>
   <vote_date>January 9, 2025,  02:54 PM</vote_date>
+  <vote_question_text>On Cloture on the Motion to Proceed S. 5</vote_question_text>
+  <vote_result>Cloture on the Motion to Proceed Agreed to</vote_result>
+  <majority_requirement>3/5</majority_requirement>
   <document>
     <document_congress>119</document_congress>
     <document_type>S.</document_type>
@@ -182,6 +187,15 @@ class SenateXmlParseTests(unittest.TestCase):
         self.assertEqual(parsed["members"][0]["last_name"], "Cruz")
         self.assertEqual(parsed["members"][0]["state"], "TX")
         self.assertEqual(parsed["members"][0]["vote_cast"], "Yea")
+        self.assertEqual(
+            parsed["question"],
+            "On Cloture on the Motion to Proceed S. 5",
+        )
+        self.assertEqual(
+            parsed["result"],
+            "Cloture on the Motion to Proceed Agreed to",
+        )
+        self.assertEqual(parsed["requires"], "3/5")
 
     def test_amendment_falls_back_to_underlying_bill(self):
         parsed = parse_senate_vote_xml(SAMPLE_AMENDMENT_VOTE_XML)
@@ -250,15 +264,36 @@ class PositionAndDateTests(unittest.TestCase):
 
 class SyncSenateVotesTests(unittest.TestCase):
     @patch("congress_client.fetch_senate_vote_xml", return_value=SAMPLE_SENATE_VOTE_XML)
-    def test_upserts_by_official_and_bill(self, _mock_fetch):
+    def test_upserts_roll_call_then_member_votes(self, _mock_fetch):
         from congress_client import sync_senate_votes
-        from models import Bill, SenateRollCall, Vote
+        from models import Bill, RollCall, SenateRollCall, Vote
 
         bill = Bill(id="119-s-5", title="Test")
-        existing = Vote(bill_id="119-s-5", official_id="C001098", position="No")
+        existing_roll_call = RollCall(
+            id=10,
+            bill_id="119-s-5",
+            chamber="Senate",
+            source_roll_call_id="senate-119-1-00001",
+        )
+        existing = Vote(
+            roll_call_id=10,
+            official_id="C001098",
+            position="No",
+        )
+
+        def query(model):
+            mocked = MagicMock()
+            if model is RollCall:
+                mocked.filter_by.return_value.one_or_none.return_value = (
+                    existing_roll_call
+                )
+            elif model is Vote:
+                mocked.filter_by.return_value.all.return_value = [existing]
+            return mocked
+
         session = MagicMock()
         session.get.return_value = bill
-        session.query.return_value.filter_by.return_value.all.return_value = [existing]
+        session.query.side_effect = query
 
         lookup = {
             senator_lookup_key("Cruz", "TX"): "C001098",
@@ -277,7 +312,13 @@ class SyncSenateVotesTests(unittest.TestCase):
         added = [call.args[0] for call in session.add.call_args_list]
         self.assertEqual(sum(1 for obj in added if isinstance(obj, Vote)), 3)
         self.assertEqual(sum(1 for obj in added if isinstance(obj, SenateRollCall)), 1)
+        self.assertEqual(sum(1 for obj in added if isinstance(obj, RollCall)), 0)
         self.assertEqual(existing.position, "Yes")
+        self.assertEqual(
+            existing_roll_call.result,
+            "Cloture on the Motion to Proceed Agreed to",
+        )
+        self.assertEqual(existing_roll_call.requires, "3/5")
         session.commit.assert_not_called()
 
 
@@ -560,6 +601,133 @@ class CosponsorPartisanshipTests(unittest.TestCase):
         self.assertEqual(sponsor_party, "Republican")
         self.assertIsNone(breakdown)
         self.assertIsNone(bipartisan_type)
+
+
+class LatestActionTests(unittest.TestCase):
+    def test_reads_congress_latest_action(self):
+        from congress_client import latest_action_from_congress
+
+        text, action_date = latest_action_from_congress(
+            {
+                "latestAction": {
+                    "actionDate": "2025-07-04",
+                    "text": "Became Public Law No: 119-5.",
+                }
+            }
+        )
+        self.assertEqual(text, "Became Public Law No: 119-5.")
+        self.assertEqual(action_date.isoformat(), "2025-07-04")
+
+
+class RollCallSourceTests(unittest.TestCase):
+    def test_pads_chamber_congress_session_and_number(self):
+        self.assertEqual(
+            make_source_roll_call_id("Senate", 119, 1, 1),
+            "senate-119-1-00001",
+        )
+        self.assertEqual(
+            make_source_roll_call_id("House", 119, 1, 17),
+            "house-119-1-00017",
+        )
+
+
+class HouseRollCallMetadataTests(unittest.TestCase):
+    def test_reads_question_result_and_date_from_members_payload(self):
+        payload = {
+            "houseRollCallVoteMemberVotes": {
+                "result": "Passed",
+                "voteQuestion": "On Passage",
+                "startDate": "2025-01-16T11:00:00-05:00",
+                "results": [],
+            }
+        }
+        parsed = _house_roll_call_metadata(payload)
+        self.assertEqual(parsed["result"], "Passed")
+        self.assertEqual(parsed["question"], "On Passage")
+        self.assertEqual(parsed["date"].isoformat(), "2025-01-16")
+        self.assertIsNone(parsed["requires"])
+
+
+class SyncHouseVotesTests(unittest.TestCase):
+    @patch("congress_client.fetch_house_roll_call")
+    @patch("congress_client.fetch_bill_actions")
+    def test_stores_house_roll_call_outcome(self, mock_actions, mock_house):
+        from congress_client import sync_bill_votes
+        from models import Bill, RollCall, Vote
+
+        bill = Bill(id="119-hr-1", title="Test")
+        mock_actions.return_value = [
+            {
+                "recordedVotes": [
+                    {
+                        "chamber": "House",
+                        "congress": 119,
+                        "sessionNumber": 1,
+                        "rollNumber": 17,
+                        "date": "2025-01-16T16:00:00Z",
+                    }
+                ]
+            }
+        ]
+        mock_house.return_value = (
+            [
+                {"bioguideID": "A000055", "voteCast": "Yea"},
+                {"bioguideID": "B000001", "voteCast": "Nay"},
+            ],
+            {
+                "question": "On Passage",
+                "result": "Passed",
+                "requires": None,
+                "date": date(2025, 1, 16),
+            },
+        )
+
+        created_roll_call = RollCall(
+            id=3,
+            bill_id="119-hr-1",
+            chamber="House",
+            source_roll_call_id="house-119-1-00017",
+        )
+
+        def query(model):
+            mocked = MagicMock()
+            if model is RollCall:
+                mocked.filter_by.return_value.one_or_none.return_value = None
+            elif model is Vote:
+                mocked.filter_by.return_value.all.return_value = []
+            return mocked
+
+        session = MagicMock()
+        session.get.return_value = bill
+        session.query.side_effect = query
+
+        def add(obj):
+            if isinstance(obj, RollCall):
+                obj.id = created_roll_call.id
+
+        session.add.side_effect = add
+
+        stats = sync_bill_votes(
+            119,
+            "hr",
+            1,
+            session=session,
+            official_ids={"A000055", "B000001"},
+            ensure_bill=False,
+        )
+
+        self.assertEqual(stats["house_roll_calls"], 1)
+        self.assertEqual(stats["inserted"], 2)
+        added = [call.args[0] for call in session.add.call_args_list]
+        roll_calls = [obj for obj in added if isinstance(obj, RollCall)]
+        votes = [obj for obj in added if isinstance(obj, Vote)]
+        self.assertEqual(len(roll_calls), 1)
+        self.assertEqual(roll_calls[0].result, "Passed")
+        self.assertEqual(roll_calls[0].question, "On Passage")
+        self.assertEqual(roll_calls[0].chamber, "House")
+        self.assertEqual(roll_calls[0].source_roll_call_id, "house-119-1-00017")
+        self.assertEqual({vote.official_id for vote in votes}, {"A000055", "B000001"})
+        self.assertTrue(all(vote.roll_call_id == 3 for vote in votes))
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from openstates_client import (
     EXCLUDED_JURISDICTIONS,
     PEOPLE_INCLUDES,
     TARGET_STATES,
+    bill_fields_from_openstates,
     classifications_for_state,
     district_from_role,
     fetch_state_legislators,
@@ -509,6 +510,45 @@ class OpenStatesCliTests(unittest.TestCase):
         ):
             main()
         mock_sync_all.assert_called_once_with(limit=5)
+
+
+class OpenStatesBillMappingTests(unittest.TestCase):
+    def test_maps_latest_action_to_status(self):
+        fields = bill_fields_from_openstates(
+            {
+                "id": "ocd-bill/example",
+                "identifier": "HB 1",
+                "title": "A state bill",
+                "subject": ["BUDGET"],
+                "first_action_date": "2025-01-10",
+                "latest_action_date": "2025-06-15",
+                "latest_action_description": "Signed by Governor",
+            }
+        )
+        self.assertEqual(fields["id"], "ocd-bill/example")
+        self.assertEqual(fields["level"], "state")
+        self.assertEqual(fields["policy_area"], "BUDGET")
+        self.assertEqual(fields["status"], "Became Law")
+        self.assertEqual(fields["latest_action_text"], "Signed by Governor")
+        self.assertEqual(fields["latest_action_date"].isoformat(), "2025-06-15")
+
+
+class OpenStatesBillCliTests(unittest.TestCase):
+    @patch("openstates_client.sync_state_bills")
+    def test_bills_command_uses_state_and_limit(self, mock_sync):
+        mock_sync.return_value = {
+            "state": "Texas",
+            "fetched": 2,
+            "saved": 2,
+            "skipped": 0,
+        }
+        with patch.object(
+            sys,
+            "argv",
+            ["openstates_client.py", "bills", "--state", "TX", "--limit", "20"],
+        ):
+            main()
+        mock_sync.assert_called_once_with("TX", limit=20)
 
 
 if __name__ == "__main__":

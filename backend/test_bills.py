@@ -13,6 +13,7 @@ from api.routes.bills import (
     _chamber_for_office,
     _empty_chamber_summaries,
     _empty_party_summaries,
+    _latest_roll_call_ids,
     _record_vote_count,
     bill_feed_sort_key,
     bills_feed_order,
@@ -160,6 +161,55 @@ class BipartisanTypeTests(unittest.TestCase):
         detail = _bill_detail(bill, _empty_chamber_summaries())
         self.assertEqual(detail.days_to_vote, 12)
         self.assertEqual(detail.velocity_bucket, "fast")
+
+    def test_bill_detail_includes_roll_calls(self):
+        from models import RollCall
+
+        bill = Bill(id="119-hr-1", title="Test")
+        roll_call = RollCall(
+            id=7,
+            bill_id="119-hr-1",
+            chamber="House",
+            question="On Passage",
+            result="Passed",
+            requires="1/2",
+            source_roll_call_id="house-119-1-00017",
+        )
+        detail = _bill_detail(
+            bill,
+            _empty_chamber_summaries(),
+            roll_calls=[roll_call],
+        )
+        self.assertEqual(len(detail.roll_calls), 1)
+        self.assertEqual(detail.roll_calls[0].result, "Passed")
+        self.assertEqual(detail.roll_calls[0].question, "On Passage")
+        self.assertEqual(detail.roll_calls[0].chamber, "House")
+        self.assertEqual(detail.roll_calls[0].requires, "1/2")
+        self.assertIsNone(detail.status)
+
+    def test_bill_detail_includes_status(self):
+        bill = Bill(
+            id="119-hr-1",
+            title="Test",
+            status="Became Law",
+            latest_action_text="Became Public Law No: 119-1.",
+        )
+        detail = _bill_detail(bill, _empty_chamber_summaries())
+        self.assertEqual(detail.status, "Became Law")
+        self.assertEqual(
+            detail.latest_action_text,
+            "Became Public Law No: 119-1.",
+        )
+
+    def test_latest_roll_call_ids_picks_newest_per_chamber(self):
+        from models import RollCall
+
+        house_old = RollCall(id=1, bill_id="119-hr-1", chamber="House")
+        senate = RollCall(id=2, bill_id="119-hr-1", chamber="Senate")
+        house_new = RollCall(id=3, bill_id="119-hr-1", chamber="House")
+        # Helper expects newest-first order, matching _roll_calls_by_bill.
+        ids = _latest_roll_call_ids([house_new, senate, house_old])
+        self.assertEqual(set(ids), {3, 2})
 
 
 class BillFeedSortTests(unittest.TestCase):

@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -11,6 +11,10 @@ from api.filters import STATE_ABBR_BY_NAME, STATE_NAME_BY_ABBR, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Official, StateSyncLog
+from status_mapper import (
+    derive_bill_status,
+    origin_chamber_from_identifier,
+)
 
 load_dotenv()
 
@@ -572,41 +576,194 @@ def sync_all_states(limit=None):
     return results, failures
 
 
+def parse_openstates_date(value):
+    """Parse OpenStates date strings such as 2025-05-01."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def bill_fields_from_openstates(payload):
+    """Map an OpenStates /bills list row to upsert fields."""
+    payload = payload if isinstance(payload, dict) else {}
+    bill_id = _text_or_none(payload.get("id"))
+    identifier = _text_or_none(payload.get("identifier"))
+    action_text = _text_or_none(payload.get("latest_action_description"))
+    action_date = parse_openstates_date(payload.get("latest_action_date"))
+    subjects = payload.get("subject") or []
+    policy_area = None
+    if isinstance(subjects, list):
+        for item in subjects:
+            if isinstance(item, str) and item.strip():
+                policy_area = item.strip()
+                break
+    origin = origin_chamber_from_identifier(identifier)
+    return {
+        "id": bill_id,
+        "title": _text_or_none(payload.get("title")),
+        "introduced_date": parse_openstates_date(payload.get("first_action_date")),
+        "latest_action_text": action_text,
+        "latest_action_date": action_date,
+        "policy_area": policy_area,
+        "status": derive_bill_status(action_text, origin_chamber=origin),
+        "level": "state",
+    }
+
+
+def fetch_state_bills(state_code, limit=50):
+    """Recent bills for one jurisdiction, newest latest_action first."""
+    if limit < 1:
+        raise ValueError("bill limit must be a positive integer")
+    abbr, state_name = require_target_state(state_code)
+    results = []
+    page = 1
+    while len(results) < limit:
+        remaining = limit - len(results)
+        print(
+            f"  Fetching {abbr} bills (page {page}, up to {remaining})..."
+        )
+        payload = openstates_get(
+            "/bills",
+            params={
+                "jurisdiction": abbr.lower(),
+                "sort": "latest_action_desc",
+                "page": page,
+                "per_page": min(PAGE_SIZE, remaining),
+            },
+        )
+        batch = [
+            item for item in (payload.get("results") or []) if isinstance(item, dict)
+        ]
+        if not batch:
+            break
+        results.extend(batch)
+        pagination = payload.get("pagination") or {}
+        max_page = pagination.get("max_page") or page
+        if page >= max_page:
+            break
+        page += 1
+    return results[:limit], abbr, state_name
+
+
+def sync_state_bills(state_code, limit=50):
+    """Upsert OpenStates bills for one state, including status from latest action."""
+    from congress_client import upsert_bill
+
+    _require_api_key()
+    abbr, state_name = require_target_state(state_code)
+    ensure_schema()
+    bills, abbr, state_name = fetch_state_bills(abbr, limit=limit)
+    session = SessionLocal()
+    saved = 0
+    skipped = 0
+    try:
+        total = len(bills)
+        print(f"Fetched {total} OpenStates bills for {state_name}.")
+        for index, payload in enumerate(bills, start=1):
+            fields = bill_fields_from_openstates(payload)
+            if not fields["id"]:
+                skipped += 1
+                continue
+            upsert_bill(
+                session,
+                fields["id"],
+                fields["title"] or fields["id"],
+                sponsor_id=None,
+                policy_area=fields["policy_area"],
+                introduced_date=fields["introduced_date"],
+                latest_action_text=fields["latest_action_text"],
+                latest_action_date=fields["latest_action_date"],
+                status=fields["status"],
+                level="state",
+            )
+            saved += 1
+            print(
+                f"[{index}/{total}] {payload.get('identifier') or fields['id']} "
+                f"status={fields['status']!r}"
+            )
+        session.commit()
+        return {
+            "state": state_name,
+            "fetched": total,
+            "saved": saved,
+            "skipped": skipped,
+        }
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Ingest OpenStates state legislators and governors into officials."
+        description=(
+            "Ingest OpenStates state legislators, governors, and bills."
+        )
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["members"],
+        choices=["members", "bills"],
         default="members",
-        help="members: current state legislators and governor (default).",
+        help=(
+            "members: current state legislators and governor (default). "
+            "bills: recent state legislation and status from latest action."
+        ),
     )
-    state_group = parser.add_mutually_exclusive_group(required=True)
-    state_group.add_argument(
+    parser.add_argument(
         "--state",
         help="State postal abbreviation or name, e.g. TX or Texas.",
     )
-    state_group.add_argument(
+    parser.add_argument(
         "--all-states",
         action="store_true",
         help=(
-            "Ingest every standard US state in TARGET_STATES "
+            "With members: ingest every standard US state in TARGET_STATES "
             "(excludes DC and territories). Continues after a single-state failure."
         ),
     )
-    state_group.add_argument(
+    parser.add_argument(
         "--limit",
         type=int,
         metavar="N",
         help=(
-            "Ingest the N standard US states with the oldest last_synced_at "
-            "timestamps (round-robin). Example: --limit 5."
+            "With members: ingest the N states with the oldest last_synced_at "
+            "(round-robin). With bills: ingest the N newest bills for --state. "
+            "Example: --limit 5."
         ),
     )
     args = parser.parse_args()
 
+    if args.state and args.all_states:
+        parser.error("--state and --all-states cannot be combined")
+
+    if args.command == "bills":
+        if args.all_states:
+            parser.error("bills requires --state (not --all-states)")
+        if not args.state:
+            parser.error("bills requires --state")
+        bill_limit = 50 if args.limit is None else args.limit
+        if bill_limit < 1:
+            parser.error("--limit must be a positive integer")
+        stats = sync_state_bills(args.state, limit=bill_limit)
+        print("\nOpenStates bill ingest summary")
+        print(f"  State:    {stats['state']}")
+        print(f"  Fetched:  {stats['fetched']}")
+        print(f"  Upserted: {stats['saved']}")
+        print(f"  Skipped:  {stats['skipped']}")
+        return
+
+    if args.limit is not None and args.state:
+        parser.error("members --limit cannot be combined with --state")
     if args.command == "members":
         if args.all_states:
             _results, failures = sync_all_states()
@@ -618,9 +775,11 @@ def main():
             _results, failures = sync_all_states(limit=args.limit)
             if failures:
                 sys.exit(1)
-        else:
+        elif args.state:
             stats = sync_state_members(args.state)
             _print_member_stats(stats)
+        else:
+            parser.error("members requires --state, --all-states, or --limit")
 
 
 if __name__ == "__main__":

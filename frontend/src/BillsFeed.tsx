@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
-import BillDrawer, { BillDates, BipartisanTag, PolicyAreaTag } from './BillDrawer'
+import BillDrawer, { BillDates, BipartisanTag, PolicyAreaTag, StatusTag } from './BillDrawer'
 import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
 
@@ -112,8 +112,9 @@ export default function BillsFeed() {
               <h3 className="mt-2 text-base font-semibold leading-snug">
                 {bill.title || 'Untitled bill'}
               </h3>
-              {bill.policy_area || bill.bipartisan_type ? (
+              {bill.status || bill.policy_area || bill.bipartisan_type ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusTag status={bill.status} />
                   {bill.policy_area ? (
                     <PolicyAreaTag area={bill.policy_area} />
                   ) : null}

@@ -12,8 +12,13 @@ from sqlalchemy import and_, exists, or_
 from api.filters import classify_bipartisan_type, normalize_party, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
-from models import Bill, Official, SenateRollCall, Vote
+from models import Bill, Official, RollCall, SenateRollCall, Vote
 from services.bill_analytics import refresh_bill_velocity
+from status_mapper import (
+    STATUS_INTRODUCED,
+    derive_bill_status,
+    origin_chamber_from_bill_id,
+)
 
 load_dotenv()
 
@@ -66,6 +71,9 @@ POSITION_MAP = {
     "not voting": "Not Voting",
     "notvoting": "Not Voting",
 }
+
+ROLL_CALL_HOUSE = "House"
+ROLL_CALL_SENATE = "Senate"
 
 
 def _require_api_key():
@@ -408,6 +416,11 @@ def parse_senate_vote_xml(xml_bytes, congress=None):
         "bill_id": bill_id,
         "bill_title": bill_title,
         "vote_date": parse_senate_vote_date(_xml_text(root, "vote_date")),
+        "question": _xml_text(root, "vote_question_text")
+        or _xml_text(root, "question"),
+        "result": _xml_text(root, "vote_result")
+        or _xml_text(root, "vote_result_text"),
+        "requires": _xml_text(root, "majority_requirement"),
         "members": members,
     }
 
@@ -465,19 +478,69 @@ def fetch_senate_vote_menu(congress, session):
     return senate_get(url)
 
 
-def _apply_vote_positions(session, bill_id, latest_by_official):
-    """Upsert one vote row per official for a bill. Returns insert/update counts."""
+def make_source_roll_call_id(chamber, congress, session, roll_number):
+    """Stable source id, e.g. senate-119-1-00001 or house-119-1-00017."""
+    key = str(chamber or "").strip().lower()
+    return f"{key}-{int(congress)}-{int(session)}-{int(roll_number):05d}"
+
+
+def upsert_roll_call(
+    session,
+    *,
+    bill_id,
+    chamber,
+    source_roll_call_id,
+    date=None,
+    question=None,
+    result=None,
+    requires=None,
+):
+    """Insert or update one roll-call row keyed by source_roll_call_id."""
+    existing = (
+        session.query(RollCall)
+        .filter_by(source_roll_call_id=source_roll_call_id)
+        .one_or_none()
+    )
+    if existing is None:
+        existing = RollCall(
+            bill_id=bill_id,
+            chamber=chamber,
+            date=date,
+            question=question,
+            result=result,
+            requires=requires,
+            source_roll_call_id=source_roll_call_id,
+        )
+        session.add(existing)
+        session.flush()
+        return existing
+
+    existing.bill_id = bill_id
+    existing.chamber = chamber
+    if date is not None:
+        existing.date = date
+    if question is not None:
+        existing.question = question
+    if result is not None:
+        existing.result = result
+    if requires is not None:
+        existing.requires = requires
+    return existing
+
+
+def _apply_vote_positions(session, roll_call_id, latest_by_official):
+    """Upsert one vote row per official for a roll call. Returns insert/update counts."""
     stats = {"inserted": 0, "updated": 0, "unchanged": 0}
     existing_votes = {
         row.official_id: row
-        for row in session.query(Vote).filter_by(bill_id=bill_id).all()
+        for row in session.query(Vote).filter_by(roll_call_id=roll_call_id).all()
     }
     for official_id, position in latest_by_official.items():
         current = existing_votes.get(official_id)
         if current is None:
             session.add(
                 Vote(
-                    bill_id=bill_id,
+                    roll_call_id=roll_call_id,
                     official_id=official_id,
                     position=position,
                 )
@@ -1039,6 +1102,54 @@ def _introduced_date_from_detail(detail):
     return parse_congress_date(detail.get("introducedDate"))
 
 
+def latest_action_from_congress(payload):
+    """Return (text, date) from a Congress.gov bill list or detail payload."""
+    if not isinstance(payload, dict):
+        return None, None
+    action = payload.get("latestAction") or {}
+    if not isinstance(action, dict):
+        return None, None
+    text = action.get("text")
+    if isinstance(text, str):
+        text = text.strip() or None
+    else:
+        text = None
+    date = parse_congress_date(
+        action.get("actionDate") or action.get("actionTime")
+    )
+    return text, date
+
+
+def status_fields_for_bill(
+    bill_id,
+    action_text=None,
+    action_date=None,
+    roll_calls=None,
+    existing=None,
+):
+    """Build latest-action columns, keeping stored values when the payload is empty."""
+    text = action_text
+    date = action_date
+    if text is None and existing is not None:
+        text = existing.latest_action_text
+    if date is None and existing is not None:
+        date = existing.latest_action_date
+    status = derive_bill_status(
+        text,
+        origin_chamber=origin_chamber_from_bill_id(bill_id),
+        roll_calls=roll_calls,
+    )
+    if text is None and existing is not None and existing.status:
+        status = existing.status
+    elif text is None and status == STATUS_INTRODUCED and existing is None:
+        status = STATUS_INTRODUCED
+    return {
+        "latest_action_text": text,
+        "latest_action_date": date,
+        "status": status,
+    }
+
+
 def _latest_vote_date(actions):
     latest = None
     for action in actions or []:
@@ -1089,10 +1200,14 @@ def sync_bill_enrichment():
         "velocity_buckets_set": 0,
         "velocity_mean": None,
         "velocity_std": None,
+        "latest_actions_set": 0,
+        "statuses_set": 0,
     }
 
     try:
-        has_votes = exists().where(Vote.bill_id == Bill.id)
+        has_votes = exists().where(
+            and_(Vote.roll_call_id == RollCall.id, RollCall.bill_id == Bill.id)
+        )
         bills = (
             session.query(Bill)
             .filter(
@@ -1104,6 +1219,8 @@ def sync_bill_enrichment():
                     Bill.cosponsor_party_breakdown.is_(None),
                     Bill.bipartisan_type.is_(None),
                     and_(Bill.voted_date.is_(None), has_votes),
+                    Bill.status.is_(None),
+                    Bill.latest_action_text.is_(None),
                 )
             )
             .order_by(Bill.id)
@@ -1118,6 +1235,8 @@ def sync_bill_enrichment():
         for index, bill in enumerate(bills, start=1):
             parsed = parse_bill_id(bill.id)
             if parsed is None:
+                if str(bill.id).startswith("ocd-bill/"):
+                    continue
                 print(f"[{index}/{len(bills)}] Skipping unparseable id {bill.id!r}.")
                 stats["bills_failed"] += 1
                 continue
@@ -1132,6 +1251,8 @@ def sync_bill_enrichment():
                 or bill.sponsor_party is None
                 or bill.cosponsor_party_breakdown is None
                 or bill.bipartisan_type is None
+                or bill.status is None
+                or bill.latest_action_text is None
             )
             if needs_detail:
                 try:
@@ -1156,6 +1277,30 @@ def sync_bill_enrichment():
                     print(f"  introduced_date={introduced_date.isoformat()}")
                 else:
                     print("  No introducedDate on bill detail.")
+
+            if detail is not None and (
+                bill.latest_action_text is None or bill.status is None
+            ):
+                action_text, action_date = latest_action_from_congress(detail)
+                if action_text and bill.latest_action_text is None:
+                    bill.latest_action_text = action_text
+                    bill.latest_action_date = action_date
+                    stats["latest_actions_set"] += 1
+                    changed = True
+                    preview = action_text.replace("\n", " ")[:80]
+                    print(f"  latest_action={preview!r}")
+                if bill.status is None:
+                    roll_calls = (
+                        session.query(RollCall).filter_by(bill_id=bill.id).all()
+                    )
+                    bill.status = derive_bill_status(
+                        bill.latest_action_text,
+                        origin_chamber=origin_chamber_from_bill_id(bill.id),
+                        roll_calls=roll_calls,
+                    )
+                    stats["statuses_set"] += 1
+                    changed = True
+                    print(f"  status={bill.status!r}")
 
             if detail is not None and (
                 bill.sponsor_party is None
@@ -1201,7 +1346,10 @@ def sync_bill_enrichment():
 
             if bill.voted_date is None:
                 vote_exists = (
-                    session.query(Vote.id).filter_by(bill_id=bill.id).first()
+                    session.query(Vote.id)
+                    .join(RollCall, RollCall.id == Vote.roll_call_id)
+                    .filter(RollCall.bill_id == bill.id)
+                    .first()
                     is not None
                 )
                 if vote_exists:
@@ -1291,22 +1439,90 @@ def fetch_bill_actions(congress, bill_type, number):
     return actions
 
 
-def fetch_house_vote_members(congress, session_number, roll_number):
+def _house_roll_call_metadata(payload):
+    """Question, result, and date from a Congress.gov house-vote payload."""
+    inner = (
+        payload.get("houseRollCallVoteMemberVotes")
+        or payload.get("houseRollCallVote")
+        or payload.get("houseVote")
+        or payload
+    )
+    if not isinstance(inner, dict):
+        inner = {}
+    question = (
+        inner.get("voteQuestion")
+        or payload.get("voteQuestion")
+        or inner.get("question")
+    )
+    result = inner.get("result") or payload.get("result")
+    requires = (
+        inner.get("majorityRequirement")
+        or inner.get("voteRequirement")
+        or payload.get("majorityRequirement")
+    )
+    raw_date = (
+        inner.get("startDate")
+        or inner.get("date")
+        or payload.get("startDate")
+        or payload.get("date")
+    )
+    return {
+        "question": question.strip() if isinstance(question, str) and question.strip() else None,
+        "result": result.strip() if isinstance(result, str) and result.strip() else None,
+        "requires": requires.strip() if isinstance(requires, str) and requires.strip() else None,
+        "date": parse_congress_date(raw_date),
+    }
+
+
+def fetch_house_vote_detail(congress, session_number, roll_number):
+    """Roll-call metadata from the Congress.gov house-vote detail endpoint."""
+    url = f"{BASE_URL}/house-vote/{congress}/{session_number}/{roll_number}"
+    payload = congress_get(url, params={"format": "json"})
+    return _house_roll_call_metadata(payload)
+
+
+def fetch_house_roll_call(congress, session_number, roll_number):
+    """House member votes plus question/result from the members endpoint."""
     url = (
         f"{BASE_URL}/house-vote/{congress}/{session_number}/{roll_number}/members"
     )
     params = {"limit": PAGE_SIZE, "format": "json"}
     members = []
+    metadata = {
+        "question": None,
+        "result": None,
+        "requires": None,
+        "date": None,
+    }
 
     while url:
         payload = congress_get(url, params=params)
         inner = payload.get("houseRollCallVoteMemberVotes") or {}
+        if not members:
+            parsed = _house_roll_call_metadata(payload)
+            metadata.update({key: value for key, value in parsed.items() if value})
         members.extend(inner.get("results") or [])
         url = (payload.get("pagination") or {}).get("next")
         if not url:
             url = (inner.get("pagination") or {}).get("next")
         params = None
 
+    if metadata.get("result") is None or metadata.get("question") is None:
+        try:
+            detail = fetch_house_vote_detail(congress, session_number, roll_number)
+        except (requests.HTTPError, requests.RequestException, RuntimeError):
+            detail = {}
+        for key in ("question", "result", "requires", "date"):
+            if metadata.get(key) is None and detail.get(key) is not None:
+                metadata[key] = detail[key]
+
+    return members, metadata
+
+
+def fetch_house_vote_members(congress, session_number, roll_number):
+    members, _metadata = fetch_house_roll_call(
+        congress, session_number, roll_number
+    )
     return members
 
 
@@ -1427,8 +1643,22 @@ def upsert_bill(
     summary=None,
     introduced_date=None,
     voted_date=None,
+    latest_action_date=None,
+    latest_action_text=None,
+    status=None,
+    level=None,
+    roll_calls=None,
 ):
     existing = session.get(Bill, bill_id)
+    action_fields = status_fields_for_bill(
+        bill_id,
+        action_text=latest_action_text,
+        action_date=latest_action_date,
+        roll_calls=roll_calls,
+        existing=existing,
+    )
+    if status is not None:
+        action_fields["status"] = status
     session.merge(
         Bill(
             id=bill_id,
@@ -1471,12 +1701,49 @@ def upsert_bill(
             ),
             days_to_vote=existing.days_to_vote if existing else None,
             velocity_bucket=existing.velocity_bucket if existing else None,
+            latest_action_date=(
+                action_fields["latest_action_date"]
+                if latest_action_date is not None or existing is None
+                else (existing.latest_action_date if existing else None)
+            ),
+            latest_action_text=(
+                action_fields["latest_action_text"]
+                if latest_action_text is not None or existing is None
+                else (existing.latest_action_text if existing else None)
+            ),
+            status=action_fields["status"],
+            level=(
+                level
+                if level is not None
+                else (existing.level if existing and existing.level else "federal")
+            ),
         )
     )
     session.flush()
 
 
-def ensure_bill_from_senate_vote(session, bill_id, title, voted_date=None):
+def refresh_bill_status(session, bill_id):
+    """Recompute status from stored latest action plus recorded roll calls."""
+    bill = session.get(Bill, bill_id)
+    if bill is None:
+        return None
+    roll_calls = session.query(RollCall).filter_by(bill_id=bill_id).all()
+    bill.status = derive_bill_status(
+        bill.latest_action_text,
+        origin_chamber=origin_chamber_from_bill_id(bill_id),
+        roll_calls=roll_calls,
+    )
+    return bill.status
+
+
+def ensure_bill_from_senate_vote(
+    session,
+    bill_id,
+    title,
+    voted_date=None,
+    latest_action_text=None,
+    latest_action_date=None,
+):
     """Create a bills row from Senate XML when Congress.gov has not ingested it.
 
     Existing rows are left in place; voted_date is advanced if the roll call is
@@ -1495,6 +1762,9 @@ def ensure_bill_from_senate_vote(session, bill_id, title, voted_date=None):
         title or bill_id,
         sponsor_id=None,
         voted_date=voted_date,
+        latest_action_text=latest_action_text,
+        latest_action_date=latest_action_date,
+        level="federal",
     )
     return session.get(Bill, bill_id), True
 
@@ -1509,7 +1779,7 @@ def _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name):
 
 
 def _recorded_votes_from_actions(actions):
-    """Unique roll calls, oldest first so the latest position wins on upsert."""
+    """Unique roll calls, oldest first so bill voted_date can advance in order."""
     seen = set()
     recorded = []
     for action in actions:
@@ -1541,7 +1811,8 @@ def sync_senate_votes(
 
     Senators are matched to `officials` by last name and state (Senate XML
     uses postal abbreviations; Congress.gov stores full state names).
-    Positions upsert on (official_id, bill_id) so re-runs are idempotent.
+    A `roll_calls` row is upserted first; member positions then upsert on
+    (roll_call_id, official_id) so re-runs are idempotent.
     """
     owns_session = db_session is None
     if owns_session:
@@ -1610,6 +1881,8 @@ def sync_senate_votes(
             bill_id,
             parsed.get("bill_title"),
             voted_date=parsed.get("vote_date"),
+            latest_action_text=parsed.get("result") or parsed.get("question"),
+            latest_action_date=parsed.get("vote_date"),
         )
         if existing_bill is None:
             stats["skipped_no_bill"] = True
@@ -1649,8 +1922,23 @@ def sync_senate_votes(
                 f"{len(unknown)} senator(s) not in officials: {preview}{extra}"
             )
 
+        roll_call = upsert_roll_call(
+            db_session,
+            bill_id=bill_id,
+            chamber=ROLL_CALL_SENATE,
+            source_roll_call_id=make_source_roll_call_id(
+                ROLL_CALL_SENATE,
+                parsed.get("congress") or congress,
+                parsed.get("session") or session,
+                parsed.get("vote_number") or vote_number,
+            ),
+            date=parsed.get("vote_date"),
+            question=parsed.get("question"),
+            result=parsed.get("result"),
+            requires=parsed.get("requires"),
+        )
         vote_stats = _apply_vote_positions(
-            db_session, bill_id, latest_by_official
+            db_session, roll_call.id, latest_by_official
         )
         stats.update(vote_stats)
 
@@ -1668,6 +1956,7 @@ def sync_senate_votes(
             SENATE_ROLL_CALL_INGESTED,
             bill_id=bill_id,
         )
+        refresh_bill_status(db_session, bill_id)
 
         if owns_session:
             db_session.commit()
@@ -1897,8 +2186,8 @@ def sync_bill_votes(
 
     House member votes come from Congress.gov. Senate member votes come from
     Senate.gov roll-call XML, matched to officials by last name and state.
-    Multiple roll calls on the same bill collapse to one row per official;
-    the latest roll call's position is kept.
+    Each roll call is stored in `roll_calls` (question, result, threshold);
+    member positions hang off that row. Re-runs upsert by source roll-call id.
     """
     owns_session = session is None
     if owns_session:
@@ -1932,6 +2221,7 @@ def sync_bill_votes(
             sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
                 congress, bill_type, bill_number, detail
             )
+            action_text, action_date = latest_action_from_congress(detail)
             upsert_bill(
                 session,
                 bill_id,
@@ -1943,6 +2233,9 @@ def sync_bill_votes(
                 cosponsor_party_breakdown=breakdown,
                 bipartisan_type=bipartisan_type,
                 introduced_date=_introduced_date_from_detail(detail),
+                latest_action_text=action_text,
+                latest_action_date=action_date,
+                level="federal",
             )
         elif existing_bill is None:
             print(f"  Skipping votes for {bill_id}; bill is not in the database.")
@@ -1955,7 +2248,6 @@ def sync_bill_votes(
             if bill_row is not None:
                 bill_row.voted_date = vote_date
         recorded = _recorded_votes_from_actions(actions)
-        latest_by_official = {}
         unknown_officials = set()
         senator_lookup = None
 
@@ -2010,11 +2302,12 @@ def sync_bill_votes(
                 f"  House roll call {roll_number} "
                 f"(congress {vote.get('congress')}, session {session_number})"
             )
-            members = fetch_house_vote_members(
+            members, metadata = fetch_house_roll_call(
                 vote.get("congress") or congress,
                 session_number,
                 roll_number,
             )
+            house_by_official = {}
             for member in members:
                 bioguide_id = member.get("bioguideID") or member.get("bioguideId")
                 if not bioguide_id:
@@ -2025,16 +2318,32 @@ def sync_bill_votes(
                 position = normalize_position(member.get("voteCast"))
                 if not position:
                     continue
-                latest_by_official[bioguide_id] = position
+                house_by_official[bioguide_id] = position
+
+            roll_call = upsert_roll_call(
+                session,
+                bill_id=bill_id,
+                chamber=ROLL_CALL_HOUSE,
+                source_roll_call_id=make_source_roll_call_id(
+                    ROLL_CALL_HOUSE,
+                    vote.get("congress") or congress,
+                    session_number,
+                    roll_number,
+                ),
+                date=metadata.get("date") or parse_congress_date(vote.get("date")),
+                question=metadata.get("question"),
+                result=metadata.get("result"),
+                requires=metadata.get("requires"),
+            )
+            house_stats = _apply_vote_positions(
+                session, roll_call.id, house_by_official
+            )
+            stats["inserted"] += house_stats["inserted"]
+            stats["updated"] += house_stats["updated"]
+            stats["unchanged"] += house_stats["unchanged"]
 
         stats["skipped_unknown_officials"] += len(unknown_officials)
-
-        house_stats = _apply_vote_positions(
-            session, bill_id, latest_by_official
-        )
-        stats["inserted"] += house_stats["inserted"]
-        stats["updated"] += house_stats["updated"]
-        stats["unchanged"] += house_stats["unchanged"]
+        refresh_bill_status(session, bill_id)
 
         if owns_session:
             session.commit()
@@ -2108,6 +2417,9 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
             sponsor_party, breakdown, bipartisan_type = _load_sponsorship_fields(
                 item_congress, bill_type, number, detail
             )
+            action_text, action_date = latest_action_from_congress(detail)
+            if action_text is None:
+                action_text, action_date = latest_action_from_congress(item)
             upsert_bill(
                 session,
                 bill_id,
@@ -2119,6 +2431,9 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                 cosponsor_party_breakdown=breakdown,
                 bipartisan_type=bipartisan_type,
                 introduced_date=_introduced_date_from_detail(detail),
+                latest_action_text=action_text,
+                latest_action_date=action_date,
+                level="federal",
             )
             stats["bills_upserted"] += 1
             if sponsor_id:
@@ -2129,12 +2444,17 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
                 stats["bills_with_cosponsors"] += 1
 
             title_preview = (title or "")[:80]
+            bill_status = derive_bill_status(
+                action_text,
+                origin_chamber=origin_chamber_from_bill_id(bill_id),
+            )
             print(
                 f"  Upserted {bill_id} sponsor={sponsor_id or 'NULL'} "
                 f"sponsor_name={sponsor_name or 'NULL'!r} "
                 f"sponsor_party={sponsor_party or 'NULL'!r} "
                 f"bipartisan_type={bipartisan_type or 'NULL'} "
                 f"cosponsors={breakdown if breakdown is not None else 'NULL'} "
+                f"status={bill_status!r} "
                 f"title={title_preview!r}"
             )
 
@@ -2294,6 +2614,8 @@ def _print_enrichment_stats(stats):
     print(f"  Policy areas set:       {stats['policy_areas_set']}")
     print(f"  Summaries set:          {stats['summaries_set']}")
     print(f"  Introduced dates set:   {stats['introduced_dates_set']}")
+    print(f"  Latest actions set:     {stats.get('latest_actions_set', 0)}")
+    print(f"  Statuses set:           {stats.get('statuses_set', 0)}")
     print(f"  Vote dates set:         {stats['voted_dates_set']}")
     print(f"  Sponsor parties set:    {stats.get('sponsor_party_set', 0)}")
     print(f"  Cosponsor breakdowns:   {stats.get('cosponsor_breakdowns_set', 0)}")

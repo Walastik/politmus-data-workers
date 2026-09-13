@@ -164,7 +164,7 @@ export default function MemberDrawer({
               ) : (
                 <ul className="mt-3 space-y-3">
                   {filteredVotes.map((vote) => (
-                    <li key={`${vote.bill_id}-${vote.position}`}>
+                    <li key={vote.roll_call_id ?? `${vote.bill_id}-${vote.position}`}>
                       <button
                         type="button"
                         onClick={() => setSelectedBill(billFromVote(vote))}
@@ -182,6 +182,13 @@ export default function MemberDrawer({
                         <p className="mt-1 text-sm font-medium leading-snug">
                           {vote.bill_title || 'Untitled bill'}
                         </p>
+                        {vote.question || vote.result ? (
+                          <p className="mt-1 text-xs text-slate-400">
+                            {[vote.chamber, vote.result, vote.question]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        ) : null}
                         {vote.sponsor_name ? (
                           <p className="mt-1 text-xs text-slate-500">
                             Sponsor: {vote.sponsor_name}
@@ -349,7 +356,12 @@ function voteMatchesSearch(vote: OfficialVote, rawQuery: string) {
   if (looksLikeBillIdQuery(query)) {
     return false
   }
-  return fuzzyTextMatch(vote.bill_title, query) || fuzzyTextMatch(vote.bill_summary, query)
+  return (
+    fuzzyTextMatch(vote.bill_title, query) ||
+    fuzzyTextMatch(vote.bill_summary, query) ||
+    fuzzyTextMatch(vote.question ?? null, query) ||
+    fuzzyTextMatch(vote.result ?? null, query)
+  )
 }
 
 function billFromVote(vote: OfficialVote): Bill {
@@ -368,7 +380,12 @@ function billFromVote(vote: OfficialVote): Bill {
     voted_date: null,
     days_to_vote: null,
     velocity_bucket: null,
+    latest_action_date: null,
+    latest_action_text: null,
+    status: null,
+    level: 'federal',
     votes_summary: { house: {}, senate: {} },
     votes_by_party: { house: {}, senate: {} },
+    roll_calls: [],
   }
 }
