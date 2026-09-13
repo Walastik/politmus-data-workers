@@ -13,7 +13,9 @@ from api.census import _legislative_district, _match_from_payload, _parse_sld_co
 from api.filters import STATE_NAME_BY_ABBR
 from api.routes.lookup import _office_roles
 from openstates_client import (
+    CURRENT_LEGISLATIVE_CLASSIFICATION,
     EXCLUDED_JURISDICTIONS,
+    PEOPLE_INCLUDES,
     TARGET_STATES,
     classifications_for_state,
     district_from_role,
@@ -24,6 +26,7 @@ from openstates_client import (
     official_from_person,
     openstates_get,
     people_classifications_for_state,
+    people_list_params,
     request_with_backoff,
     require_target_state,
     states_due_for_sync,
@@ -240,33 +243,99 @@ class OpenStatesMappingTests(unittest.TestCase):
         self.assertIsNone(official_from_person(lieutenant, "Texas"))
         self.assertIsNone(official_from_person(attorney_general, "Texas"))
 
-    def test_bicameral_skips_legislature(self):
-        self.assertEqual(classifications_for_state("TX"), ("upper", "lower"))
-        self.assertEqual(classifications_for_state("Texas"), ("upper", "lower"))
+    def test_all_states_use_legislature_for_current_members(self):
+        self.assertEqual(CURRENT_LEGISLATIVE_CLASSIFICATION, "legislature")
+        for state in ("TX", "Texas", "NE", "Nebraska"):
+            self.assertEqual(classifications_for_state(state), ("legislature",))
         self.assertEqual(
             people_classifications_for_state("TX"),
-            ("upper", "lower", "executive"),
+            ("legislature", "executive"),
         )
-
-    def test_nebraska_uses_legislature(self):
-        self.assertEqual(classifications_for_state("NE"), ("legislature",))
-        self.assertEqual(classifications_for_state("Nebraska"), ("legislature",))
         self.assertEqual(
             people_classifications_for_state("NE"),
             ("legislature", "executive"),
         )
 
+    def test_people_list_params_filter_current_role_and_include_profiles(self):
+        params = people_list_params("TX", "legislature", 1)
+        self.assertEqual(params["jurisdiction"], "tx")
+        self.assertEqual(params["org_classification"], "legislature")
+        self.assertEqual(params["include"], ["offices", "links"])
+        self.assertEqual(tuple(params["include"]), PEOPLE_INCLUDES)
+        self.assertEqual(params["page"], 1)
+
 
 class FetchPeopleTests(unittest.TestCase):
     @patch("openstates_client.openstates_get")
-    def test_requests_executive_after_chambers(self, mock_get):
+    def test_requests_legislature_then_executive(self, mock_get):
         mock_get.return_value = {"results": [], "pagination": {"max_page": 1}}
         fetch_state_legislators("TX")
-        classifications = [
-            call.kwargs["params"]["org_classification"]
-            for call in mock_get.call_args_list
+        self.assertEqual(mock_get.call_count, 2)
+        classifications = []
+        for get_call in mock_get.call_args_list:
+            self.assertEqual(get_call.args[0], "/people")
+            params = get_call.kwargs["params"]
+            classifications.append(params["org_classification"])
+            self.assertEqual(params["include"], ["offices", "links"])
+            self.assertEqual(params["jurisdiction"], "tx")
+        self.assertEqual(classifications, ["legislature", "executive"])
+
+    @patch("openstates_client.openstates_get")
+    def test_skips_people_without_current_role(self, mock_get):
+        mock_get.side_effect = [
+            {
+                "results": [
+                    {"id": "ocd-person/former"},
+                    {
+                        "id": "ocd-person/leg",
+                        "current_role": {"org_classification": "lower"},
+                    },
+                ],
+                "pagination": {"max_page": 1},
+            },
+            {"results": [], "pagination": {"max_page": 1}},
         ]
-        self.assertEqual(classifications, ["upper", "lower", "executive"])
+        people = fetch_state_legislators("TX")
+        self.assertEqual([person["id"] for person in people], ["ocd-person/leg"])
+
+    @patch("openstates_client.openstates_get")
+    def test_stops_executive_pages_after_governor(self, mock_get):
+        mock_get.side_effect = [
+            {
+                "results": [
+                    {
+                        "id": "ocd-person/leg",
+                        "current_role": {"org_classification": "upper"},
+                    }
+                ],
+                "pagination": {"max_page": 1},
+            },
+            {
+                "results": [
+                    {
+                        "id": "ocd-person/ag",
+                        "current_role": {
+                            "title": "Attorney General",
+                            "org_classification": "executive",
+                        },
+                    },
+                    {
+                        "id": "ocd-person/gov",
+                        "current_role": {
+                            "title": "Governor",
+                            "org_classification": "executive",
+                        },
+                    },
+                ],
+                "pagination": {"max_page": 4},
+            },
+        ]
+        people = fetch_state_legislators("TX")
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(
+            {person["id"] for person in people},
+            {"ocd-person/leg", "ocd-person/ag", "ocd-person/gov"},
+        )
 
 
 class LookupRoleTests(unittest.TestCase):
