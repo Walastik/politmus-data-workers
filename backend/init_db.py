@@ -7,8 +7,26 @@ from services.bill_effects import (
     DEFAULT_EXTRACTION_PROMPT,
 )
 
+def _votes_use_legacy_bill_id(conn):
+    """True when `votes` still links officials directly to bills."""
+    return conn.execute(text(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'votes'
+          AND column_name = 'bill_id'
+        """
+    )).scalar() is not None
+
+
 def ensure_schema():
     """Create tables and add columns that create_all will not alter in place."""
+    with engine.begin() as conn:
+        # Member positions now hang off roll_calls. Dropping the old votes
+        # table is intentional; re-run bills / senate-votes ingest to backfill.
+        if _votes_use_legacy_bill_id(conn):
+            conn.execute(text("DROP TABLE IF EXISTS votes"))
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.execute(text(
@@ -87,6 +105,26 @@ def ensure_schema():
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS velocity_bucket VARCHAR"
         ))
         conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS latest_action_date DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS latest_action_text TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS status VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS level VARCHAR "
+            "NOT NULL DEFAULT 'federal'"
+        ))
+        conn.execute(text(
+            """
+            UPDATE bills
+            SET level = 'federal'
+            WHERE level IS NULL OR level = ''
+            """
+        ))
+        conn.execute(text(
             "ALTER TABLE bills DROP COLUMN IF EXISTS classification"
         ))
         conn.execute(text("DROP TABLE IF EXISTS classification_guidelines"))
@@ -131,6 +169,14 @@ def ensure_schema():
             "CREATE UNIQUE INDEX IF NOT EXISTS "
             "uq_senate_roll_calls_congress_session_vote "
             "ON senate_roll_calls (congress, session, vote_number)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_roll_calls_source_id "
+            "ON roll_calls (source_roll_call_id)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_votes_roll_call_official "
+            "ON votes (roll_call_id, official_id)"
         ))
 
 

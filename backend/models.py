@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, String, Integer, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, String, Integer, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -43,9 +43,15 @@ class Bill(Base):
     days_to_vote = Column(Integer, nullable=True)
     # very_fast, fast, average, slow, or very_slow vs the corpus distribution.
     velocity_bucket = Column(String, nullable=True)
+    latest_action_date = Column(Date, nullable=True)
+    latest_action_text = Column(Text, nullable=True)
+    # Became Law, Vetoed, Failed, To President / Governor, Passed Both
+    # Chambers, Passed Senate, Passed House, or Introduced.
+    status = Column(String, nullable=True)
+    level = Column(String, nullable=False, default="federal", server_default="federal")
 
     sponsor = relationship("Official", back_populates="bills")
-    votes = relationship("Vote", back_populates="bill")
+    roll_calls = relationship("RollCall", back_populates="bill")
     effects = relationship(
         "BillEffect", back_populates="bill", cascade="all, delete-orphan"
     )
@@ -113,15 +119,56 @@ class ExtractionGuideline(Base):
     updated_at = Column(DateTime, nullable=False)
 
 
-class Vote(Base):
-    __tablename__ = 'votes'
+class RollCall(Base):
+    """One House or Senate roll-call event on a bill.
+
+    Member positions live in `votes` and point here, not directly at `bills`.
+    `source_roll_call_id` is the Congress.gov / Senate.gov identity so ingest
+    can upsert without duplicating the same vote.
+    """
+    __tablename__ = "roll_calls"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_roll_call_id",
+            name="uq_roll_calls_source_id",
+        ),
+        CheckConstraint(
+            "chamber IN ('House', 'Senate')",
+            name="ck_roll_calls_chamber",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    bill_id = Column(String, ForeignKey('bills.id'))
-    official_id = Column(String, ForeignKey('officials.id'))
+    bill_id = Column(String, ForeignKey("bills.id"), nullable=False, index=True)
+    # House or Senate
+    chamber = Column(String, nullable=False)
+    date = Column(Date, nullable=True)
+    question = Column(String, nullable=True)
+    result = Column(String, nullable=True)
+    # Threshold when the source publishes one, e.g. 1/2, 3/5, 2/3.
+    requires = Column(String, nullable=True)
+    source_roll_call_id = Column(String, nullable=False)
+
+    bill = relationship("Bill", back_populates="roll_calls")
+    votes = relationship("Vote", back_populates="roll_call")
+
+
+class Vote(Base):
+    __tablename__ = "votes"
+    __table_args__ = (
+        UniqueConstraint(
+            "roll_call_id",
+            "official_id",
+            name="uq_votes_roll_call_official",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    roll_call_id = Column(Integer, ForeignKey("roll_calls.id"), nullable=False, index=True)
+    official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
     position = Column(String)
 
-    bill = relationship("Bill", back_populates="votes")
+    roll_call = relationship("RollCall", back_populates="votes")
     official = relationship("Official")
 
 

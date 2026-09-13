@@ -13,7 +13,9 @@ import {
   involvedParties,
   partyBadgeClass,
   sanitizeCrsHtml,
+  billStatusClass,
   type Bill,
+  type BillRollCall,
   type VoteChamber,
 } from './types'
 
@@ -114,6 +116,7 @@ export default function BillDrawer({
               {view.title || 'Untitled bill'}
             </h2>
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              <StatusTag status={view.status} />
               <PolicyAreaTag area={view.policy_area} />
               <BipartisanTag bill={view} />
               <SponsorTag bill={view} />
@@ -142,6 +145,7 @@ export default function BillDrawer({
                 }
               />
             </div>
+            <RollCallList rollCalls={view.roll_calls} />
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               CRS summary
             </h3>
@@ -168,6 +172,59 @@ export default function BillDrawer({
         </div>
       </aside>
     </div>
+  )
+}
+
+function RollCallList({ rollCalls }: { rollCalls?: BillRollCall[] }) {
+  if (!rollCalls || rollCalls.length === 0) {
+    return null
+  }
+  return (
+    <section className="mb-5">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+        Roll calls
+      </h3>
+      <ul className="mt-3 space-y-2">
+        {rollCalls.map((rollCall) => {
+          const when = formatBillDate(rollCall.date)
+          const threshold = rollCall.requires
+            ? `${rollCall.requires} required`
+            : null
+          const meta = [rollCall.chamber, when, threshold]
+            .filter(Boolean)
+            .join(' · ')
+          return (
+            <li
+              key={rollCall.id}
+              className="rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2"
+            >
+              <p className="text-sm font-medium text-slate-100">
+                {rollCall.result || 'Recorded vote'}
+              </p>
+              {rollCall.question ? (
+                <p className="mt-0.5 text-xs text-slate-300">{rollCall.question}</p>
+              ) : null}
+              {meta ? (
+                <p className="mt-1 text-[11px] text-slate-500">{meta}</p>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+export function StatusTag({ status }: { status?: string | null }) {
+  if (!status) {
+    return null
+  }
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${billStatusClass(status)}`}
+    >
+      {status}
+    </span>
   )
 }
 
@@ -244,8 +301,9 @@ export function BillDates({
 }) {
   const introduced = formatBillDate(bill.introduced_date)
   const voted = formatBillDate(bill.voted_date)
+  const latest = formatBillDate(bill.latest_action_date ?? null)
   const velocity = formatVoteVelocity(bill.days_to_vote, bill.velocity_bucket)
-  if (!introduced && !voted && !velocity) {
+  if (!introduced && !voted && !velocity && !bill.latest_action_text) {
     return null
   }
   const velocityDescription = velocity
@@ -273,6 +331,15 @@ export function BillDates({
           <dt className="sr-only">{velocityDescription}</dt>
           <dd className="inline text-slate-300" aria-hidden="true">
             {velocity.text}
+          </dd>
+        </div>
+      ) : null}
+      {bill.latest_action_text ? (
+        <div className="basis-full">
+          <dt className="inline text-slate-500">Latest action </dt>
+          <dd className="inline text-slate-300">
+            {latest ? `${latest}: ` : ''}
+            {bill.latest_action_text}
           </dd>
         </div>
       ) : null}

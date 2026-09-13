@@ -38,7 +38,9 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    python init_db.py
    ```
 
-   This creates `officials`, `bills`, `votes`, `policy_targets`, `bill_effects`, and `extraction_guidelines`, and adds any new bill columns that an older database is missing.
+   This creates `officials`, `bills`, `roll_calls`, `votes`, `policy_targets`, `bill_effects`, and `extraction_guidelines`, and adds any new bill columns that an older database is missing.
+
+   Re-running `init_db.py` after the roll-call schema change drops the old `votes` table (member positions used to hang directly off `bills`). Re-run `congress_client.py bills` and `senate-votes` to backfill.
 
 ## Scripts
 
@@ -46,7 +48,7 @@ Run these from `backend/` with the venv active (`cd backend`).
 
 ### `init_db.py`
 
-Creates the Postgres tables used by the rest of the pipeline. Safe to re-run; it will not wipe existing rows.
+Creates the Postgres tables used by the rest of the pipeline. Safe to re-run for additive column changes. The roll-call migration is an exception: if `votes` still has a `bill_id` column, that table is dropped so member positions can hang off `roll_calls` instead. Re-run the bills and senate-votes ingest after that one-time reset.
 
 ```bash
 python init_db.py
@@ -62,7 +64,7 @@ Talks to Congress.gov and writes into Postgres. Commands:
 python congress_client.py members
 ```
 
-**Recent bills and roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date and latest recorded-vote date), then loads House member votes from Congress.gov and Senate member votes from Senate.gov XML:
+**Recent bills and roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date, Congress.gov `latestAction`, and a derived `status` such as Became Law / Vetoed / Passed House), then loads House member votes from Congress.gov and Senate member votes from Senate.gov XML. Each roll call is stored in `roll_calls` (question, result, and required threshold when the source publishes one); member positions go in `votes` linked to that roll call:
 
 ```bash
 python congress_client.py
@@ -73,19 +75,19 @@ python congress_client.py bills --congress 119 --limit 20
 
 If a bill has a sponsor who is not in `officials`, the row is still saved. `sponsor_id` is left null (so the foreign key stays valid), and the Congress.gov name and Bioguide ID are stored on the bill. The script logs a warning and lists those gaps in the summary.
 
-**Votes for one bill** — loads House roll-call positions from Congress.gov and Senate member votes from Senate.gov XML:
+**Votes for one bill** — loads House roll-call positions from Congress.gov and Senate member votes from Senate.gov XML, storing each roll call's outcome in `roll_calls`:
 
 ```bash
 python congress_client.py votes --congress 119 --bill-type hr --bill-number 1
 ```
 
-**One Senate roll call** — fetches the official Senate.gov XML for a specific vote, matches senators in `officials` by last name and state, and upserts positions into `votes`:
+**One Senate roll call** — fetches the official Senate.gov XML for a specific vote, matches senators in `officials` by last name and state, upserts the roll-call outcome (`<vote_result>`, `<vote_question_text>`, `<majority_requirement>`) into `roll_calls`, and stores member positions in `votes`:
 
 ```bash
 python congress_client.py senate-votes --congress 119 --session 1 --vote-number 1
 ```
 
-**Backfill / incremental Senate votes** — reads the Senate.gov vote menu (the list of every roll call in a session), compares it to the `senate_roll_calls` cursor table, and only fetches XML for votes we have not already handled. Nominations are recorded without a member-vote download. If a legislation vote names a bill that is not in Postgres yet, the script creates that bill from the Senate XML (title and vote date) and stores the member votes on it. Run `enrich` afterward to fill CRS summaries and policy areas. Oldest-first so the latest roll call on a bill wins.
+**Backfill / incremental Senate votes** — reads the Senate.gov vote menu (the list of every roll call in a session), compares it to the `senate_roll_calls` cursor table, and only fetches XML for votes we have not already handled. Nominations are recorded without a member-vote download. If a legislation vote names a bill that is not in Postgres yet, the script creates that bill from the Senate XML (title and vote date) and stores the roll call and member votes on it. Run `enrich` afterward to fill CRS summaries and policy areas. Oldest-first so `voted_date` on a bill advances to the latest roll call.
 
 One-time production backfill (SSH into the API machine after deploying this code):
 
@@ -151,6 +153,13 @@ python openstates_client.py members --all-states
 ```
 
 `--all-states` continues if a single state fails and prints a per-state summary. Free-tier OpenStates keys are often limited (~500 requests/day, ~10/min), so all-states ingest is meant for the 12-hour GitHub Action rather than frequent local runs.
+
+**State bills** — lists `/bills` for one state (newest `latest_action` first), stores them with `level='state'` and an OpenStates `ocd-bill/…` id, and maps `latest_action_description` to the same `status` labels used for Congress.gov. Default 50 bills; pass `--limit` to cap. These rows do not appear on the federal explorer feed (`GET /api/bills` defaults to `level=federal`).
+
+```bash
+python openstates_client.py bills --state TX
+python openstates_client.py bills --state Texas --limit 20
+```
 
 ## Deploy to Fly.io
 

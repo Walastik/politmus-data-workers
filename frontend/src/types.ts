@@ -19,6 +19,11 @@ export interface OfficialVote {
   bill_summary: string | null
   position: string | null
   sponsor_name: string | null
+  roll_call_id?: number | null
+  chamber?: string | null
+  question?: string | null
+  result?: string | null
+  date?: string | null
 }
 
 export interface OfficialDetail extends Official {
@@ -45,6 +50,16 @@ export interface BillVotePartySummary {
 
 export type VoteChamber = 'house' | 'senate'
 
+export type BillStatus =
+  | 'Became Law'
+  | 'Vetoed'
+  | 'Failed'
+  | 'To President / Governor'
+  | 'Passed Both Chambers'
+  | 'Passed Senate'
+  | 'Passed House'
+  | 'Introduced'
+
 export type VelocityBucket =
   | 'very_fast'
   | 'fast'
@@ -56,6 +71,16 @@ export interface BillVoter {
   official_id: string
   name: string
   position: string | null
+}
+
+export interface BillRollCall {
+  id: number
+  chamber: string
+  date: string | null
+  question: string | null
+  result: string | null
+  requires: string | null
+  source_roll_call_id: string
 }
 
 export interface Bill {
@@ -73,8 +98,13 @@ export interface Bill {
   voted_date: string | null
   days_to_vote: number | null
   velocity_bucket: VelocityBucket | null
+  latest_action_date?: string | null
+  latest_action_text?: string | null
+  status?: BillStatus | null
+  level?: string | null
   votes_summary: BillVoteSummary
   votes_by_party?: BillVotePartySummary
+  roll_calls?: BillRollCall[]
 }
 
 export interface CivicAddress {
@@ -316,6 +346,22 @@ export function formatBillDate(value: string | null | undefined) {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+export function billStatusClass(status: BillStatus | string | null | undefined) {
+  if (status === 'Became Law' || status === 'Passed Both Chambers') {
+    return 'bg-emerald-900/50 text-emerald-300'
+  }
+  if (status === 'Vetoed' || status === 'Failed') {
+    return 'bg-red-900/50 text-red-300'
+  }
+  if (status === 'To President / Governor') {
+    return 'bg-amber-900/50 text-amber-300'
+  }
+  if (status === 'Passed House' || status === 'Passed Senate') {
+    return 'bg-blue-900/50 text-blue-300'
+  }
+  return 'bg-slate-700/80 text-slate-300'
 }
 
 const VELOCITY_DISPLAY: Record<

@@ -27,6 +27,11 @@ class OfficialVoteOut(BaseModel):
     bill_summary: Optional[str] = None
     position: Optional[str] = None
     sponsor_name: Optional[str] = None
+    roll_call_id: Optional[int] = None
+    chamber: Optional[str] = None
+    question: Optional[str] = None
+    result: Optional[str] = None
+    date: Optional[date] = None
 
 
 class OfficialDetailOut(OfficialOut):
@@ -50,6 +55,22 @@ class BillOut(BaseModel):
     voted_date: Optional[date] = None
     days_to_vote: Optional[int] = None
     velocity_bucket: Optional[str] = None
+    latest_action_date: Optional[date] = None
+    latest_action_text: Optional[str] = None
+    status: Optional[str] = None
+    level: str = "federal"
+
+
+class RollCallOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    chamber: str
+    date: Optional[date] = None
+    question: Optional[str] = None
+    result: Optional[str] = None
+    requires: Optional[str] = None
+    source_roll_call_id: str
 
 
 class BillDetailOut(BillOut):
@@ -57,6 +78,7 @@ class BillDetailOut(BillOut):
     votes_by_party: dict[str, dict[str, dict[str, int]]] = Field(
         default_factory=dict
     )
+    roll_calls: list[RollCallOut] = Field(default_factory=list)
 
 
 class BillVoterOut(BaseModel):

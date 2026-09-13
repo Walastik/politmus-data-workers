@@ -2,12 +2,13 @@ from typing import Optional
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, nulls_last
 from sqlalchemy.orm import Session
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.schemas import OfficialDetailOut, OfficialOut, OfficialVoteOut
 from database import get_db
-from models import Bill, Official, Vote
+from models import Bill, Official, RollCall, Vote
 
 router = APIRouter()
 
@@ -65,10 +66,11 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Official not found")
 
     vote_rows = (
-        db.query(Vote, Bill)
-        .join(Bill, Bill.id == Vote.bill_id)
+        db.query(Vote, Bill, RollCall)
+        .join(RollCall, RollCall.id == Vote.roll_call_id)
+        .join(Bill, Bill.id == RollCall.bill_id)
         .filter(Vote.official_id == official_id)
-        .order_by(Bill.id.desc())
+        .order_by(nulls_last(desc(RollCall.date)), desc(RollCall.id))
         .all()
     )
 
@@ -92,7 +94,12 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
                 bill_summary=bill.summary,
                 position=vote.position,
                 sponsor_name=bill.sponsor_name,
+                roll_call_id=roll_call.id,
+                chamber=roll_call.chamber,
+                question=roll_call.question,
+                result=roll_call.result,
+                date=roll_call.date,
             )
-            for vote, bill in vote_rows
+            for vote, bill, roll_call in vote_rows
         ],
     )
