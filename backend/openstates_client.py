@@ -21,14 +21,17 @@ REQUEST_PAUSE_SECONDS = 0.2
 MAX_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 1.0
 
-# Bicameral states are upper + lower. Unicameral Nebraska is legislature only.
-# Skipping legislature elsewhere avoids an empty OpenStates call per state.
-# Executive is always fetched once more so lookup can return the governor.
+# org_classification on /people filters by current role, so these queries
+# return active members instead of a state's full historical roster.
+# "legislature" merges upper and lower into one paginated set (Nebraska's
+# unicameral body uses the same value). A second "executive" request is
+# how we find the sitting governor without storing other executives.
+# include=offices,links puts contact fields on the list payload so we do
+# not follow up with a GET per person.
 LEGISLATIVE_CLASSIFICATIONS = ("upper", "lower", "legislature")
-BICAMERAL_CLASSIFICATIONS = ("upper", "lower")
-UNICAMERAL_STATES = frozenset({"NE"})
-UNICAMERAL_CLASSIFICATIONS = ("legislature",)
+CURRENT_LEGISLATIVE_CLASSIFICATION = "legislature"
 EXECUTIVE_CLASSIFICATION = "executive"
+PEOPLE_INCLUDES = ("offices", "links")
 STATE_UPPER_OFFICE = "State Senator"
 STATE_LOWER_OFFICE = "State Representative"
 GOVERNOR_OFFICE = "Governor"
@@ -123,16 +126,25 @@ def openstates_get(path, params=None):
 
 
 def classifications_for_state(state_code):
-    """Legislative OpenStates org_classification values for a jurisdiction."""
-    abbr, _state_name = resolve_state(state_code)
-    if abbr in UNICAMERAL_STATES:
-        return UNICAMERAL_CLASSIFICATIONS
-    return BICAMERAL_CLASSIFICATIONS
+    """Current-legislator OpenStates org_classification for a jurisdiction."""
+    resolve_state(state_code)
+    return (CURRENT_LEGISLATIVE_CLASSIFICATION,)
 
 
 def people_classifications_for_state(state_code):
-    """Legislative chambers plus one executive request for the governor."""
+    """Current legislators plus one executive request for the governor."""
     return classifications_for_state(state_code) + (EXECUTIVE_CLASSIFICATION,)
+
+
+def people_list_params(state_abbr, classification, page):
+    """Query params for one page of current people in a jurisdiction."""
+    return {
+        "jurisdiction": state_abbr.lower(),
+        "org_classification": classification,
+        "include": list(PEOPLE_INCLUDES),
+        "page": page,
+        "per_page": PAGE_SIZE,
+    }
 
 
 def resolve_state(state_code):
@@ -357,12 +369,18 @@ def upsert_official(session, incoming):
 
 
 def fetch_state_legislators(state_code):
-    """Current legislators and governor for a state, keyed by OpenStates person id."""
+    """Current legislators and governor for a state, keyed by OpenStates person id.
+
+    Uses /people list filters only: org_classification limits results to
+    active members, and include=offices,links supplies contact fields so
+    ingest never issues a follow-up GET per person.
+    """
     abbr, _state_name = resolve_state(state_code)
     by_id = {}
 
     for classification in people_classifications_for_state(abbr):
         page = 1
+        found_governor = False
         while True:
             print(
                 f"  Fetching {abbr} {classification} people "
@@ -370,21 +388,23 @@ def fetch_state_legislators(state_code):
             )
             payload = openstates_get(
                 "/people",
-                params={
-                    "jurisdiction": abbr.lower(),
-                    "org_classification": classification,
-                    "include": ["offices", "links"],
-                    "page": page,
-                    "per_page": PAGE_SIZE,
-                },
+                params=people_list_params(abbr, classification, page),
             )
             for person in payload.get("results") or []:
+                if not isinstance(person.get("current_role"), dict):
+                    continue
                 person_id = _text_or_none(person.get("id"))
                 if person_id:
                     by_id[person_id] = person
+                if is_governor_role(person.get("current_role")):
+                    found_governor = True
             pagination = payload.get("pagination") or {}
             max_page = pagination.get("max_page") or page
             if page >= max_page:
+                break
+            # Executive lists include many current statewide officials we
+            # skip later; stop paging once the sitting governor is in hand.
+            if classification == EXECUTIVE_CLASSIFICATION and found_governor:
                 break
             page += 1
 
