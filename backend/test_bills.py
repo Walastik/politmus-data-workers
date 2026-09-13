@@ -20,7 +20,7 @@ from api.routes.bills import (
     last_name_from_official_name,
     sort_bill_voters,
 )
-from api.schemas import BillVoterOut
+from api.schemas import BillVoterOut, OfficialVoteOut, RollCallOut
 from models import Bill
 
 
@@ -170,6 +170,7 @@ class BipartisanTypeTests(unittest.TestCase):
             id=7,
             bill_id="119-hr-1",
             chamber="House",
+            date=date(2026, 9, 2),
             question="On Passage",
             result="Passed",
             requires="1/2",
@@ -185,7 +186,20 @@ class BipartisanTypeTests(unittest.TestCase):
         self.assertEqual(detail.roll_calls[0].question, "On Passage")
         self.assertEqual(detail.roll_calls[0].chamber, "House")
         self.assertEqual(detail.roll_calls[0].requires, "1/2")
+        self.assertEqual(detail.roll_calls[0].date, date(2026, 9, 2))
         self.assertIsNone(detail.status)
+
+    def test_roll_call_and_official_vote_schemas_accept_dates(self):
+        voted = date(2026, 9, 2)
+        roll_call = RollCallOut(
+            id=7,
+            chamber="House",
+            date=voted,
+            source_roll_call_id="house-119-1-00017",
+        )
+        vote = OfficialVoteOut(bill_id="119-hr-1", date=voted)
+        self.assertEqual(roll_call.date, voted)
+        self.assertEqual(vote.date, voted)
 
     def test_bill_detail_includes_status(self):
         bill = Bill(

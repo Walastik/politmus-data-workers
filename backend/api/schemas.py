@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date as Date
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,7 +31,7 @@ class OfficialVoteOut(BaseModel):
     chamber: Optional[str] = None
     question: Optional[str] = None
     result: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[Date] = None
 
 
 class OfficialDetailOut(OfficialOut):
@@ -51,11 +51,11 @@ class BillOut(BaseModel):
     bipartisan_type: Optional[str] = None
     policy_area: Optional[str] = None
     summary: Optional[str] = None
-    introduced_date: Optional[date] = None
-    voted_date: Optional[date] = None
+    introduced_date: Optional[Date] = None
+    voted_date: Optional[Date] = None
     days_to_vote: Optional[int] = None
     velocity_bucket: Optional[str] = None
-    latest_action_date: Optional[date] = None
+    latest_action_date: Optional[Date] = None
     latest_action_text: Optional[str] = None
     status: Optional[str] = None
     level: str = "federal"
@@ -66,7 +66,7 @@ class RollCallOut(BaseModel):
 
     id: int
     chamber: str
-    date: Optional[date] = None
+    date: Optional[Date] = None
     question: Optional[str] = None
     result: Optional[str] = None
     requires: Optional[str] = None
