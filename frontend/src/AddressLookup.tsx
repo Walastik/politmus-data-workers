@@ -1,5 +1,6 @@
 import { Search } from 'lucide-react'
 import { useState, useEffect, type FormEvent } from 'react'
+import { useUser } from '@clerk/clerk-react'
 
 import { apiUrl } from './api'
 import LookupResults from './LookupResults'
@@ -13,6 +14,9 @@ export default function AddressLookup() {
   const [error, setError] = useState<string | null>(null)
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
+
+  const { user, isLoaded: userLoaded } = useUser()
+  const savedAddress = user?.unsafeMetadata?.savedAddress as string | undefined
 
   // Extract fetch logic into a standalone function
   async function performLookup(targetAddress: string) {
@@ -53,25 +57,13 @@ export default function AddressLookup() {
     await performLookup(address)
   }
 
-  // Auto-load saved address when component mounts
+  // Auto-load saved address when component mounts and user loads
   useEffect(() => {
-    // We'll use a simple approach to get user data
-    const fetchUserAddress = async () => {
-      try {
-        // This is a simplified version - in practice, you'd want to properly 
-        // integrate with Clerk's user context
-        const savedAddress = localStorage.getItem('savedAddress') || ''
-        if (savedAddress && !hasAutoLoaded) {
-          setHasAutoLoaded(true)
-          await performLookup(savedAddress)
-        }
-      } catch (err) {
-        console.error('Failed to auto-load address:', err)
-      }
+    if (userLoaded && savedAddress && !hasAutoLoaded && !lookup && !loading) {
+      setHasAutoLoaded(true)
+      performLookup(savedAddress)
     }
-
-    fetchUserAddress()
-  }, [hasAutoLoaded])
+  }, [userLoaded, savedAddress, hasAutoLoaded, lookup, loading])
 
   return (
     <div>

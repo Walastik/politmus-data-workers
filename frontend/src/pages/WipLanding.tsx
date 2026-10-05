@@ -1,4 +1,6 @@
 import { SignInButton, UserButton, SignedIn, SignedOut } from '@clerk/clerk-react'
+import { MapPin } from 'lucide-react'
+import LocationSettings from '../components/LocationSettings'
 import AsciiAnimation from './AsciiAnimation'
 
 export default function WipLanding() {
@@ -19,7 +21,15 @@ export default function WipLanding() {
           </SignInButton>
         </SignedOut>
         <SignedIn>
-          <UserButton />
+          <UserButton>
+            <UserButton.UserProfilePage 
+              label="Location Settings" 
+              url="location" 
+              labelIcon={<MapPin className="h-4 w-4" />}
+            >
+              <LocationSettings />
+            </UserButton.UserProfilePage>
+          </UserButton>
         </SignedIn>
       </div>
     </div>

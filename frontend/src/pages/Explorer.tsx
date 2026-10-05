@@ -1,5 +1,8 @@
 import { Landmark, MapPin, ScrollText, Search, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
+import { SignInButton, UserButton, SignedIn, SignedOut } from '@clerk/clerk-react'
+
+import LocationSettings from '../components/LocationSettings'
 
 import AddressLookup from '../AddressLookup'
 import { apiUrl } from '../api'
@@ -107,32 +110,52 @@ export default function Explorer() {
               </p>
             </div>
           </div>
-          <nav className="flex gap-2" aria-label="Primary">
-            <TabButton
-              active={tab === 'lookup'}
-              icon={<MapPin className="h-3.5 w-3.5" />}
-              label="Lookup"
-              onClick={() => {
-                setSelectedOfficial(null)
-                setTab('lookup')
-              }}
-            />
-            <TabButton
-              active={tab === 'roster'}
-              icon={<Users className="h-3.5 w-3.5" />}
-              label="Roster"
-              onClick={() => setTab('roster')}
-            />
-            <TabButton
-              active={tab === 'bills'}
-              icon={<ScrollText className="h-3.5 w-3.5" />}
-              label="Bills"
-              onClick={() => {
-                setSelectedOfficial(null)
-                setTab('bills')
-              }}
-            />
-          </nav>
+          <div className="flex items-center gap-4">
+            <nav className="flex gap-2" aria-label="Primary">
+              <TabButton
+                active={tab === 'lookup'}
+                icon={<MapPin className="h-3.5 w-3.5" />}
+                label="Lookup"
+                onClick={() => {
+                  setSelectedOfficial(null)
+                  setTab('lookup')
+                }}
+              />
+              <TabButton
+                active={tab === 'roster'}
+                icon={<Users className="h-3.5 w-3.5" />}
+                label="Roster"
+                onClick={() => setTab('roster')}
+              />
+              <TabButton
+                active={tab === 'bills'}
+                icon={<ScrollText className="h-3.5 w-3.5" />}
+                label="Bills"
+                onClick={() => {
+                  setSelectedOfficial(null)
+                  setTab('bills')
+                }}
+              />
+            </nav>
+            <SignedIn>
+              <UserButton>
+                <UserButton.UserProfilePage 
+                  label="Location Settings" 
+                  url="location" 
+                  labelIcon={<MapPin className="h-4 w-4" />}
+                >
+                  <LocationSettings />
+                </UserButton.UserProfilePage>
+              </UserButton>
+            </SignedIn>
+            <SignedOut>
+              <SignInButton mode="modal">
+                <button className="rounded bg-slate-800 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 transition hover:bg-slate-700">
+                  Sign In
+                </button>
+              </SignInButton>
+            </SignedOut>
+          </div>
         </div>
 
         {tab === 'roster' ? (

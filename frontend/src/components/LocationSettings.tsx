@@ -1,10 +1,10 @@
 import { useUser } from '@clerk/clerk-react'
-import { MapPin } from 'lucide-react'
 import { useState } from 'react'
 
 export default function LocationSettings() {
   const { user, isLoaded } = useUser()
-  const [address, setAddress] = useState(user?.unsafeMetadata?.savedAddress || '')
+  const initialAddress = (user?.unsafeMetadata?.savedAddress as string) || ''
+  const [address, setAddress] = useState(initialAddress)
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
