@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from api.filters import classify_bipartisan_type, normalize_party
 from api.schemas import BillDetailOut, BillVoterOut, BillVotersOut, RollCallOut
+from api.auth import get_current_user
 from database import get_db
 from models import Bill, Official, RollCall, Vote
+from clerk_backend_api.security.types import RequestState
 
 router = APIRouter()
 
