@@ -1,5 +1,5 @@
 import { Search } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 
 import { apiUrl } from './api'
 import LookupResults from './LookupResults'
@@ -12,11 +12,11 @@ export default function AddressLookup() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
+  const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const trimmed = address.trim()
-    if (!trimmed) {
+  // Extract fetch logic into a standalone function
+  async function performLookup(targetAddress: string) {
+    if (!targetAddress.trim()) {
       setError('Enter a U.S. street address.')
       setLookup(null)
       return
@@ -28,7 +28,7 @@ export default function AddressLookup() {
 
     try {
       const response = await fetch(
-        apiUrl(`/api/lookup?address=${encodeURIComponent(trimmed)}`),
+        apiUrl(`/api/lookup?address=${encodeURIComponent(targetAddress)}`),
       )
       const body = await readJson(response)
       if (!response.ok) {
@@ -47,6 +47,31 @@ export default function AddressLookup() {
       setLoading(false)
     }
   }
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await performLookup(address)
+  }
+
+  // Auto-load saved address when component mounts
+  useEffect(() => {
+    // We'll use a simple approach to get user data
+    const fetchUserAddress = async () => {
+      try {
+        // This is a simplified version - in practice, you'd want to properly 
+        // integrate with Clerk's user context
+        const savedAddress = localStorage.getItem('savedAddress') || ''
+        if (savedAddress && !hasAutoLoaded) {
+          setHasAutoLoaded(true)
+          await performLookup(savedAddress)
+        }
+      } catch (err) {
+        console.error('Failed to auto-load address:', err)
+      }
+    }
+
+    fetchUserAddress()
+  }, [hasAutoLoaded])
 
   return (
     <div>
