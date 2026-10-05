@@ -4,6 +4,8 @@ primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
+  [build.args]
+        VITE_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsucG9saXRtdXMuY29tJA
 
 [env]
   API_UPSTREAM = "politmus-api.flycast:80"
