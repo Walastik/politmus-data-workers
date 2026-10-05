@@ -10,10 +10,10 @@ export default function WipLanding() {
       </h1>
       <p className="text-xl text-slate-400">Work in Progress</p>
       
-      <div className="mt-8">
+      <div className="absolute right-4 top-4">
         <SignedOut>
           <SignInButton mode="modal">
-            <button className="rounded-md bg-blue-600 px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-500">
+            <button className="rounded-md bg-blue-600 px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-500 opacity-0 hover:opacity-100 transition-opacity duration-300">
               Sign In
             </button>
           </SignInButton>
