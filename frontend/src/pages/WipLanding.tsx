@@ -1,3 +1,4 @@
+import { SignInButton, UserButton, SignedIn, SignedOut } from '@clerk/clerk-react'
 import AsciiAnimation from './AsciiAnimation'
 
 export default function WipLanding() {
@@ -8,6 +9,19 @@ export default function WipLanding() {
         Politmus
       </h1>
       <p className="text-xl text-slate-400">Work in Progress</p>
+      
+      <div className="mt-8">
+        <SignedOut>
+          <SignInButton mode="modal">
+            <button className="rounded-md bg-blue-600 px-6 py-2.5 font-semibold text-white transition-colors hover:bg-blue-500">
+              Sign In
+            </button>
+          </SignInButton>
+        </SignedOut>
+        <SignedIn>
+          <UserButton />
+        </SignedIn>
+      </div>
     </div>
   )
 }
