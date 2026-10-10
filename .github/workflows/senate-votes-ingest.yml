@@ -24,11 +24,40 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       FLY_API_APP: politmus-api
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+        
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
-      # Scripts run on the API machine so they use Fly's private DATABASE_URL.
-      # Compares the Senate.gov vote menu to senate_roll_calls and only
-      # fetches XML for new roll calls or retries (bill now present, prior failure).
       - name: Catch up Senate.gov roll-call votes
-        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/congress_client.py senate-votes --incremental"
+        run: |
+          # Senate.gov blocks Fly.io datacenter IPs, but not GitHub Actions.
+          # We run the script locally here and proxy the DB connection to Fly.
+          
+          # Start a proxy to the database in the background
+          flyctl proxy 5432 -a politmus-db &
+          PROXY_PID=$!
+          
+          # Wait for the proxy tunnel to establish
+          sleep 5
+          
+          # Extract the private DB credentials from the API app
+          PRIVATE_DB_URL=$(flyctl ssh console -a "$FLY_API_APP" -q -C 'sh -c "echo $DATABASE_URL"' | grep postgres)
+          
+          # Rewrite the connection string to use our localhost proxy
+          export DATABASE_URL=$(echo $PRIVATE_DB_URL | sed 's/@.*:5432/@localhost:5432/')
+          
+          # Run the ingestion job locally
+          python backend/congress_client.py senate-votes --incremental
+          
+          kill $PROXY_PID
