@@ -3,3 +3,6 @@
 venv/
 __pycache__/
 *.pyc
+
+# Local untracked LLM categorization config
+backend/scripts/llm_config.py
