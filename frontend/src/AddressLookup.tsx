@@ -28,7 +28,7 @@ export default function AddressLookup() {
   const debouncedAddress = useDebounce(address, 300)
   const [suggestions, setSuggestions] = useState<PhotonResult[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const [coordinates, setCoordinates] = useState<[number, number] | null>(null)
+  const [_coordinates, setCoordinates] = useState<[number, number] | null>(null)
 
   const [lookup, setLookup] = useState<CivicLookup | null>(null)
   const [loading, setLoading] = useState(false)
