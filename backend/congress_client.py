@@ -431,15 +431,17 @@ def senate_get(url):
     delay = INITIAL_BACKOFF_SECONDS
     last_error = None
 
+    # Senate.gov WAF aggressively blocks Fly.io/datacenter IPs. 
+    # If we're running on Fly, route through a proxy immediately to avoid guaranteed 403s.
+    request_url = url
+    if os.environ.get("FLY_APP_NAME"):
+        import urllib.parse
+        request_url = "https://api.allorigins.win/raw?url=" + urllib.parse.quote(url)
+
     for attempt in range(1, MAX_RETRIES + 1):
         time.sleep(REQUEST_PAUSE_SECONDS)
         try:
-            response = requests.get(url, headers=headers, timeout=30)
-            if response.status_code == 403:
-                # Fallback to proxy if datacenter IP is blocked by Senate.gov WAF
-                import urllib.parse
-                proxy_url = "https://api.allorigins.win/raw?url=" + urllib.parse.quote(url)
-                response = requests.get(proxy_url, headers=headers, timeout=30)
+            response = requests.get(request_url, headers=headers, timeout=30)
         except requests.RequestException as exc:
             last_error = exc
             print(f"  Request error ({exc}); retrying in {delay:.1f}s...")
