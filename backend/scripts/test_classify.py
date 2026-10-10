@@ -83,6 +83,11 @@ def main():
         # Parse into Pydantic model
         parsed_data = ClassificationMetadata.model_validate_json(parsed_json_str)
 
+        # Store the results back in the metadata
+        bill.classification_metadata = json.loads(parsed_json_str)
+        db.commit()
+        print("\nSuccessfully saved classification_metadata to the database.")
+
         # Sample official stances for evaluation
         sample_stances = [
             {"target": "Immigration Enforcement", "mechanism": "funding", "direction": "increase"},
