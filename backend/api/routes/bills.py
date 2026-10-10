@@ -6,7 +6,7 @@ from sqlalchemy import desc, func, nulls_first, nulls_last
 from sqlalchemy.orm import Session
 
 from api.filters import classify_bipartisan_type, normalize_party
-from api.schemas import BillDetailOut, BillVoterOut, BillVotersOut, RollCallOut
+from api.schemas import BillDetailOut, BillPageOut, BillVoterOut, BillVotersOut, RollCallOut
 from api.auth import get_current_user
 from database import get_db
 from models import Bill, Official, RollCall, Vote
@@ -249,25 +249,68 @@ def _bill_detail(
     )
 
 
-@router.get("", response_model=list[BillDetailOut])
+@router.get("", response_model=BillPageOut)
 def list_bills(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     level: Optional[str] = Query(
         default="federal",
         description="Bill level to list (federal or state). Omit all with level=all.",
     ),
+    vote_status: Optional[str] = Query(None),
+    pace: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    sponsor_party: Optional[str] = Query(None),
+    bipartisan: Optional[str] = Query(None),
+    sort: Optional[str] = Query("voted_desc"),
     db: Session = Depends(get_db),
 ):
     query = db.query(Bill)
     if level and level.strip().lower() not in {"all", "*"}:
         query = query.filter(Bill.level.ilike(level.strip()))
-    bills = query.order_by(*bills_feed_order()).limit(limit).all()
+
+    if vote_status == "voted":
+        query = query.filter(Bill.voted_date.isnot(None))
+    elif vote_status == "pending":
+        query = query.filter(Bill.voted_date.is_(None))
+        
+    if pace:
+        query = query.filter(Bill.velocity_bucket == pace)
+        
+    if status:
+        if status.lower() == "passed":
+            query = query.filter(Bill.status.ilike("%passed%") | Bill.status.ilike("%became law%"))
+        elif status.lower() == "failed":
+            query = query.filter(Bill.status.ilike("%failed%") | Bill.status.ilike("%vetoed%"))
+        else:
+            query = query.filter(Bill.status.ilike(f"%{status}%"))
+            
+    if sponsor_party:
+        query = query.filter(Bill.sponsor_party.ilike(f"{sponsor_party}%"))
+        
+    if bipartisan:
+        query = query.filter(Bill.bipartisan_type == bipartisan)
+        
+    total = query.count()
+        
+    if sort == "voted_desc":
+        query = query.order_by(nulls_last(desc(Bill.voted_date)), desc(Bill.id))
+    elif sort == "voted_asc":
+        query = query.order_by(nulls_last(Bill.voted_date), desc(Bill.id))
+    elif sort == "introduced_desc":
+        query = query.order_by(nulls_last(desc(Bill.introduced_date)), desc(Bill.id))
+    elif sort == "introduced_asc":
+        query = query.order_by(nulls_last(Bill.introduced_date), desc(Bill.id))
+    else:
+        query = query.order_by(nulls_last(desc(Bill.voted_date)), desc(Bill.id))
+
+    bills = query.offset(offset).limit(limit).all()
     bill_ids = [bill.id for bill in bills]
     roll_calls_by_bill = _roll_calls_by_bill(db, bill_ids)
     summaries, party_summaries = _vote_summaries(
         db, bill_ids, roll_calls_by_bill
     )
-    return [
+    items = [
         _bill_detail(
             bill,
             summaries.get(bill.id) or _empty_chamber_summaries(),
@@ -276,6 +319,7 @@ def list_bills(
         )
         for bill in bills
     ]
+    return BillPageOut(items=items, total=total)
 
 
 @router.get("/{bill_id}/votes", response_model=BillVotersOut)

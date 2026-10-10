@@ -5,37 +5,7 @@ import BillDrawer, { BillDates, BipartisanTag, PolicyAreaTag, StatusTag } from '
 import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
 
-function compareDatesDesc(a: string | null, b: string | null) {
-  if (a === b) {
-    return 0
-  }
-  if (!a) {
-    return 1
-  }
-  if (!b) {
-    return -1
-  }
-  return b.localeCompare(a)
-}
 
-function compareBillsForFeed(a: Bill, b: Bill) {
-  const aUnvoted = a.voted_date == null
-  const bUnvoted = b.voted_date == null
-  if (aUnvoted !== bUnvoted) {
-    return aUnvoted ? -1 : 1
-  }
-  if (!aUnvoted) {
-    const voted = compareDatesDesc(a.voted_date, b.voted_date)
-    if (voted !== 0) {
-      return voted
-    }
-  }
-  const introduced = compareDatesDesc(a.introduced_date, b.introduced_date)
-  if (introduced !== 0) {
-    return introduced
-  }
-  return b.id.localeCompare(a.id)
-}
 
 export default function BillsFeed() {
   const [bills, setBills] = useState<Bill[]>([])
@@ -43,20 +13,41 @@ export default function BillsFeed() {
   const [error, setError] = useState<string | null>(null)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
 
+  const [voteStatus, setVoteStatus] = useState<string>('all')
+  const [pace, setPace] = useState<string>('all')
+  const [status, setStatus] = useState<string>('all')
+  const [sponsorParty, setSponsorParty] = useState<string>('all')
+  const [bipartisan, setBipartisan] = useState<string>('all')
+  const [sort, setSort] = useState<string>('voted_desc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [total, setTotal] = useState(0)
+
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError(null)
 
-    fetch(apiUrl('/api/bills'), { signal: controller.signal })
+    const params = new URLSearchParams()
+    if (voteStatus !== 'all') params.set('vote_status', voteStatus)
+    if (pace !== 'all') params.set('pace', pace)
+    if (status !== 'all') params.set('status', status)
+    if (sponsorParty !== 'all') params.set('sponsor_party', sponsorParty)
+    if (bipartisan !== 'all') params.set('bipartisan', bipartisan)
+    params.set('sort', sort)
+    params.set('limit', String(pageSize))
+    params.set('offset', String((page - 1) * pageSize))
+
+    fetch(apiUrl(`/api/bills?${params.toString()}`), { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load bills (${res.status})`)
         }
-        return res.json() as Promise<Bill[]>
+        return res.json() as Promise<{items: Bill[], total: number}>
       })
       .then((data) => {
-        setBills(Array.isArray(data) ? data : [])
+        setBills(Array.isArray(data.items) ? data.items : [])
+        setTotal(data.total || 0)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -66,35 +57,96 @@ export default function BillsFeed() {
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load bills')
         setBills([])
+        setTotal(0)
         setLoading(false)
       })
 
     return () => controller.abort()
-  }, [])
-
-  if (loading) {
-    return <p className="text-slate-400">Loading legislation feed...</p>
-  }
-  if (error) {
-    return (
-      <p className="text-red-400">
-        {error}. Check that the API is reachable and refresh.
-      </p>
-    )
-  }
-  if (bills.length === 0) {
-    return <p className="text-slate-400">No bills have been ingested yet.</p>
-  }
-
-  const ordered = [...bills].sort(compareBillsForFeed)
+  }, [voteStatus, pace, status, sponsorParty, bipartisan, sort, page, pageSize])
 
   return (
-    <>
-      <p className="mb-4 text-sm text-slate-400">
-        Showing {ordered.length} bill{ordered.length === 1 ? '' : 's'}
-      </p>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm flex flex-wrap gap-4">
+        <label className="flex flex-col text-sm text-slate-300">
+          Vote Status
+          <select value={voteStatus} onChange={(e) => { setVoteStatus(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="all">All</option>
+            <option value="voted">Voted On</option>
+            <option value="pending">Awaiting Vote</option>
+          </select>
+        </label>
+        <label className="flex flex-col text-sm text-slate-300">
+          Result
+          <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="all">All</option>
+            <option value="passed">Passed</option>
+            <option value="failed">Failed</option>
+          </select>
+        </label>
+        <label className="flex flex-col text-sm text-slate-300">
+          Pace
+          <select value={pace} onChange={(e) => { setPace(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="all">All</option>
+            <option value="very_fast">Very Fast</option>
+            <option value="fast">Fast</option>
+            <option value="average">Average</option>
+            <option value="slow">Slow</option>
+            <option value="very_slow">Very Slow</option>
+          </select>
+        </label>
+        <label className="flex flex-col text-sm text-slate-300">
+          Sponsor Party
+          <select value={sponsorParty} onChange={(e) => { setSponsorParty(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="all">All</option>
+            <option value="Democratic">Democratic</option>
+            <option value="Republican">Republican</option>
+            <option value="Independent">Independent</option>
+          </select>
+        </label>
+        <label className="flex flex-col text-sm text-slate-300">
+          Support
+          <select value={bipartisan} onChange={(e) => { setBipartisan(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="all">All</option>
+            <option value="single_party">Single Party</option>
+            <option value="bipartisan">Bipartisan</option>
+            <option value="tripartisan">Tripartisan</option>
+          </select>
+        </label>
+        <label className="flex flex-col text-sm text-slate-300">
+          Sort By
+          <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="voted_desc">Voted On (Newest)</option>
+            <option value="voted_asc">Voted On (Oldest)</option>
+            <option value="introduced_desc">Introduced (Newest)</option>
+            <option value="introduced_asc">Introduced (Oldest)</option>
+          </select>
+        </label>
+        <label className="flex flex-col text-sm text-slate-300">
+          Page Size
+          <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="75">75</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+      </div>
+
+      {error ? (
+        <p className="text-red-400">
+          {error}. Check that the API is reachable and refresh.
+        </p>
+      ) : loading ? (
+        <p className="text-slate-400">Loading legislation feed...</p>
+      ) : bills.length === 0 ? (
+        <p className="text-slate-400">No bills match your filters.</p>
+      ) : (
+        <>
+          <p className="text-sm text-slate-400">
+            Showing {bills.length}/{total} bill{total === 1 ? '' : 's'}
+          </p>
       <div className="space-y-3">
-        {ordered.map((bill) => (
+        {bills.map((bill) => (
           <article
             key={bill.id}
             className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
@@ -132,13 +184,34 @@ export default function BillsFeed() {
           </article>
         ))}
       </div>
+
+      <div className="flex justify-between items-center mt-4">
+        <button
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page === 1}
+          className="px-4 py-2 rounded bg-slate-700 disabled:opacity-50 hover:bg-slate-600 transition"
+        >
+          Previous
+        </button>
+        <span className="text-slate-400 text-sm">Page {page} of {Math.ceil(total / pageSize) || 1}</span>
+        <button
+          onClick={() => setPage((p) => p + 1)}
+          disabled={page * pageSize >= total}
+          className="px-4 py-2 rounded bg-slate-700 disabled:opacity-50 hover:bg-slate-600 transition"
+        >
+          Next
+        </button>
+      </div>
+
       {selectedBill ? (
         <BillDrawer
           bill={selectedBill}
           onClose={() => setSelectedBill(null)}
         />
       ) : null}
-    </>
+        </>
+      )}
+    </div>
   )
 }
 

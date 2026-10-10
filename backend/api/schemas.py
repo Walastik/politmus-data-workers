@@ -81,6 +81,11 @@ class BillDetailOut(BillOut):
     roll_calls: list[RollCallOut] = Field(default_factory=list)
 
 
+class BillPageOut(BaseModel):
+    items: list[BillDetailOut]
+    total: int
+
+
 class BillVoterOut(BaseModel):
     official_id: str
     name: str
