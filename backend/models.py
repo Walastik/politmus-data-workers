@@ -49,6 +49,7 @@ class Bill(Base):
     # Chambers, Passed Senate, Passed House, or Introduced.
     status = Column(String, nullable=True)
     level = Column(String, nullable=False, default="federal", server_default="federal")
+    classification_metadata = Column(JSONB, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     roll_calls = relationship("RollCall", back_populates="bill")
@@ -197,6 +198,19 @@ class SenateRollCall(Base):
     status = Column(String, nullable=False)
     processed_at = Column(DateTime, nullable=True)
 
+
+
+class OfficialStance(Base):
+    __tablename__ = "official_stances"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
+    target_id = Column(Integer, ForeignKey("policy_targets.id"), nullable=False)
+    mechanism = Column(String, nullable=False)
+    direction = Column(String, nullable=False)
+
+    official = relationship("Official")
+    target = relationship("PolicyTarget")
 
 class StateSyncLog(Base):
     """Last successful OpenStates ingest per standard US state.
