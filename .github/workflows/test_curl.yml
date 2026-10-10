@@ -1,7 +1,0 @@
-name: Test Curl
-on: workflow_dispatch
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - run: curl -s -I -A "Mozilla/5.0" https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_1.xml
