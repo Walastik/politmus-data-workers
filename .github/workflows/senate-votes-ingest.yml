@@ -40,6 +40,8 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Catch up Senate.gov roll-call votes
+        env:
+          SECRET_DB_URL: ${{ secrets.DATABASE_URL }}
         run: |
           # Senate.gov blocks Fly.io datacenter IPs, but not GitHub Actions.
           # We run the script locally here and proxy the DB connection to Fly.
@@ -51,11 +53,8 @@ jobs:
           # Wait for the proxy tunnel to establish
           sleep 5
           
-          # Extract the private DB credentials from the API app
-          PRIVATE_DB_URL=$(flyctl ssh console -a "$FLY_API_APP" -q -C 'sh -c "echo $DATABASE_URL"' | grep postgres)
-          
           # Rewrite the connection string to use our localhost proxy
-          export DATABASE_URL=$(echo $PRIVATE_DB_URL | sed 's/@.*:5432/@localhost:5432/')
+          export DATABASE_URL=$(echo $SECRET_DB_URL | sed 's/@.*:5432/@localhost:5432/')
           
           # Run the ingestion job locally
           python backend/congress_client.py senate-votes --incremental
