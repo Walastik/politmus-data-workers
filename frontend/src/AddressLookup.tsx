@@ -7,8 +7,29 @@ import LookupResults from './LookupResults'
 import MemberDrawer from './MemberDrawer'
 import type { CivicLookup, Official } from './types'
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+
+  return debouncedValue
+}
+
+interface PhotonResult {
+  formattedAddress: string
+  coordinates: [number, number]
+}
+
 export default function AddressLookup() {
   const [address, setAddress] = useState('')
+  const debouncedAddress = useDebounce(address, 300)
+  const [suggestions, setSuggestions] = useState<PhotonResult[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [coordinates, setCoordinates] = useState<[number, number] | null>(null)
+
   const [lookup, setLookup] = useState<CivicLookup | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,6 +75,7 @@ export default function AddressLookup() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setShowSuggestions(false)
     await performLookup(address)
   }
 
@@ -64,6 +86,38 @@ export default function AddressLookup() {
       performLookup(savedAddress)
     }
   }, [userLoaded, savedAddress, hasAutoLoaded, lookup, loading])
+
+  useEffect(() => {
+    async function fetchSuggestions() {
+      if (!debouncedAddress.trim()) {
+        setSuggestions([])
+        return
+      }
+      try {
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(debouncedAddress)}&countrycode=US&limit=5`)
+        const data = await res.json()
+        const parsed = (data.features || []).map((feature: any) => {
+          const props = feature.properties
+          const addressLine1 = [props.housenumber, props.street].filter(Boolean).join(' ')
+          const parts = [
+            addressLine1,
+            props.city,
+            props.state,
+            props.postcode
+          ].filter(Boolean)
+          
+          return {
+            formattedAddress: parts.join(', '),
+            coordinates: feature.geometry.coordinates
+          }
+        })
+        setSuggestions(parsed)
+      } catch (err) {
+        console.error('Photon lookup failed', err)
+      }
+    }
+    fetchSuggestions()
+  }, [debouncedAddress])
 
   return (
     <div>
@@ -83,10 +137,33 @@ export default function AddressLookup() {
             name="address"
             autoComplete="street-address"
             value={address}
-            onChange={(event) => setAddress(event.target.value)}
+            onChange={(event) => {
+              setAddress(event.target.value)
+              setShowSuggestions(true)
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
             placeholder="1600 Pennsylvania Avenue NW, Washington, DC"
             className="w-full rounded border border-slate-700 bg-slate-800 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
           />
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg max-h-60 overflow-auto text-left">
+              {suggestions.map((s, i) => (
+                <li
+                  key={i}
+                  className="px-4 py-2 hover:bg-slate-700 cursor-pointer text-sm text-slate-100"
+                  onClick={() => {
+                    setAddress(s.formattedAddress)
+                    setCoordinates(s.coordinates)
+                    setShowSuggestions(false)
+                    performLookup(s.formattedAddress)
+                  }}
+                >
+                  {s.formattedAddress}
+                </li>
+              ))}
+            </ul>
+          )}
         </label>
         <button
           type="submit"
