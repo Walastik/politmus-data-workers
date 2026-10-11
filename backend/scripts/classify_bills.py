@@ -72,6 +72,7 @@ def run_batch_classification(
     delay: float = 1.5,
     bill_id: Optional[str] = None,
     force: bool = False,
+    existing_only: bool = False,
     model_name: str = "nemotron-3.5-lightning:30b",
     ollama_host: str = "http://localhost:11434",
 ):
@@ -79,6 +80,8 @@ def run_batch_classification(
     print(f"  Model: {model_name}")
     print(f"  Ollama Host: {ollama_host}")
     print(f"  Inter-bill delay: {delay}s")
+    if existing_only:
+        print("  Target: Only ALREADY CLASSIFIED bills (--existing-only)")
 
     client = Client(host=ollama_host)
     db: Session = SessionLocal()
@@ -102,7 +105,9 @@ def run_batch_classification(
                 Bill.summary.isnot(None),
                 Bill.summary != "",
             )
-            if not force:
+            if existing_only:
+                query = query.filter(Bill.classification_metadata.isnot(None))
+            elif not force:
                 query = query.filter(Bill.classification_metadata == None)
 
             # Prioritize bills that have been voted on, then newest introduced
@@ -224,6 +229,13 @@ def main():
         help="Re-classify bills even if classification_metadata already exists",
     )
     parser.add_argument(
+        "--existing-only",
+        "--already-classified",
+        dest="existing_only",
+        action="store_true",
+        help="Process only bills that ALREADY have classification_metadata (useful to catch up existing bills with new TLDR/ELI5)",
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=os.environ.get("OLLAMA_MODEL", "nemotron-3.5-lightning:30b"),
@@ -243,6 +255,7 @@ def main():
         delay=args.delay,
         bill_id=args.bill_id,
         force=args.force,
+        existing_only=args.existing_only,
         model_name=args.model,
         ollama_host=args.host,
     )
