@@ -156,13 +156,16 @@ def run_batch_classification(
                 stats["successful"] += 1
                 stats["intents_extracted"] += intents_count
 
-                # Form concise log of extracted targets
                 intent_summary = ", ".join(
                     f"{i.target} ({i.mechanism}: {i.direction})" for i in parsed.intents[:3]
                 )
                 if intents_count > 3:
                     intent_summary += f", +{intents_count - 3} more"
 
+                if parsed.tldr:
+                    print(f"  [TL;DR] {parsed.tldr}")
+                if parsed.eli5:
+                    print(f"  [ELI5]  {parsed.eli5}")
                 print(
                     f"  -> Saved {intents_count} intent(s) in {duration:.1f}s: "
                     f"[{intent_summary if intent_summary else 'No substantive intents'}]"

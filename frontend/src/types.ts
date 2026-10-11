@@ -93,6 +93,8 @@ export interface ClassificationIntent {
 }
 
 export interface ClassificationMetadata {
+  tldr?: string | null
+  eli5?: string | null
   intents?: ClassificationIntent[]
   [key: string]: unknown
 }

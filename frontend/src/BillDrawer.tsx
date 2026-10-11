@@ -437,8 +437,39 @@ function AiClassificationSection({
         </span>
       </div>
 
+      {metadata?.tldr ? (
+        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/80 p-3">
+          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300">
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono font-bold text-purple-300 border border-purple-500/30">
+              TL;DR
+            </span>
+            <span>Quick Summary</span>
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-200">
+            {metadata.tldr}
+          </p>
+        </div>
+      ) : null}
+
+      {metadata?.eli5 ? (
+        <div className="mt-2.5 rounded-lg border border-slate-800 bg-slate-900/80 p-3">
+          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300">
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-300 border border-amber-500/30">
+              ELI5
+            </span>
+            <span>Explain Like I'm 5</span>
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-200">
+            {metadata.eli5}
+          </p>
+        </div>
+      ) : null}
+
       {intents.length > 0 ? (
         <div className="mt-3 space-y-3">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            Policy Targets & Levers ({intents.length})
+          </h4>
           {intents.map((intent, idx) => (
             <div
               key={idx}
