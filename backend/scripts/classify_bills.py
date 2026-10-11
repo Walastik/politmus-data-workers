@@ -17,6 +17,7 @@ if BACKEND_DIR not in sys.path:
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
+import httpx
 from ollama import Client
 from sqlalchemy import desc, nulls_last
 from sqlalchemy.orm import Session
@@ -62,6 +63,9 @@ def build_bill_context(bill: Bill) -> str:
         parts.append(f"Latest Action: {bill.latest_action_text}")
     if bill.summary:
         cleaned_summary = clean_html(bill.summary)
+        # Cap summary length to keep input context within safe limits
+        if len(cleaned_summary) > 25000:
+            cleaned_summary = cleaned_summary[:25000] + "\n\n[Summary truncated for length]"
         parts.append(f"Congressional Research Service (CRS) Summary:\n{cleaned_summary}")
     return "\n\n".join(parts)
 
@@ -73,6 +77,7 @@ def run_batch_classification(
     bill_id: Optional[str] = None,
     force: bool = False,
     existing_only: bool = False,
+    timeout: float = 180.0,
     model_name: str = "nemotron-3.5-lightning:30b",
     ollama_host: str = "http://localhost:11434",
 ):
@@ -80,10 +85,14 @@ def run_batch_classification(
     print(f"  Model: {model_name}")
     print(f"  Ollama Host: {ollama_host}")
     print(f"  Inter-bill delay: {delay}s")
+    print(f"  Per-bill timeout: {timeout}s")
     if existing_only:
         print("  Target: Only ALREADY CLASSIFIED bills (--existing-only)")
 
-    client = Client(host=ollama_host)
+    client = Client(
+        host=ollama_host,
+        timeout=httpx.Timeout(timeout=timeout, connect=10.0),
+    )
     db: Session = SessionLocal()
 
     stats = {
@@ -146,6 +155,10 @@ def run_batch_classification(
                         {"role": "user", "content": f"Analyze this bill:\n{context_text}"},
                     ],
                     format=ClassificationMetadata.model_json_schema(),
+                    options={
+                        "temperature": 0.1,
+                        "num_predict": 4096,  # Cap max output tokens to prevent runaway generation
+                    },
                 )
                 duration = time.time() - t0
 
@@ -236,6 +249,12 @@ def main():
         help="Process only bills that ALREADY have classification_metadata (useful to catch up existing bills with new TLDR/ELI5)",
     )
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=180.0,
+        help="Maximum seconds to wait for Ollama to process a single bill before timing out (default: 180s)",
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=os.environ.get("OLLAMA_MODEL", "nemotron-3.5-lightning:30b"),
@@ -256,6 +275,7 @@ def main():
         bill_id=args.bill_id,
         force=args.force,
         existing_only=args.existing_only,
+        timeout=args.timeout,
         model_name=args.model,
         ollama_host=args.host,
     )

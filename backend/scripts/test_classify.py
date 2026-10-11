@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import httpx
 from ollama import Client
 from sqlalchemy.orm import Session
 import sys
@@ -76,7 +77,10 @@ def evaluate_intents(intents, stances):
 
 def main():
     ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    client = Client(host=ollama_host)
+    client = Client(
+        host=ollama_host,
+        timeout=httpx.Timeout(180.0, connect=10.0),
+    )
     
     db = SessionLocal()
     try:
@@ -130,6 +134,8 @@ def main():
             parts.append(f"Latest Action: {bill.latest_action_text}")
         if bill.summary:
             cleaned_summary = clean_html(bill.summary)
+            if len(cleaned_summary) > 25000:
+                cleaned_summary = cleaned_summary[:25000] + "\n\n[Summary truncated for length]"
             parts.append(f"Congressional Research Service (CRS) Summary:\n{cleaned_summary}")
         text_to_analyze = "\n\n".join(parts)
 
@@ -140,7 +146,11 @@ def main():
                 {'role': 'system', 'content': SYSTEM_PROMPT},
                 {'role': 'user', 'content': f"Analyze this bill:\n{text_to_analyze}"}
             ],
-            format=ClassificationMetadata.model_json_schema()
+            format=ClassificationMetadata.model_json_schema(),
+            options={
+                "temperature": 0.1,
+                "num_predict": 4096,
+            },
         )
 
         parsed_json_str = response['message']['content']
