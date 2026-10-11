@@ -4,8 +4,13 @@ from ollama import Client
 from sqlalchemy.orm import Session
 import sys
 
-# Ensure backend directory is in path so we can import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Ensure backend and scripts directories are in path
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+SCRIPTS_DIR = os.path.abspath(os.path.dirname(__file__))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
 
 from models import Bill, OfficialStance, PolicyTarget, Official
 from database import SessionLocal
