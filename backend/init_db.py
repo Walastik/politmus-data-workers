@@ -125,6 +125,9 @@ def ensure_schema():
             """
         ))
         conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS classification_metadata JSONB"
+        ))
+        conn.execute(text(
             "ALTER TABLE bills DROP COLUMN IF EXISTS classification"
         ))
         conn.execute(text("DROP TABLE IF EXISTS classification_guidelines"))
