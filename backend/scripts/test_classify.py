@@ -61,15 +61,44 @@ def main():
     
     db = SessionLocal()
     try:
-        # Find one bill where classification_metadata is null
-        bill = db.query(Bill).filter(Bill.classification_metadata == None).first()
-        if not bill:
-            print("No bills found with null classification_metadata.")
-            return
+        # Allow passing a specific bill ID via command line argument: python test_classify.py [bill_id]
+        target_bill_id = sys.argv[1] if len(sys.argv) > 1 else None
+
+        if target_bill_id:
+            bill = db.query(Bill).filter(Bill.id == target_bill_id).first()
+            if not bill:
+                print(f"Error: Bill with ID '{target_bill_id}' not found.")
+                return
+        else:
+            # Find one bill where classification_metadata is null and has a non-empty summary
+            bill = (
+                db.query(Bill)
+                .filter(
+                    Bill.classification_metadata == None,
+                    Bill.summary.isnot(None),
+                    Bill.summary != "",
+                )
+                .first()
+            )
+            if not bill:
+                print("No unclassified bills found with available summaries.")
+                print("Tip: You can pass a specific bill ID: python backend/scripts/test_classify.py <bill_id>")
+                return
 
         print(f"Found bill: {bill.id} - {bill.title}")
+        if bill.summary:
+            preview = bill.summary[:200] + ("..." if len(bill.summary) > 200 else "")
+            print(f"Summary ({len(bill.summary)} chars): {preview}\n")
+        else:
+            print("Warning: Bill has no summary, relying on title.\n")
 
-        text_to_analyze = bill.summary or bill.title or "No text available."
+        # Provide both Title and Summary for comprehensive LLM extraction
+        parts = []
+        if bill.title:
+            parts.append(f"Title: {bill.title}")
+        if bill.summary:
+            parts.append(f"Summary:\n{bill.summary}")
+        text_to_analyze = "\n\n".join(parts) if parts else "No text available."
 
         print("Running inference through nemotron-3.5-lightning:30b...")
         response = client.chat(
