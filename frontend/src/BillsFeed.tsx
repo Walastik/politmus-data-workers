@@ -1,3 +1,5 @@
+import { Sparkles } from 'lucide-react'
+import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
@@ -164,13 +166,21 @@ export default function BillsFeed() {
               <h3 className="mt-2 text-base font-semibold leading-snug">
                 {bill.title || 'Untitled bill'}
               </h3>
-              {bill.status || bill.policy_area || bill.bipartisan_type ? (
+              {bill.status || bill.policy_area || bill.bipartisan_type || bill.classification_metadata ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <StatusTag status={bill.status} />
                   {bill.policy_area ? (
                     <PolicyAreaTag area={bill.policy_area} />
                   ) : null}
                   <BipartisanTag bill={bill} />
+                  <SignedIn>
+                    {bill.classification_metadata?.intents && bill.classification_metadata.intents.length > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-purple-800/70 bg-purple-950/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-purple-300">
+                        <Sparkles className="h-2.5 w-2.5 text-purple-400" />
+                        AI Classified ({bill.classification_metadata.intents.length})
+                      </span>
+                    ) : null}
+                  </SignedIn>
                 </div>
               ) : null}
               <BillDates bill={bill} className="mt-2" />

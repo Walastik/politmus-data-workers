@@ -243,6 +243,7 @@ def _bill_detail(
         latest_action_text=bill.latest_action_text,
         status=bill.status,
         level=bill.level or "federal",
+        classification_metadata=bill.classification_metadata,
         votes_summary=votes_summary or _empty_chamber_summaries(),
         votes_by_party=votes_by_party or _empty_party_summaries(),
         roll_calls=[_roll_call_out(row) for row in (roll_calls or [])],

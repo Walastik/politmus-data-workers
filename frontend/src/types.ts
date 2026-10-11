@@ -83,6 +83,19 @@ export interface BillRollCall {
   source_roll_call_id: string
 }
 
+export interface ClassificationIntent {
+  target: string
+  mechanism: 'funding' | 'regulation' | 'oversight' | 'taxation' | string
+  direction: 'increase' | 'decrease' | 'maintain' | 'mixed' | string
+  magnitude: 'low' | 'medium' | 'high' | string
+  rationale?: string
+}
+
+export interface ClassificationMetadata {
+  intents?: ClassificationIntent[]
+  [key: string]: unknown
+}
+
 export interface Bill {
   id: string
   title: string | null
@@ -102,6 +115,7 @@ export interface Bill {
   latest_action_text?: string | null
   status?: BillStatus | null
   level?: string | null
+  classification_metadata?: ClassificationMetadata | null
   votes_summary: BillVoteSummary
   votes_by_party?: BillVotePartySummary
   roll_calls?: BillRollCall[]

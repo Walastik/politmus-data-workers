@@ -59,6 +59,7 @@ class BillOut(BaseModel):
     latest_action_text: Optional[str] = None
     status: Optional[str] = None
     level: str = "federal"
+    classification_metadata: Optional[dict] = None
 
 
 class RollCallOut(BaseModel):

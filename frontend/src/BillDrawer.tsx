@@ -1,4 +1,5 @@
-import { X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Sparkles, X } from 'lucide-react'
+import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
@@ -16,6 +17,7 @@ import {
   billStatusClass,
   type Bill,
   type BillRollCall,
+  type ClassificationMetadata,
   type VoteChamber,
 } from './types'
 
@@ -146,6 +148,9 @@ export default function BillDrawer({
               />
             </div>
             <RollCallList rollCalls={view.roll_calls} />
+            <SignedIn>
+              <AiClassificationSection metadata={view.classification_metadata} />
+            </SignedIn>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               CRS summary
             </h3>
@@ -377,5 +382,136 @@ function CrsSummary({ text }: { text: string }) {
       className="mt-3 text-sm leading-relaxed text-slate-300 [&_a]:text-blue-300 [&_li]:mb-1 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_strong]:text-slate-100 [&_ul]:list-disc [&_ul]:pl-5"
       dangerouslySetInnerHTML={{ __html: sanitizeCrsHtml(text) }}
     />
+  )
+}
+
+function directionBadgeClass(direction?: string) {
+  switch (direction?.toLowerCase()) {
+    case 'increase':
+      return 'bg-emerald-950/80 text-emerald-300 border-emerald-800/70'
+    case 'decrease':
+      return 'bg-rose-950/80 text-rose-300 border-rose-800/70'
+    case 'maintain':
+      return 'bg-sky-950/80 text-sky-300 border-sky-800/70'
+    case 'mixed':
+      return 'bg-amber-950/80 text-amber-300 border-amber-800/70'
+    default:
+      return 'bg-slate-800 text-slate-300 border-slate-700'
+  }
+}
+
+function mechanismBadgeClass(mechanism?: string) {
+  switch (mechanism?.toLowerCase()) {
+    case 'funding':
+      return 'bg-indigo-950/80 text-indigo-300 border-indigo-800/70'
+    case 'regulation':
+      return 'bg-purple-950/80 text-purple-300 border-purple-800/70'
+    case 'oversight':
+      return 'bg-cyan-950/80 text-cyan-300 border-cyan-800/70'
+    case 'taxation':
+      return 'bg-orange-950/80 text-orange-300 border-orange-800/70'
+    default:
+      return 'bg-slate-800 text-slate-300 border-slate-700'
+  }
+}
+
+function AiClassificationSection({
+  metadata,
+}: {
+  metadata?: ClassificationMetadata | null
+}) {
+  const [showRaw, setShowRaw] = useState(false)
+  const intents = metadata?.intents ?? []
+
+  return (
+    <section className="mb-5 rounded-xl border border-purple-500/30 bg-purple-950/10 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-purple-400" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-300">
+            AI Policy Classification
+          </h3>
+        </div>
+        <span className="rounded bg-purple-900/50 px-1.5 py-0.5 text-[10px] font-mono font-medium text-purple-300">
+          Nemotron 30B
+        </span>
+      </div>
+
+      {intents.length > 0 ? (
+        <div className="mt-3 space-y-3">
+          {intents.map((intent, idx) => (
+            <div
+              key={idx}
+              className="rounded-lg border border-slate-800 bg-slate-900/90 p-3 shadow-inner"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-sm text-slate-100">
+                  {intent.target}
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${mechanismBadgeClass(
+                      intent.mechanism
+                    )}`}
+                  >
+                    {intent.mechanism}
+                  </span>
+                  <span
+                    className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${directionBadgeClass(
+                      intent.direction
+                    )}`}
+                  >
+                    {intent.direction}
+                  </span>
+                  {intent.magnitude ? (
+                    <span className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono uppercase text-slate-400">
+                      {intent.magnitude}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              {intent.rationale ? (
+                <p className="mt-2 text-xs leading-relaxed text-slate-300">
+                  {intent.rationale}
+                </p>
+              ) : null}
+            </div>
+          ))}
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setShowRaw(!showRaw)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-400 hover:text-purple-300 transition"
+            >
+              {showRaw ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              {showRaw ? 'Hide raw JSON metadata' : 'View raw JSON metadata'}
+            </button>
+            {showRaw ? (
+              <pre className="mt-2 max-h-52 overflow-auto rounded bg-slate-950 p-2 text-[11px] font-mono text-purple-200 border border-slate-800">
+                {JSON.stringify(metadata, null, 2)}
+              </pre>
+            ) : null}
+          </div>
+        </div>
+      ) : metadata ? (
+        <div className="mt-2">
+          <p className="text-xs text-slate-400">
+            Metadata recorded, but no intents parsed.
+          </p>
+          <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-950 p-2 text-[11px] font-mono text-purple-200 border border-slate-800">
+            {JSON.stringify(metadata, null, 2)}
+          </pre>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-slate-400">
+          No AI classification metadata recorded for this bill yet.
+        </p>
+      )}
+    </section>
   )
 }
