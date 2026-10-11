@@ -475,6 +475,13 @@ function AiClassificationSection({
                   {intent.rationale}
                 </p>
               ) : null}
+              {intent.citation ? (
+                <div className="mt-2 border-l-2 border-purple-500/60 bg-purple-950/30 py-1 pl-2.5 pr-2 rounded-r">
+                  <p className="text-[11px] italic text-purple-200">
+                    &ldquo;{intent.citation}&rdquo;
+                  </p>
+                </div>
+              ) : null}
             </div>
           ))}
 

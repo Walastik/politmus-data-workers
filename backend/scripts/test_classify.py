@@ -1,8 +1,24 @@
 import os
 import json
+import re
 from ollama import Client
 from sqlalchemy.orm import Session
 import sys
+
+def clean_html(text: str | None) -> str:
+    """Strip HTML tags and normalize whitespace from CRS summaries."""
+    if not text:
+        return ""
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+    )
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+([.,;:!?])", r"\1", text)
 
 # Ensure backend and scripts directories are in path
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -43,15 +59,18 @@ def evaluate_intents(intents, stances):
 
             if score != 0:
                 total_score += score
-                receipts.append({
+                receipt = {
                     "target": intent.target,
                     "mechanism": intent.mechanism,
                     "stance_direction": stance_dir,
                     "effect_direction": effect_dir,
                     "simulated_vote": "Yea",
                     "score_delta": score,
-                    "rationale": intent.rationale
-                })
+                    "rationale": intent.rationale,
+                }
+                if getattr(intent, "citation", None):
+                    receipt["citation"] = intent.citation
+                receipts.append(receipt)
 
     return total_score, receipts
 
@@ -92,13 +111,27 @@ def main():
         else:
             print("Warning: Bill has no summary, relying on title.\n")
 
-        # Provide both Title and Summary for comprehensive LLM extraction
-        parts = []
+        # Provide all available bill context for comprehensive LLM extraction
+        parts = [f"Bill ID: {bill.id}"]
         if bill.title:
             parts.append(f"Title: {bill.title}")
+        if bill.policy_area:
+            parts.append(f"Policy Area: {bill.policy_area}")
+        if bill.sponsor_name:
+            sponsor_info = bill.sponsor_name
+            if bill.sponsor_party:
+                sponsor_info += f" ({bill.sponsor_party})"
+            parts.append(f"Sponsor: {sponsor_info}")
+        if bill.bipartisan_type:
+            parts.append(f"Bipartisan Status: {bill.bipartisan_type}")
+        if bill.status:
+            parts.append(f"Legislative Status: {bill.status}")
+        if bill.latest_action_text:
+            parts.append(f"Latest Action: {bill.latest_action_text}")
         if bill.summary:
-            parts.append(f"Summary:\n{bill.summary}")
-        text_to_analyze = "\n\n".join(parts) if parts else "No text available."
+            cleaned_summary = clean_html(bill.summary)
+            parts.append(f"Congressional Research Service (CRS) Summary:\n{cleaned_summary}")
+        text_to_analyze = "\n\n".join(parts)
 
         print("Running inference through nemotron-3.5-lightning:30b...")
         response = client.chat(

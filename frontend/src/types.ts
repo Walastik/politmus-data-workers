@@ -89,6 +89,7 @@ export interface ClassificationIntent {
   direction: 'increase' | 'decrease' | 'maintain' | 'mixed' | string
   magnitude: 'low' | 'medium' | 'high' | string
   rationale?: string
+  citation?: string
 }
 
 export interface ClassificationMetadata {
