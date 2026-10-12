@@ -148,22 +148,40 @@ def run_batch_classification(
 
             try:
                 t0 = time.time()
-                response = client.chat(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Analyze this bill:\n{context_text}"},
-                    ],
-                    format=ClassificationMetadata.model_json_schema(),
-                    options={
-                        "temperature": 0.1,
-                        "num_ctx": 32768,     # Allow reading up to 32k tokens of bill context
-                        "num_predict": 4096,  # Cap max output tokens to prevent runaway generation
-                    },
-                )
-                duration = time.time() - t0
+                raw_content = ""
 
-                raw_content = response["message"]["content"]
+                # Attempt inference with up to 1 retry if Ollama returns an empty string
+                for attempt in range(1, 3):
+                    response = client.chat(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": f"Analyze this bill:\n{context_text}"},
+                        ],
+                        format=ClassificationMetadata.model_json_schema(),
+                        options={
+                            "temperature": 0.1 if attempt == 1 else 0.2,
+                            "num_ctx": 32768,     # Allow reading up to 32k tokens of bill context
+                            "num_predict": 4096,  # Cap max output tokens to prevent runaway generation
+                        },
+                    )
+                    msg = getattr(response, "message", None)
+                    content = getattr(msg, "content", "") if msg is not None else ""
+                    if not content and isinstance(response, dict):
+                        content = response.get("message", {}).get("content", "")
+
+                    if content and content.strip():
+                        raw_content = content
+                        break
+
+                    if attempt < 2:
+                        print(f"  -> Model returned empty response, retrying once...")
+                        time.sleep(1.0)
+
+                if not raw_content or not raw_content.strip():
+                    raise ValueError("Ollama returned an empty response (0 tokens generated)")
+
+                duration = time.time() - t0
                 parsed = ClassificationMetadata.model_validate_json(raw_content)
 
                 # Persist to database immediately
