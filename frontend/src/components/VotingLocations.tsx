@@ -23,19 +23,19 @@ import {
 interface VotingLocationsProps {
   voterInfo: VoterInfo | null
   loading: boolean
-  error: string | null
+  error?: string | null
   stateCode?: string | null
 }
 
 export default function VotingLocations({
   voterInfo,
   loading,
-  error,
+  error = null,
   stateCode,
 }: VotingLocationsProps) {
   if (loading) {
     return (
-      <div className="py-8 text-center text-slate-400" aria-live="polite">
+      <div className="py-8 text-center text-slate-400" aria-live="polite" role="status">
         <p>Loading voting and polling location information…</p>
       </div>
     )
@@ -126,7 +126,7 @@ export default function VotingLocations({
       )}
 
       {/* Contact Cards for election offices */}
-      {(voterInfo.adminBodies.local || voterInfo.adminBodies.state) && (
+      {voterInfo.adminBodies && (voterInfo.adminBodies.local || voterInfo.adminBodies.state) && (
         <ContactCardsSection adminBodies={voterInfo.adminBodies} />
       )}
 
@@ -371,8 +371,11 @@ function AddressProblemStateView({ stateCode }: { stateCode?: string | null }) {
 function RegistrationBlock({
   adminBodies,
 }: {
-  adminBodies: { state: AdminBody | null; local: AdminBody | null }
+  adminBodies?: { state: AdminBody | null; local: AdminBody | null } | null
 }) {
+  if (!adminBodies) {
+    return null
+  }
   const local = adminBodies.local
   const state = adminBodies.state
 

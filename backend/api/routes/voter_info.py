@@ -109,6 +109,9 @@ class SlidingWindowRateLimiter:
         async with self.lock:
             self.entries.clear()
 
+    def clear(self) -> None:
+        self.entries.clear()
+
 
 class VoterInfoCache:
     """Thread- and async-safe in-memory LRU cache with TTL."""
@@ -145,6 +148,9 @@ class VoterInfoCache:
     async def reset(self) -> None:
         async with self.lock:
             self.entries.clear()
+
+    def clear(self) -> None:
+        self.entries.clear()
 
 
 rate_limiter = SlidingWindowRateLimiter()

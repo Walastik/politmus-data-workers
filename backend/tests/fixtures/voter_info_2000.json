@@ -1,0 +1,137 @@
+{
+  "kind": "civicinfo#voterInfoResponse",
+  "status": "success",
+  "election": {
+    "id": "2000",
+    "name": "VIP Test Election",
+    "electionDay": "2024-11-05",
+    "ocdDivisionId": "ocd-division/country:us"
+  },
+  "normalizedInput": {
+    "line1": "1263 Pacific Ave",
+    "city": "Kansas City",
+    "state": "KS",
+    "zip": "66102"
+  },
+  "pollingLocations": [
+    {
+      "address": {
+        "locationName": "Kansas City Community Center",
+        "line1": "1263 Pacific Ave",
+        "city": "Kansas City",
+        "state": "KS",
+        "zip": "66102"
+      },
+      "notes": "Main gymnasium, enter through south doors.",
+      "pollingHours": "7:00 AM - 7:00 PM\nValid photo ID required",
+      "startDate": "2024-11-05",
+      "endDate": "2024-11-05",
+      "sources": [
+        {
+          "name": "Voting Information Project",
+          "official": true
+        }
+      ]
+    }
+  ],
+  "earlyVoteSites": [
+    {
+      "address": {
+        "locationName": "Wyandotte County Election Office",
+        "line1": "850 State Ave",
+        "city": "Kansas City",
+        "state": "KS",
+        "zip": "66101"
+      },
+      "pollingHours": "8:00 AM - 5:00 PM Monday through Friday",
+      "startDate": "2024-10-21",
+      "endDate": "2024-11-04",
+      "sources": [
+        {
+          "name": "Voting Information Project",
+          "official": true
+        }
+      ]
+    }
+  ],
+  "dropOffLocations": [
+    {
+      "address": {
+        "locationName": "City Hall Ballot Drop Box",
+        "line1": "701 N 7th St",
+        "city": "Kansas City",
+        "state": "KS",
+        "zip": "66101"
+      },
+      "notes": "24/7 secure drive-up drop box outside main entrance.",
+      "pollingHours": "Open 24 hours daily until 7:00 PM on Election Day",
+      "startDate": "2024-10-16",
+      "endDate": "2024-11-05",
+      "sources": [
+        {
+          "name": "Voting Information Project",
+          "official": true
+        }
+      ]
+    }
+  ],
+  "state": [
+    {
+      "name": "Kansas",
+      "electionAdministrationBody": {
+        "name": "Kansas Secretary of State",
+        "electionInfoUrl": "https://sos.ks.gov/elections/elections.html",
+        "electionRegistrationUrl": "https://www.ksvotes.org/",
+        "electionRegistrationConfirmationUrl": "https://myvoteinfo.voteks.org/voterview",
+        "absenteeVotingInfoUrl": "https://sos.ks.gov/elections/voter-information.html",
+        "votingLocationFinderUrl": "https://myvoteinfo.voteks.org/voterview",
+        "ballotInfoUrl": "https://myvoteinfo.voteks.org/voterview",
+        "hoursOfOperation": "8:00 AM - 5:00 PM CST",
+        "physicalAddress": {
+          "locationName": "Memorial Hall, 1st Floor",
+          "line1": "120 SW 10th Ave",
+          "city": "Topeka",
+          "state": "KS",
+          "zip": "66612"
+        },
+        "electionOfficials": [
+          {
+            "name": "Elections Director",
+            "title": "Director of Elections",
+            "officePhoneNumber": "(785) 296-4561",
+            "emailAddress": "election@ks.gov"
+          }
+        ]
+      },
+      "local_jurisdiction": {
+        "name": "Wyandotte County Election Office",
+        "electionAdministrationBody": {
+          "name": "Wyandotte County Election Commissioner",
+          "electionInfoUrl": "https://www.wycokck.org/Departments/Election-Office",
+          "electionRegistrationUrl": "https://www.wycokck.org/Departments/Election-Office/Voter-Registration",
+          "hoursOfOperation": "8:00 AM - 5:00 PM Monday - Friday",
+          "physicalAddress": {
+            "line1": "850 State Ave",
+            "city": "Kansas City",
+            "state": "KS",
+            "zip": "66101"
+          },
+          "electionOfficials": [
+            {
+              "name": "Election Commissioner",
+              "officePhoneNumber": "(913) 573-8500",
+              "emailAddress": "election@wycokck.org"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "otherElections": [
+    {
+      "id": "2001",
+      "name": "VIP Primary Test Election",
+      "electionDay": "2024-08-06"
+    }
+  ]
+}

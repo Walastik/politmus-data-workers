@@ -24,12 +24,24 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    DATABASE_URL=postgresql://postgres:postgres_password@localhost:5432/politmus_local
    CONGRESS_GOV_API_KEY=your_key_here
    OPENSTATES_API_KEY=your_key_here
+   GOOGLE_CIVIC_API_KEY=your_google_civic_api_key_here
+   CIVIC_ELECTION_ID_OVERRIDE=
+   TRUSTED_PROXY=false
    OLLAMA_HOST=http://localhost:11434
    OLLAMA_MODEL=qwen2.5-coder:32b
    OLLAMA_TIMEOUT_SECONDS=180
    ```
 
-   Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/). Get an OpenStates API key from [openstates.org/accounts/signup](https://openstates.org/accounts/signup/). Address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table; it does not need a Google API key. `OLLAMA_*` is only required for the local bill classifier.
+   - Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/).
+   - Get an OpenStates API key from [openstates.org/accounts/signup](https://openstates.org/accounts/signup/).
+   - **Google Civic Information API key**: Needed for voting location lookups (`POST /api/voter-info`).
+     - Enable the **Google Civic Information API** in the [Google Cloud Console](https://console.cloud.google.com/).
+     - Create an API key and **restrict the key** under "API restrictions" to only allow calls to the *Google Civic Information API* to minimize risk.
+     - Optional: Set `CIVIC_ELECTION_ID_OVERRIDE` to target a specific election ID (such as `2000` for VIP test election).
+     - Set `TRUSTED_PROXY=true` in production deployments behind a reverse proxy (e.g. Fly.io, Cloudflare, nginx) so the rate limiter parses client IP from `X-Forwarded-For`.
+   - Representative address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table and does not require Google API credentials.
+   - `OLLAMA_*` is only required for the local bill classifier.
+   - **Privacy Policy Notice**: Addresses entered for voting location lookups are proxied to the Google Civic Information API. Ensure the public privacy policy explicitly discloses that user addresses are sent upstream for polling place resolution.
 
 4. Create (or update) tables:
 
@@ -206,7 +218,7 @@ gh secret set FLY_API_TOKEN
 Use an org or personal token, not a deploy-only token (`fly ssh` rejects those). Set `OPENSTATES_API_KEY` on the Fly app (not as a GitHub secret):
 
 ```bash
-fly secrets set OPENSTATES_API_KEY=your_key_here -a politmus-api
+fly secrets set OPENSTATES_API_KEY=your_key_here GOOGLE_CIVIC_API_KEY=your_civic_key TRUSTED_PROXY=true -a politmus-api
 ```
 
 Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, or **Senate Votes Ingestion** from the Actions tab, or load data once by hand:
