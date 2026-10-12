@@ -604,3 +604,408 @@ export function civicRepresentativeToOfficial(
     openstates_id: isCivicStateLevel(rep) ? rep.id : null,
   }
 }
+
+export type VoterUiState =
+  | 'live'
+  | 'mail_only'
+  | 'no_locations_yet'
+  | 'no_data_yet'
+  | 'nearby_only'
+  | 'election_over'
+  | 'no_election'
+  | 'address_problem'
+  | 'unavailable'
+
+export interface VoterSource {
+  name: string | null
+  official: boolean | null
+}
+
+export interface VoterLocation {
+  locationName: string | null
+  line1: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  pollingHours: string | null
+  startDate: string | null
+  endDate: string | null
+  notes: string | null
+  sources: VoterSource[]
+}
+
+export interface AdminBody {
+  name: string | null
+  electionInfoUrl: string | null
+  electionRegistrationUrl: string | null
+  electionRegistrationConfirmationUrl: string | null
+  absenteeVotingInfoUrl: string | null
+  votingLocationFinderUrl: string | null
+  ballotInfoUrl: string | null
+  hoursOfOperation: string | null
+  physicalAddress: CivicAddress | null
+  phone: string | null
+  email: string | null
+}
+
+export interface AdminBodies {
+  state: AdminBody | null
+  local: AdminBody | null
+}
+
+export interface VoterElection {
+  id: string
+  name: string
+  date: string | null
+}
+
+export interface VoterInfo {
+  uiState: VoterUiState
+  upstreamStatus: string
+  election: VoterElection | null
+  mailOnly: boolean
+  pollingLocations: VoterLocation[]
+  earlyVoteSites: VoterLocation[]
+  dropOffLocations: VoterLocation[]
+  adminBodies: AdminBodies
+  otherElections: VoterElection[]
+  fetchedAt: string
+  detail?: string
+}
+
+export interface StateVoterResource {
+  name: string
+  voteGovUrl: string
+  checkRegistrationUrl: string
+  registerUrl: string
+}
+
+export const STATE_VOTER_RESOURCES: Record<string, StateVoterResource> = {
+  AL: {
+    name: 'Alabama',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/alabama/',
+  },
+  AK: {
+    name: 'Alaska',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/alaska/',
+  },
+  AZ: {
+    name: 'Arizona',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/arizona/',
+  },
+  AR: {
+    name: 'Arkansas',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/arkansas/',
+  },
+  CA: {
+    name: 'California',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/california/',
+  },
+  CO: {
+    name: 'Colorado',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/colorado/',
+  },
+  CT: {
+    name: 'Connecticut',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/connecticut/',
+  },
+  DE: {
+    name: 'Delaware',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/delaware/',
+  },
+  DC: {
+    name: 'District of Columbia',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/district-of-columbia/',
+  },
+  FL: {
+    name: 'Florida',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/florida/',
+  },
+  GA: {
+    name: 'Georgia',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/georgia/',
+  },
+  HI: {
+    name: 'Hawaii',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/hawaii/',
+  },
+  ID: {
+    name: 'Idaho',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/idaho/',
+  },
+  IL: {
+    name: 'Illinois',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/illinois/',
+  },
+  IN: {
+    name: 'Indiana',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/indiana/',
+  },
+  IA: {
+    name: 'Iowa',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/iowa/',
+  },
+  KS: {
+    name: 'Kansas',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/kansas/',
+  },
+  KY: {
+    name: 'Kentucky',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/kentucky/',
+  },
+  LA: {
+    name: 'Louisiana',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/louisiana/',
+  },
+  ME: {
+    name: 'Maine',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/maine/',
+  },
+  MD: {
+    name: 'Maryland',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/maryland/',
+  },
+  MA: {
+    name: 'Massachusetts',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/massachusetts/',
+  },
+  MI: {
+    name: 'Michigan',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/michigan/',
+  },
+  MN: {
+    name: 'Minnesota',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/minnesota/',
+  },
+  MS: {
+    name: 'Mississippi',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/mississippi/',
+  },
+  MO: {
+    name: 'Missouri',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/missouri/',
+  },
+  MT: {
+    name: 'Montana',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/montana/',
+  },
+  NE: {
+    name: 'Nebraska',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/nebraska/',
+  },
+  NV: {
+    name: 'Nevada',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/nevada/',
+  },
+  NH: {
+    name: 'New Hampshire',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/new-hampshire/',
+  },
+  NJ: {
+    name: 'New Jersey',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/new-jersey/',
+  },
+  NM: {
+    name: 'New Mexico',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/new-mexico/',
+  },
+  NY: {
+    name: 'New York',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/new-york/',
+  },
+  NC: {
+    name: 'North Carolina',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/north-carolina/',
+  },
+  ND: {
+    name: 'North Dakota',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/north-dakota/',
+  },
+  OH: {
+    name: 'Ohio',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/ohio/',
+  },
+  OK: {
+    name: 'Oklahoma',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/oklahoma/',
+  },
+  OR: {
+    name: 'Oregon',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/oregon/',
+  },
+  PA: {
+    name: 'Pennsylvania',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/pennsylvania/',
+  },
+  RI: {
+    name: 'Rhode Island',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/rhode-island/',
+  },
+  SC: {
+    name: 'South Carolina',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/south-carolina/',
+  },
+  SD: {
+    name: 'South Dakota',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/south-dakota/',
+  },
+  TN: {
+    name: 'Tennessee',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/tennessee/',
+  },
+  TX: {
+    name: 'Texas',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/texas/',
+  },
+  UT: {
+    name: 'Utah',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/utah/',
+  },
+  VT: {
+    name: 'Vermont',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/vermont/',
+  },
+  VA: {
+    name: 'Virginia',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/virginia/',
+  },
+  WA: {
+    name: 'Washington',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/washington/',
+  },
+  WV: {
+    name: 'West Virginia',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/west-virginia/',
+  },
+  WI: {
+    name: 'Wisconsin',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/wisconsin/',
+  },
+  WY: {
+    name: 'Wyoming',
+    voteGovUrl: 'https://vote.gov',
+    checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+    registerUrl: 'https://www.vote.org/register-to-vote/wyoming/',
+  },
+}
+
+export function getVoterResources(stateCode?: string | null): StateVoterResource {
+  if (!stateCode) {
+    return {
+      name: 'United States',
+      voteGovUrl: 'https://vote.gov',
+      checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+      registerUrl: 'https://www.vote.org/register-to-vote/',
+    }
+  }
+  const upper = stateCode.toUpperCase().trim()
+  return (
+    STATE_VOTER_RESOURCES[upper] ?? {
+      name: upper,
+      voteGovUrl: 'https://vote.gov',
+      checkRegistrationUrl: 'https://www.vote.org/am-i-registered-to-vote/',
+      registerUrl: 'https://www.vote.org/register-to-vote/',
+    }
+  )
+}
+

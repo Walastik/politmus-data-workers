@@ -1,11 +1,12 @@
-import { Search } from 'lucide-react'
-import { useState, useEffect, type FormEvent } from 'react'
+import { Search, Users, Vote } from 'lucide-react'
+import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { useUser } from '@clerk/clerk-react'
 
 import { apiUrl } from './api'
 import LookupResults from './LookupResults'
 import MemberDrawer from './MemberDrawer'
-import type { CivicLookup, Official } from './types'
+import VotingLocations from './components/VotingLocations'
+import type { CivicLookup, Official, VoterInfo } from './types'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
@@ -36,14 +37,82 @@ export default function AddressLookup() {
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
 
+  // Voter info state (independent from representative lookup)
+  const [voterInfo, setVoterInfo] = useState<VoterInfo | null>(null)
+  const [voterInfoLoading, setVoterInfoLoading] = useState(false)
+  const [voterInfoError, setVoterInfoError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'representatives' | 'voting'>('representatives')
+  const activeVoterInfoControllerRef = useRef<AbortController | null>(null)
+
   const { user, isLoaded: userLoaded } = useUser()
   const savedAddress = user?.unsafeMetadata?.savedAddress as string | undefined
 
+  async function fetchVoterInfo(targetAddress: string, signal: AbortSignal) {
+    try {
+      const response = await fetch(apiUrl('/api/voter-info'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: targetAddress }),
+        signal,
+      })
+      const data = await readJson(response)
+      if (signal.aborted) {
+        return
+      }
+
+      if (!response.ok) {
+        setVoterInfo({
+          uiState: 'unavailable',
+          upstreamStatus: data?.upstreamStatus || `http_${response.status}`,
+          election: null,
+          mailOnly: false,
+          pollingLocations: [],
+          earlyVoteSites: [],
+          dropOffLocations: [],
+          adminBodies: { state: null, local: null },
+          otherElections: [],
+          fetchedAt: new Date().toISOString(),
+          detail: apiDetail(data, `Voting info lookup failed (${response.status})`),
+        })
+        return
+      }
+
+      setVoterInfo(data as VoterInfo)
+    } catch (err: unknown) {
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return
+      }
+      console.error('Voter info fetch failed', err)
+      setVoterInfo({
+        uiState: 'unavailable',
+        upstreamStatus: 'network_error',
+        election: null,
+        mailOnly: false,
+        pollingLocations: [],
+        earlyVoteSites: [],
+        dropOffLocations: [],
+        adminBodies: { state: null, local: null },
+        otherElections: [],
+        fetchedAt: new Date().toISOString(),
+        detail:
+          err instanceof Error
+            ? err.message
+            : 'Could not reach the voting information service.',
+      })
+    } finally {
+      if (!signal.aborted) {
+        setVoterInfoLoading(false)
+      }
+    }
+  }
+
   // Extract fetch logic into a standalone function
   async function performLookup(targetAddress: string) {
-    if (!targetAddress.trim()) {
+    const trimmed = targetAddress.trim()
+    if (!trimmed) {
       setError('Enter a U.S. street address.')
       setLookup(null)
+      setVoterInfo(null)
       return
     }
 
@@ -51,9 +120,20 @@ export default function AddressLookup() {
     setError(null)
     setSelectedOfficial(null)
 
+    // Reset voter-info state and abort any active prior voter-info request
+    activeVoterInfoControllerRef.current?.abort()
+    const voterController = new AbortController()
+    activeVoterInfoControllerRef.current = voterController
+    setVoterInfo(null)
+    setVoterInfoLoading(true)
+    setVoterInfoError(null)
+
+    // Fire voter info concurrently without blocking representative lookup
+    fetchVoterInfo(trimmed, voterController.signal)
+
     try {
       const response = await fetch(
-        apiUrl(`/api/lookup?address=${encodeURIComponent(targetAddress)}`),
+        apiUrl(`/api/lookup?address=${encodeURIComponent(trimmed)}`),
       )
       const body = await readJson(response)
       if (!response.ok) {
@@ -72,6 +152,7 @@ export default function AddressLookup() {
       setLoading(false)
     }
   }
+
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -180,12 +261,85 @@ export default function AddressLookup() {
           <p className="text-slate-400">Looking up that address…</p>
         ) : null}
         {lookup ? (
-          <LookupResults
-            lookup={lookup}
-            onSelectOfficial={setSelectedOfficial}
-          />
+          <div>
+            <div
+              className="mb-6 flex border-b border-slate-700"
+              role="tablist"
+              aria-label="Address lookup results views"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="tab-representatives"
+                aria-controls="panel-representatives"
+                aria-selected={activeTab === 'representatives'}
+                onClick={() => setActiveTab('representatives')}
+                className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                  activeTab === 'representatives'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                }`}
+              >
+                <Users className="h-4 w-4" aria-hidden="true" />
+                <span>Representatives</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-voting"
+                aria-controls="panel-voting"
+                aria-selected={activeTab === 'voting'}
+                onClick={() => setActiveTab('voting')}
+                className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                  activeTab === 'voting'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                }`}
+              >
+                <Vote className="h-4 w-4" aria-hidden="true" />
+                <span>Voting Locations</span>
+                {voterInfoLoading && (
+                  <span
+                    className="h-2 w-2 rounded-full bg-blue-400 animate-pulse"
+                    title="Loading voting info"
+                  />
+                )}
+              </button>
+            </div>
+
+            <div
+              id="panel-representatives"
+              role="tabpanel"
+              aria-labelledby="tab-representatives"
+              hidden={activeTab !== 'representatives'}
+            >
+              {activeTab === 'representatives' && (
+                <LookupResults
+                  lookup={lookup}
+                  onSelectOfficial={setSelectedOfficial}
+                />
+              )}
+            </div>
+
+            <div
+              id="panel-voting"
+              role="tabpanel"
+              aria-labelledby="tab-voting"
+              hidden={activeTab !== 'voting'}
+            >
+              {activeTab === 'voting' && (
+                <VotingLocations
+                  voterInfo={voterInfo}
+                  loading={voterInfoLoading}
+                  error={voterInfoError}
+                  stateCode={lookup.normalized_input?.state}
+                />
+              )}
+            </div>
+          </div>
         ) : null}
       </div>
+
 
       {selectedOfficial ? (
         <MemberDrawer
