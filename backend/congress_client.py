@@ -41,11 +41,15 @@ SENATE_ROLL_CALL_TERMINAL = {
     SENATE_ROLL_CALL_INGESTED,
     SENATE_ROLL_CALL_SKIPPED_NOMINATION,
 }
-SENATE_USER_AGENT = "politmus-data-workers (https://politmus.com)"
+SENATE_USER_AGENT = os.getenv(
+    "SENATE_USER_AGENT",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+)
 API_KEY = os.getenv("CONGRESS_GOV_API_KEY")
 PAGE_SIZE = 250
 CURRENT_CONGRESS = 119
 REQUEST_PAUSE_SECONDS = 0.2
+SENATE_REQUEST_PAUSE_SECONDS = float(os.getenv("SENATE_REQUEST_PAUSE_SECONDS", "1.0"))
 MAX_RETRIES = 5
 INITIAL_BACKOFF_SECONDS = 1.0
 
@@ -426,15 +430,23 @@ def parse_senate_vote_xml(xml_bytes, congress=None):
 
 
 def senate_get(url):
-    """GET bytes from Senate.gov with polite pacing and 429/5xx backoff."""
-    headers = {"User-Agent": SENATE_USER_AGENT}
+    """GET bytes from Senate.gov with polite pacing, browser headers, proxy support, and 429/5xx backoff."""
+    headers = {
+        "User-Agent": SENATE_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    proxy_url = os.getenv("SENATE_PROXY_URL")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
     delay = INITIAL_BACKOFF_SECONDS
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
-        time.sleep(REQUEST_PAUSE_SECONDS)
+        time.sleep(SENATE_REQUEST_PAUSE_SECONDS)
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = requests.get(
+                url, headers=headers, proxies=proxies, timeout=30
+            )
         except requests.RequestException as exc:
             last_error = exc
             print(f"  Request error ({exc}); retrying in {delay:.1f}s...")
@@ -457,6 +469,13 @@ def senate_get(url):
                 f"{response.status_code} for {url}", response=response
             )
             continue
+
+        if response.status_code == 403:
+            print(
+                f"  HTTP 403 Forbidden from Senate.gov for {url}. "
+                "The runner IP or user agent appears to be blocked by Senate.gov WAF/Akamai. "
+                "Consider setting SENATE_PROXY_URL or using a self-hosted runner."
+            )
 
         response.raise_for_status()
         return response.content

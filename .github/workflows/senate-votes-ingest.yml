@@ -2,10 +2,10 @@ name: Senate Votes Ingestion
 
 on:
   schedule:
-    # Every 6 hours at :45 UTC, offset from Congress ingest (minute 0)
-    # and OpenStates (03:00/15:00). Also runs after Congress ingest so
+    # Every 12 hours at :45 UTC, offset from Congress ingest (minute 0).
+    # Also runs after Congress ingest completes via workflow_run so
     # newly stored bills can unlock previously skipped Senate votes.
-    - cron: '45 */6 * * *'
+    - cron: '45 */12 * * *'
   workflow_dispatch:
   workflow_run:
     workflows: ["Congress Data Ingestion"]
@@ -42,6 +42,7 @@ jobs:
       - name: Catch up Senate.gov roll-call votes
         env:
           SECRET_DB_URL: ${{ secrets.DATABASE_URL }}
+          SENATE_PROXY_URL: ${{ secrets.SENATE_PROXY_URL }}
         run: |
           # Senate.gov blocks Fly.io datacenter IPs, but not GitHub Actions.
           # We run the script locally here and proxy the DB connection to Fly.
