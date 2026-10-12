@@ -63,9 +63,9 @@ def build_bill_context(bill: Bill) -> str:
         parts.append(f"Latest Action: {bill.latest_action_text}")
     if bill.summary:
         cleaned_summary = clean_html(bill.summary)
-        # Cap summary length to keep input context within safe limits
-        if len(cleaned_summary) > 25000:
-            cleaned_summary = cleaned_summary[:25000] + "\n\n[Summary truncated for length]"
+        # Cap summary length at 60,000 characters (~15,000 words) to fit comfortably within the 32k context window
+        if len(cleaned_summary) > 60000:
+            cleaned_summary = cleaned_summary[:60000] + "\n\n[Summary truncated for length]"
         parts.append(f"Congressional Research Service (CRS) Summary:\n{cleaned_summary}")
     return "\n\n".join(parts)
 
@@ -157,6 +157,7 @@ def run_batch_classification(
                     format=ClassificationMetadata.model_json_schema(),
                     options={
                         "temperature": 0.1,
+                        "num_ctx": 32768,     # Allow reading up to 32k tokens of bill context
                         "num_predict": 4096,  # Cap max output tokens to prevent runaway generation
                     },
                 )

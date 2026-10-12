@@ -134,8 +134,8 @@ def main():
             parts.append(f"Latest Action: {bill.latest_action_text}")
         if bill.summary:
             cleaned_summary = clean_html(bill.summary)
-            if len(cleaned_summary) > 25000:
-                cleaned_summary = cleaned_summary[:25000] + "\n\n[Summary truncated for length]"
+            if len(cleaned_summary) > 60000:
+                cleaned_summary = cleaned_summary[:60000] + "\n\n[Summary truncated for length]"
             parts.append(f"Congressional Research Service (CRS) Summary:\n{cleaned_summary}")
         text_to_analyze = "\n\n".join(parts)
 
@@ -149,6 +149,7 @@ def main():
             format=ClassificationMetadata.model_json_schema(),
             options={
                 "temperature": 0.1,
+                "num_ctx": 32768,
                 "num_predict": 4096,
             },
         )
