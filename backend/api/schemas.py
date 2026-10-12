@@ -1,7 +1,8 @@
 from datetime import date as Date
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic.alias_generators import to_camel
 
 
 class OfficialOut(BaseModel):
@@ -145,3 +146,85 @@ class CivicLookupOut(BaseModel):
     normalized_input: Optional[CivicAddressOut] = None
     divisions: list[CivicDivisionOut] = Field(default_factory=list)
     representatives: list[CivicRepresentativeOut] = Field(default_factory=list)
+
+
+class CamelModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class VoterInfoRequest(CamelModel):
+    address: str = Field(..., min_length=1, max_length=300)
+    election_id: Optional[str] = None
+
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("address must not be empty or whitespace only")
+        if len(cleaned) > 300:
+            raise ValueError("address must be at most 300 characters")
+        return cleaned
+
+
+class ElectionOut(CamelModel):
+    id: str
+    name: str
+    date: Optional[str] = None
+
+
+class SourceOut(CamelModel):
+    name: Optional[str] = None
+    official: Optional[bool] = None
+
+
+class LocationOut(CamelModel):
+    location_name: Optional[str] = None
+    line1: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+    polling_hours: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    notes: Optional[str] = None
+    sources: list[SourceOut] = Field(default_factory=list)
+
+
+class AdminBodyOut(CamelModel):
+    name: Optional[str] = None
+    election_info_url: Optional[str] = None
+    election_registration_url: Optional[str] = None
+    election_registration_confirmation_url: Optional[str] = None
+    absentee_voting_info_url: Optional[str] = None
+    voting_location_finder_url: Optional[str] = None
+    ballot_info_url: Optional[str] = None
+    hours_of_operation: Optional[str] = None
+    physical_address: Optional[CivicAddressOut] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+
+class AdminBodiesOut(CamelModel):
+    state: Optional[AdminBodyOut] = None
+    local: Optional[AdminBodyOut] = None
+
+
+class VoterInfoOut(CamelModel):
+    ui_state: str
+    upstream_status: str
+    election: Optional[ElectionOut] = None
+    mail_only: bool = False
+    polling_locations: list[LocationOut] = Field(default_factory=list)
+    early_vote_sites: list[LocationOut] = Field(default_factory=list)
+    drop_off_locations: list[LocationOut] = Field(default_factory=list)
+    admin_bodies: AdminBodiesOut = Field(default_factory=AdminBodiesOut)
+    other_elections: list[ElectionOut] = Field(default_factory=list)
+    fetched_at: str
+
+
+class VoterInfoErrorOut(CamelModel):
+    ui_state: str = "unavailable"
+    upstream_status: str
+    detail: str
+
