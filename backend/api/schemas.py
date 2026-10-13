@@ -1,4 +1,4 @@
-from datetime import date as Date
+from datetime import date as Date, datetime
 import re
 from typing import Optional
 
@@ -36,8 +36,27 @@ class OfficialVoteOut(BaseModel):
     date: Optional[Date] = None
 
 
+class OfficialStanceOut(BaseModel):
+    """A policy position the official states, with the page it came from."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    issue_label: Optional[str] = None
+    policy_area: Optional[str] = None
+    target_name: Optional[str] = None
+    mechanism: str
+    direction: str
+    emphasis: Optional[str] = None
+    summary: Optional[str] = None
+    evidence_quote: Optional[str] = None
+    source_url: Optional[str] = None
+    source_type: str = "official_site"
+    extracted_at: Optional[datetime] = None
+
+
 class OfficialDetailOut(OfficialOut):
     votes: list[OfficialVoteOut] = Field(default_factory=list)
+    stated_positions: list[OfficialStanceOut] = Field(default_factory=list)
 
 
 class BillOut(BaseModel):

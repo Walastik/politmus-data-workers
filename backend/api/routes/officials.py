@@ -6,9 +6,9 @@ from sqlalchemy import desc, nulls_last
 from sqlalchemy.orm import Session
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
-from api.schemas import OfficialDetailOut, OfficialOut, OfficialVoteOut
+from api.schemas import OfficialDetailOut, OfficialOut, OfficialStanceOut, OfficialVoteOut
 from database import get_db
-from models import Bill, Official, RollCall, Vote
+from models import Bill, Official, OfficialStance, RollCall, Vote
 
 router = APIRouter()
 
@@ -74,6 +74,13 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         .all()
     )
 
+    stances = (
+        db.query(OfficialStance)
+        .filter(OfficialStance.official_id == official_id)
+        .order_by(OfficialStance.policy_area, OfficialStance.issue_label, OfficialStance.target_name)
+        .all()
+    )
+
     return OfficialDetailOut(
         id=official.id,
         name=official.name,
@@ -102,4 +109,5 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
             )
             for vote, bill, roll_call in vote_rows
         ],
+        stated_positions=[OfficialStanceOut.model_validate(s) for s in stances],
     )

@@ -144,6 +144,41 @@ def ensure_schema():
             "name": DEFAULT_GUIDELINES_NAME,
             "prompt": DEFAULT_EXTRACTION_PROMPT,
         })
+        # official_stances predates the positions worker with only
+        # official/target/mechanism/direction; add provenance columns.
+        for column_sql in (
+            "target_name VARCHAR",
+            "target_slug VARCHAR",
+            "emphasis VARCHAR",
+            "policy_area VARCHAR",
+            "issue_label VARCHAR",
+            "summary TEXT",
+            "evidence_quote TEXT",
+            "source_url VARCHAR",
+            "source_page_id INTEGER REFERENCES official_source_pages(id) "
+            "ON DELETE SET NULL",
+            "source_type VARCHAR NOT NULL DEFAULT 'official_site'",
+            "extracted_at TIMESTAMP",
+            "extractor_version VARCHAR",
+            "model VARCHAR",
+        ):
+            conn.execute(text(
+                f"ALTER TABLE official_stances ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_official_stances_target_slug "
+            "ON official_stances (target_slug)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_official_stances_official_target_mechanism_source "
+            "ON official_stances (official_id, target_id, mechanism, source_type)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_official_source_pages_official_url "
+            "ON official_source_pages (official_id, url)"
+        ))
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_policy_targets_slug "
             "ON policy_targets (slug)"

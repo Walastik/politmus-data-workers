@@ -21,6 +21,23 @@ Direction = Literal["increase", "decrease", "maintain", "mixed"]
 Magnitude = Literal["low", "medium", "high"]
 
 DEFAULT_GUIDELINES_NAME = "default"
+
+# Shared by bill extraction and official stated-position extraction so both
+# sides of the accountability comparison label mechanism/direction the same way.
+EFFECT_LABEL_DEFINITIONS = """\
+mechanism:
+- funding: appropriations, spending authorizations, grants, transfers
+- taxation: taxes, tariffs, fees
+- regulation: rules, eligibility, rights, compliance, criminalization
+- oversight: reporting to Congress, inspectors general, audits, disclosure
+
+direction:
+- increase: more money, more rules or authority, more tax, more oversight
+- decrease: cuts, easing, tax reduction, less oversight
+- maintain: continues an existing program or rule without a clear change
+- mixed: both directions for the same target and mechanism
+"""
+
 DEFAULT_EXTRACTION_PROMPT = """\
 You extract the policy effects of U.S. federal legislation from its \
 Congressional Research Service (CRS) summary.
@@ -40,18 +57,7 @@ Reuse the same string for the same noun.
 - magnitude: low | medium | high
 - rationale: 1 to 2 sentences citing the summary
 
-mechanism:
-- funding: appropriations, spending authorizations, grants, transfers
-- taxation: taxes, tariffs, fees
-- regulation: rules, eligibility, rights, compliance, criminalization
-- oversight: reporting to Congress, inspectors general, audits, disclosure
-
-direction:
-- increase: more money, more rules or authority, more tax, more oversight
-- decrease: cuts, easing, tax reduction, less oversight
-- maintain: continues an existing program or rule without a clear change
-- mixed: both directions for the same target and mechanism
-
+""" + EFFECT_LABEL_DEFINITIONS + """
 Do not emit a row when there is no real effect on that target.
 """
 

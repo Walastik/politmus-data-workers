@@ -201,16 +201,109 @@ class SenateRollCall(Base):
 
 
 class OfficialStance(Base):
+    """One policy position an official states publicly (e.g. on their website).
+
+    target_id + mechanism + direction use the same vocabulary as bill_effects
+    so services/accountability.py can join them. target_slug matches
+    slugify_target() of bills.classification_metadata intents, and
+    policy_area uses the CRS policy area list stored on bills.policy_area.
+    """
     __tablename__ = "official_stances"
+    __table_args__ = (
+        UniqueConstraint(
+            "official_id",
+            "target_id",
+            "mechanism",
+            "source_type",
+            name="uq_official_stances_official_target_mechanism_source",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
     target_id = Column(Integer, ForeignKey("policy_targets.id"), nullable=False)
     mechanism = Column(String, nullable=False)
     direction = Column(String, nullable=False)
+    # Noun as the model wrote it, plus its slug for classification_metadata joins.
+    target_name = Column(String, nullable=True)
+    target_slug = Column(String, nullable=True, index=True)
+    # low | medium | high: how prominently the official features it.
+    emphasis = Column(String, nullable=True)
+    # One of the CRS policy areas (same list as bills.policy_area).
+    policy_area = Column(String, nullable=True)
+    # The site's own heading for the issue, e.g. "Climate".
+    issue_label = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
+    # Verbatim excerpt from the source page; verified before saving.
+    evidence_quote = Column(Text, nullable=True)
+    source_url = Column(String, nullable=True)
+    source_page_id = Column(
+        Integer, ForeignKey("official_source_pages.id", ondelete="SET NULL"), nullable=True
+    )
+    # official_site today; campaign_site etc. later.
+    source_type = Column(
+        String, nullable=False, default="official_site", server_default="official_site"
+    )
+    extracted_at = Column(DateTime, nullable=True)
+    extractor_version = Column(String, nullable=True)
+    model = Column(String, nullable=True)
 
     official = relationship("Official")
     target = relationship("PolicyTarget")
+    source_page = relationship("OfficialSourcePage")
+
+
+class OfficialSourcePage(Base):
+    """One crawled page from an official's website, stored as cleaned text.
+
+    content_hash feeds official_position_sync.combined_hash, which lets the
+    positions worker skip the LLM when nothing on the site changed.
+    """
+    __tablename__ = "official_source_pages"
+    __table_args__ = (
+        UniqueConstraint(
+            "official_id",
+            "url",
+            name="uq_official_source_pages_official_url",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
+    url = Column(String, nullable=False)
+    # home | issues_index | issue_detail
+    page_kind = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    http_status = Column(Integer, nullable=True)
+    content_hash = Column(String, nullable=True)
+    text = Column(Text, nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
+    # False once a later crawl no longer finds this URL.
+    is_current = Column(Boolean, nullable=False, default=True, server_default="true")
+    error = Column(Text, nullable=True)
+
+
+class OfficialPositionSync(Base):
+    """Per-official cursor for the stated-positions worker.
+
+    Lets runs be idempotent (skip unchanged sites) and round-robin by
+    last_attempt_at, like state_sync_log does for OpenStates.
+    """
+    __tablename__ = "official_position_sync"
+
+    official_id = Column(String, ForeignKey("officials.id"), primary_key=True)
+    # ok | no_positions | no_website | no_issue_pages | blocked | needs_js | failed
+    status = Column(String, nullable=False)
+    last_attempt_at = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    # Hash of every current page's content_hash, in URL order.
+    combined_hash = Column(String, nullable=True)
+    extractor_version = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    pages_found = Column(Integer, nullable=True)
+    stances_saved = Column(Integer, nullable=True)
+    last_error = Column(Text, nullable=True)
+
 
 class StateSyncLog(Base):
     """Last successful OpenStates ingest per standard US state.
