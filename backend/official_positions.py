@@ -56,7 +56,7 @@ DEFAULT_MODEL = os.getenv(
 DEFAULT_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300"))
 DEFAULT_NUM_CTX = 16384
-DEFAULT_NUM_PREDICT = 2048
+DEFAULT_NUM_PREDICT = 4096
 DEFAULT_CONCURRENCY = 2
 DEFAULT_MAX_AGE_DAYS = 30
 FAILED_BACKOFF_HOURS = 6
@@ -110,36 +110,76 @@ def load_local_prompts(path: Path = LOCAL_CONFIG_PATH) -> Prompts:
 # -- Ollama ------------------------------------------------------------------
 
 
-def make_chat_fn(model: str, host: str, timeout: float, num_ctx: int, num_predict: int):
-    """chat_fn(messages, schema) -> JSON string, with one retry on empty output.
+def _field(obj, name):
+    """Read a field from an ollama response object or plain dict."""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
-    num_ctx is the same for every call: changing it makes Ollama reload the model.
+
+def make_chat_fn(
+    model: str,
+    host: str,
+    timeout: float,
+    num_ctx: int,
+    num_predict: int,
+    think: bool = False,
+    client=None,
+):
+    """chat_fn(messages, schema) -> JSON string.
+
+    Thinking is off by default: reasoning models (e.g. Nemotron) otherwise
+    spend the num_predict budget on hidden reasoning and return no answer.
+    An empty answer is retried once with double the output budget (that does
+    not reload the model; only a num_ctx change does, so num_ctx is fixed).
     """
-    from llm_extractor import make_ollama_client
+    if client is None:
+        from llm_extractor import make_ollama_client
 
-    client = make_ollama_client(host, timeout)
+        client = make_ollama_client(host, timeout)
+    state = {"think": think}
+
+    def call(messages, format_schema, temperature, budget):
+        kwargs = dict(
+            model=model,
+            messages=messages,
+            format=format_schema,
+            options={"temperature": temperature, "num_ctx": num_ctx, "num_predict": budget},
+            keep_alive="30m",
+        )
+        if state["think"] is not None:
+            kwargs["think"] = state["think"]
+        try:
+            return client.chat(**kwargs)
+        except Exception as exc:
+            # Models without a thinking mode reject the parameter; drop it.
+            if state["think"] is not None and "think" in str(exc).lower():
+                state["think"] = None
+                kwargs.pop("think")
+                return client.chat(**kwargs)
+            raise
 
     def chat_fn(messages, format_schema) -> str:
-        for attempt in (1, 2):
-            response = client.chat(
-                model=model,
-                messages=messages,
-                format=format_schema,
-                options={
-                    "temperature": 0 if attempt == 1 else 0.2,
-                    "num_ctx": num_ctx,
-                    "num_predict": num_predict,
-                },
-                keep_alive="30m",
-            )
-            message = getattr(response, "message", None)
-            content = getattr(message, "content", None) if message is not None else None
-            if not content and isinstance(response, dict):
-                content = (response.get("message") or {}).get("content")
+        details = []
+        for attempt, (temperature, budget) in enumerate(
+            ((0, num_predict), (0.2, num_predict * 2)), start=1
+        ):
+            response = call(messages, format_schema, temperature, budget)
+            message = _field(response, "message")
+            content = _field(message, "content") if message is not None else None
             if content and content.strip():
                 return content
-            time.sleep(1.0)
-        raise ValueError("Ollama returned an empty response")
+            thinking = (_field(message, "thinking") if message is not None else None) or ""
+            details.append(
+                f"attempt {attempt}: done_reason={_field(response, 'done_reason')}, "
+                f"output_tokens={_field(response, 'eval_count')}, "
+                f"thinking_chars={len(thinking)}, num_predict={budget}"
+            )
+        raise ValueError(
+            "Ollama returned an empty response ("
+            + "; ".join(details)
+            + "). If done_reason is 'length', raise --num-predict or keep --think off."
+        )
 
     return chat_fn
 
@@ -231,6 +271,7 @@ def extract_positions(
     vocabulary: list[str],
     concurrency: int,
     chunk_chars: int = DEFAULT_CHUNK_CHARS,
+    log=None,
 ):
     """Map each chunk through the model, verify quotes, and merge.
 
@@ -240,20 +281,32 @@ def extract_positions(
     chunks = [chunk for source in sources for chunk in chunk_source(source, chunk_chars)]
     if not chunks:
         return [], 0, 0
+    total = len(chunks)
+    if log:
+        log(f"  sending {total} chunk(s) to the model...")
 
-    def run(chunk):
-        raw = chat_fn(
-            build_position_messages(prompt, official, chunk, vocabulary),
-            StatedPositionsOutput.model_json_schema(),
-        )
-        return verify_positions(parse_positions(raw), chunk)
+    def run(numbered):
+        number, chunk = numbered
+        try:
+            raw = chat_fn(
+                build_position_messages(prompt, official, chunk, vocabulary),
+                StatedPositionsOutput.model_json_schema(),
+            )
+            result = verify_positions(parse_positions(raw), chunk)
+        except Exception as exc:
+            where = chunk.url + (f" [{chunk.heading}]" if chunk.heading else "")
+            raise RuntimeError(f"chunk {number}/{total} {where}: {exc}") from exc
+        if log:
+            log(f"    chunk {number}/{total}: {len(result[0])} kept, {result[1]} rejected")
+        return result
 
-    workers = max(1, min(concurrency, len(chunks)))
+    numbered = list(enumerate(chunks, start=1))
+    workers = max(1, min(concurrency, total))
     if workers == 1:
-        results = [run(chunk) for chunk in chunks]
+        results = [run(item) for item in numbered]
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(run, chunks))
+            results = list(pool.map(run, numbered))
     verified = [item for kept, _ in results for item in kept]
     rejected = sum(count for _, count in results)
     return merge_positions(verified), len(chunks), rejected
@@ -313,6 +366,7 @@ def run_positions(
     timeout: float | None = None,
     num_ctx: int = DEFAULT_NUM_CTX,
     num_predict: int = DEFAULT_NUM_PREDICT,
+    think: bool = False,
     crawl_config=None,
     prompts: Prompts | None = None,
     chat_fn=None,
@@ -361,6 +415,7 @@ def run_positions(
                 timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS,
                 num_ctx,
                 num_predict,
+                think=think,
             )
         if crawler is None and not extract_only:
             from services.site_crawler import SiteCrawler
@@ -505,6 +560,7 @@ def _process_official(
             vocabulary=vocabulary,
             concurrency=concurrency,
             chunk_chars=chunk_chars,
+            log=log,
         )
         stats["chunks"] += chunk_count
         stats["rejected_unverified"] += rejected
@@ -672,7 +728,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default=None, help=f"Ollama host (default {DEFAULT_HOST}).")
     parser.add_argument("--timeout", type=float, default=None, help=f"Ollama request timeout seconds (default {int(DEFAULT_TIMEOUT_SECONDS)}).")
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help=f"Ollama context window (default {DEFAULT_NUM_CTX}).")
-    parser.add_argument("--num-predict", type=int, default=DEFAULT_NUM_PREDICT, help=f"Max output tokens per call (default {DEFAULT_NUM_PREDICT}).")
+    parser.add_argument("--num-predict", type=int, default=DEFAULT_NUM_PREDICT, help=f"Max output tokens per call; retries double it (default {DEFAULT_NUM_PREDICT}).")
+    parser.add_argument("--think", action="store_true", help="Let reasoning models think before answering (slower; off by default).")
     args = parser.parse_args(argv)
 
     if args.show:
@@ -703,6 +760,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout=args.timeout,
                 num_ctx=args.num_ctx,
                 num_predict=args.num_predict,
+                think=args.think,
                 crawl_config=config,
             )
     except KeyboardInterrupt:

@@ -335,10 +335,87 @@ class ExtractPositionsTests(unittest.TestCase):
         def chat_fn(messages, schema):
             raise TimeoutError("Ollama timed out")
 
-        with self.assertRaises(TimeoutError):
+        with self.assertRaises(RuntimeError) as ctx:
             extract_positions(
-                OFFICIAL, [SourceText("u", CONGRESS_TEXT)], prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=2
+                OFFICIAL, [SourceText("https://x.gov/congress", CONGRESS_TEXT)],
+                prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=2,
             )
+        self.assertIn("chunk 1/1 https://x.gov/congress", str(ctx.exception))
+        self.assertIn("Ollama timed out", str(ctx.exception))
+
+
+class FakeOllamaClient:
+    """Returns queued responses and records each chat() call."""
+
+    def __init__(self, responses, reject_think=False):
+        self.responses = list(responses)
+        self.calls = []
+        self.reject_think = reject_think
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.reject_think and "think" in kwargs:
+            raise ValueError('"nemo" does not support thinking')
+        return self.responses.pop(0)
+
+
+def ollama_response(content="", thinking="", done_reason="stop", eval_count=10):
+    return SimpleNamespace(
+        message=SimpleNamespace(content=content, thinking=thinking),
+        done_reason=done_reason,
+        eval_count=eval_count,
+    )
+
+
+class ChatFnTests(unittest.TestCase):
+    def make(self, client, **kwargs):
+        from official_positions import make_chat_fn
+
+        return make_chat_fn("m", "h", 1, num_ctx=16384, num_predict=100, client=client, **kwargs)
+
+    def test_thinking_is_off_and_context_fixed(self):
+        client = FakeOllamaClient([ollama_response('{"positions": []}')])
+        self.assertEqual(self.make(client)([], {}), '{"positions": []}')
+        call = client.calls[0]
+        self.assertIs(call["think"], False)
+        self.assertEqual(call["options"]["num_ctx"], 16384)
+        self.assertEqual(call["options"]["num_predict"], 100)
+
+    def test_empty_answer_retries_with_double_budget(self):
+        client = FakeOllamaClient([
+            ollama_response("", thinking="x" * 500, done_reason="length", eval_count=100),
+            ollama_response('{"positions": []}'),
+        ])
+        self.assertEqual(self.make(client)([], {}), '{"positions": []}')
+        self.assertEqual([c["options"]["num_predict"] for c in client.calls], [100, 200])
+        self.assertEqual(client.calls[0]["options"]["num_ctx"], client.calls[1]["options"]["num_ctx"])
+
+    def test_error_explains_why_the_answer_was_empty(self):
+        client = FakeOllamaClient([
+            ollama_response("", thinking="x" * 500, done_reason="length", eval_count=100),
+            ollama_response("  ", thinking="y" * 900, done_reason="length", eval_count=200),
+        ])
+        with self.assertRaises(ValueError) as ctx:
+            self.make(client)([], {})
+        message = str(ctx.exception)
+        self.assertIn("done_reason=length", message)
+        self.assertIn("thinking_chars=900", message)
+        self.assertIn("--num-predict", message)
+
+    def test_models_without_thinking_mode_drop_the_parameter(self):
+        client = FakeOllamaClient(
+            [ollama_response('{"positions": []}'), ollama_response('{"positions": []}')],
+            reject_think=True,
+        )
+        chat_fn = self.make(client)
+        chat_fn([], {})
+        chat_fn([], {})
+        self.assertEqual(["think" in c for c in client.calls], [True, False, False])
+
+    def test_think_flag_is_passed_through(self):
+        client = FakeOllamaClient([ollama_response('{"positions": []}')])
+        self.make(client, think=True)([], {})
+        self.assertIs(client.calls[0]["think"], True)
 
 
 def _test_database_available() -> bool:
