@@ -162,6 +162,26 @@ class CrawlTests(unittest.TestCase):
         self.assertNotIn(SITE + "/issues/apply", urls)
 
     @respx.mock
+    def test_follows_remaining_nav_issue_links_as_issue_pages(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        topics = ["climate", "foreign-policy", "housing", "health-care", "immigration"]
+        nav = "".join(f'<a href="/legislation/{t}">{t.title()}</a>' for t in topics)
+        respx.get(f"{SITE}/").mock(return_value=html(
+            f"<html><body><nav><a href='/congress'>In Congress</a>{nav}</nav></body></html>"
+        ))
+        respx.get(f"{SITE}/congress").mock(return_value=html(
+            "<html><body><main><h1>In Congress</h1><p>" + "Work in Congress. " * 20 + "</p></main></body></html>"
+        ))
+        for t in topics:
+            respx.get(f"{SITE}/legislation/{t}").mock(return_value=html(
+                f"<html><body><main><h1>{t}</h1><p>" + f"Her position on {t}. " * 15 + "</p></main></body></html>"
+            ))
+        result = make_crawler().crawl(SITE)
+        urls = [p.url for p in result.pages]
+        for t in topics:
+            self.assertIn(f"{SITE}/legislation/{t}", urls)
+
+    @respx.mock
     def test_respects_max_pages(self):
         mount_site(respx)
         result = make_crawler(max_pages=2).crawl(SITE)

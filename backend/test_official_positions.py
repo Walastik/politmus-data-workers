@@ -28,6 +28,7 @@ from services.official_positions import (
     extractor_version,
     make_link_selector,
     merge_positions,
+    official_direction,
     parse_positions,
     clean_quote,
     quote_in_text,
@@ -53,7 +54,8 @@ CONGRESS_TEXT = (
     "create millions of jobs and move our national energy grid to renewable sources.\n\n"
     "## Health Care\n\n"
     "Representative Example believes health care is a human right. She supports "
-    "expanding Medicaid so every family in the district can see a doctor.\n\n"
+    "expanding Medicaid so every family in the district can see a doctor. "
+    "She will fight against cuts to Medicaid.\n\n"
     "- Expand Medicaid in every state\n"
     "- Protect coverage for pre-existing conditions"
 )
@@ -66,6 +68,7 @@ def position(**overrides) -> dict:
         "target_name": "Renewable Energy",
         "mechanism": "funding",
         "direction": "increase",
+        "stance": "supports",
         "emphasis": "high",
         "summary": "Supports moving the national grid to renewable energy.",
         "evidence_quote": (
@@ -193,9 +196,40 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(sent[0][0]["content"], "PICK LINKS")
 
 
+class StanceTests(unittest.TestCase):
+    def test_official_direction_follows_stance(self):
+        cases = {
+            ("increase", "supports"): "increase",
+            ("decrease", "supports"): "decrease",
+            ("maintain", "supports"): "maintain",
+            ("increase", "opposes"): "decrease",
+            ("decrease", "opposes"): "increase",  # fights cuts -> wants more
+            ("maintain", "opposes"): "mixed",
+            ("mixed", "opposes"): "mixed",
+        }
+        for (direction, stance), wanted in cases.items():
+            p = StatedPosition(**position(direction=direction, stance=stance))
+            self.assertEqual(official_direction(p), wanted, (direction, stance))
+            self.assertEqual(VerifiedPosition(p, "u", None).direction, wanted)
+
+    def test_stance_is_required(self):
+        data = position()
+        del data["stance"]
+        with self.assertRaises(ValidationError):
+            parse_positions(model_json(data))
+
+
 class MergeTests(unittest.TestCase):
     def _verified(self, **overrides):
         return VerifiedPosition(StatedPosition(**position(**overrides)), "u", None)
+
+    def test_support_and_opposed_opposite_agree(self):
+        merged = merge_positions([
+            self._verified(target_name="Medicaid", direction="increase", stance="supports"),
+            self._verified(target_name="Medicaid", direction="decrease", stance="opposes"),
+        ])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].direction, "increase")
 
     def test_conflicting_directions_become_mixed(self):
         merged = merge_positions([
@@ -203,7 +237,7 @@ class MergeTests(unittest.TestCase):
             self._verified(target_name="renewable energy", direction="decrease", emphasis="low"),
         ])
         self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].position.direction, "mixed")
+        self.assertEqual(merged[0].direction, "mixed")
         self.assertEqual(merged[0].position.emphasis, "medium")
 
     def test_highest_emphasis_supplies_statement_and_sorts_first(self):
@@ -515,13 +549,16 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         self.calls.append(messages)
         return model_json(
             position(),
+            # Opposing a cut: stored as wanting Medicaid funding to increase.
             position(
                 issue_label="Health Care",
                 policy_area="Health",
                 target_name="Medicaid",
+                direction="decrease",
+                stance="opposes",
                 emphasis="medium",
-                summary="Supports expanding Medicaid.",
-                evidence_quote="She supports expanding Medicaid so every family in the district can see a doctor.",
+                summary="Opposes cuts to Medicaid.",
+                evidence_quote="She will fight against cuts to Medicaid.",
             ),
             position(target_name="Invented", evidence_quote="This sentence is nowhere on the page."),
         )
@@ -569,6 +606,17 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         ])
         sync = self._sync()
         self.assertEqual((sync.status, sync.stances_saved, sync.pages_found), ("ok", 2, 1))
+        from models import OfficialStance
+
+        session = self.SessionLocal()
+        medicaid = session.query(OfficialStance).filter_by(
+            official_id=self.OFFICIAL_ID, target_name="Medicaid"
+        ).one()
+        self.assertEqual(
+            (medicaid.direction, medicaid.stance, medicaid.policy_direction),
+            ("increase", "opposes", "decrease"),
+        )
+        session.close()
         calls_after_first = len(self.calls)
 
         self.clock[0] += timedelta(hours=1)

@@ -573,7 +573,11 @@ class SiteCrawler:
             ),
             key=lambda c: (-c.score, len(c.url)),
         )
-        index_urls = [c.url for c in candidates if c.score > 0][:MAX_INDEX_PAGES]
+        positive = [c for c in candidates if c.score > 0]
+        index_urls = [c.url for c in positive[:MAX_INDEX_PAGES]]
+        # Other issue-like nav links (e.g. a menu of /legislation/<topic>
+        # pages) are read as issue pages after the index pages' children.
+        nav_extras = positive[MAX_INDEX_PAGES:]
 
         if not index_urls:
             base = urlsplit(home.url)
@@ -616,7 +620,9 @@ class SiteCrawler:
             detail_queue.extend(self._child_candidates(html, page.url, host))
 
         seen = set(fetched) | {home.url}
-        for candidate in sorted(detail_queue, key=lambda c: (-c.score, c.url)):
+        queue = sorted(detail_queue, key=lambda c: (-c.score, c.url))
+        queue += [c for c in nav_extras if c.url not in {q.url for q in queue}]
+        for candidate in queue:
             if len(fetched) >= max_pages:
                 break
             if candidate.url in seen:
@@ -666,7 +672,7 @@ class SiteCrawler:
                 and len(segments) > len(index_segments)
                 and segments[: len(index_segments)] == index_segments
             )
-            issue_section = bool(segments) and score_link(f"/{segments[0]}", "") >= 6 and len(segments) > 1
+            issue_section = len(segments) > 1 and _is_issue_segment(segments[0])
             if under_index or issue_section:
                 out.append(LinkCandidate(url, text, 10 if under_index else 6))
         return out

@@ -34,7 +34,7 @@ from services.bill_effects import (
 
 # Bump when the output schema or verification rules change so every official
 # is re-extracted on the next run.
-SCHEMA_VERSION = "positions-v1"
+SCHEMA_VERSION = "positions-v2"
 SOURCE_OFFICIAL_SITE = "official_site"
 
 DEFAULT_CHUNK_CHARS = 10_000
@@ -79,19 +79,46 @@ PolicyArea = Literal[
 ]
 POLICY_AREAS = get_args(PolicyArea)
 
+Stance = Literal["supports", "opposes"]
+
+# What the official wants, given the policy action and their stance on it.
+_OPPOSED_DIRECTION = {
+    "increase": "decrease",
+    "decrease": "increase",
+    # Opposing "keep as is" or a mixed change says change is wanted, not which way.
+    "maintain": "mixed",
+    "mixed": "mixed",
+}
+
+
 class StatedPosition(BaseModel):
-    """One position as returned by the model."""
+    """One position as returned by the model.
+
+    The model describes the policy action the text talks about (target,
+    mechanism, direction, labelled like a bill effect) and whether the
+    official supports or opposes it. The official's own desired direction is
+    derived in code (see official_direction), so the model never has to
+    invert "fights cuts to Medicaid" itself.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     issue_label: str = Field(description="Heading the position sits under, copied from the text.")
-    policy_area: PolicyArea = Field(description="Closest CRS policy area.")
-    target_name: str = Field(description="Specific noun acted on, e.g. Medicaid, Renewable Energy.")
+    evidence_quote: str = Field(description="One or two consecutive sentences copied verbatim from the text.")
+    target_name: str = Field(description="Policy noun acted on, e.g. Medicaid, Renewable Energy. Never a bill name.")
     mechanism: Mechanism = Field(description="funding, regulation, oversight, or taxation.")
-    direction: Direction = Field(description="increase, decrease, maintain, or mixed.")
+    direction: Direction = Field(description="Direction of the policy action described, as a bill effect would be labelled.")
+    stance: Stance = Field(description="Whether the official supports or opposes that policy action.")
     emphasis: Magnitude = Field(description="low, medium, or high.")
-    summary: str = Field(description="One plain sentence stating the position.")
-    evidence_quote: str = Field(description="One or two sentences copied verbatim from the text.")
+    policy_area: PolicyArea = Field(description="Closest CRS policy area.")
+    summary: str = Field(description="One plain sentence stating the official's position.")
+
+
+def official_direction(position: StatedPosition) -> str:
+    """The direction the official wants for the target and mechanism."""
+    if position.stance == "supports":
+        return position.direction
+    return _OPPOSED_DIRECTION[position.direction]
 
 
 class StatedPositionsOutput(BaseModel):
@@ -129,6 +156,12 @@ class VerifiedPosition:
     position: StatedPosition
     source_url: str
     page_id: int | None
+    # What the official wants; "mixed" after merging conflicting statements.
+    direction: str = ""
+
+    def __post_init__(self):
+        if not self.direction:
+            self.direction = official_direction(self.position)
 
 
 # -- hashing / versions ------------------------------------------------------
@@ -390,22 +423,23 @@ _EMPHASIS_RANK = {"low": 0, "medium": 1, "high": 2}
 def merge_positions(verified: list[VerifiedPosition]) -> list[VerifiedPosition]:
     """One position per (target slug, mechanism).
 
-    Conflicting directions become "mixed"; the highest-emphasis statement
+    Conflicting desired directions become "mixed"; the highest-emphasis statement
     supplies the summary and quote. Result is capped and sorted by emphasis.
     """
     merged: dict[tuple[str, str], VerifiedPosition] = {}
     directions: dict[tuple[str, str], set[str]] = {}
     for item in verified:
         key = (slugify_target(item.position.target_name), item.position.mechanism)
-        directions.setdefault(key, set()).add(item.position.direction)
+        directions.setdefault(key, set()).add(item.direction)
         existing = merged.get(key)
         if existing is None or _EMPHASIS_RANK[item.position.emphasis] > _EMPHASIS_RANK[existing.position.emphasis]:
-            merged[key] = VerifiedPosition(item.position.model_copy(), item.source_url, item.page_id)
+            merged[key] = VerifiedPosition(
+                item.position.model_copy(), item.source_url, item.page_id, item.direction
+            )
     out = []
     for key, item in merged.items():
-        seen = directions[key]
-        if len(seen) > 1:
-            item.position.direction = "mixed"
+        if len(directions[key]) > 1:
+            item.direction = "mixed"
         out.append(item)
     out.sort(key=lambda v: (-_EMPHASIS_RANK[v.position.emphasis], v.position.policy_area, v.position.target_name))
     return out[:MAX_STANCES_PER_OFFICIAL]
@@ -521,7 +555,9 @@ def persist_official_stances(
             official_id=official_id,
             target_id=target.id,
             mechanism=p.mechanism,
-            direction=p.direction,
+            direction=item.direction,
+            stance=p.stance,
+            policy_direction=p.direction,
             target_name=p.target_name,
             target_slug=slugify_target(p.target_name),
             emphasis=p.emphasis,

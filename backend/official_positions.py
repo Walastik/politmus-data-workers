@@ -613,7 +613,11 @@ def _process_official(
 
         if dry_run:
             for item in positions:
-                log("     " + json.dumps({**item.position.model_dump(), "source_url": item.source_url}))
+                log("     " + json.dumps({
+                    **item.position.model_dump(),
+                    "official_direction": item.direction,
+                    "source_url": item.source_url,
+                }))
             stats["extracted"] += 1
             if not positions:
                 stats["no_positions"] += 1
@@ -706,8 +710,9 @@ def show_official(official_id: str, session_factory=None) -> int:
         )
         for s in stances:
             print(
-                f"\n  [{s.policy_area}] {s.issue_label}: {s.target_name} / {s.mechanism} / "
-                f"{s.direction} ({s.emphasis})\n    {s.summary}\n    \"{s.evidence_quote}\"\n    {s.source_url}"
+                f"\n  [{s.policy_area}] {s.issue_label}: wants {s.target_name} / {s.mechanism} / "
+                f"{s.direction} ({s.emphasis}; {s.stance} {s.policy_direction})"
+                f"\n    {s.summary}\n    \"{s.evidence_quote}\"\n    {s.source_url}"
             )
         if not stances:
             print("  No stated positions stored.")

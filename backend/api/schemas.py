@@ -46,6 +46,8 @@ class OfficialStanceOut(BaseModel):
     target_name: Optional[str] = None
     mechanism: str
     direction: str
+    stance: Optional[str] = None
+    policy_direction: Optional[str] = None
     emphasis: Optional[str] = None
     summary: Optional[str] = None
     evidence_quote: Optional[str] = None
