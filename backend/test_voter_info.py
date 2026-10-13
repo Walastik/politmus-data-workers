@@ -1,3 +1,4 @@
+from datetime import date
 import hashlib
 import json
 import logging
@@ -9,13 +10,18 @@ import pytest_asyncio
 import respx
 
 from api.main import app
+from api.schemas import VoterInfoRequest
 from api.routes.voter_info import (
+    CIVIC_ELECTIONS_URL,
     CIVIC_VOTER_INFO_URL,
+    elections_cache,
     rate_limiter,
     parse_cache_control_ttl,
     response_cache,
     sanitize_url,
+    upcoming_elections,
 )
+from api.routes import voter_info as voter_info_module
 
 FIXTURES_DIR = Path(__file__).parent / "tests" / "fixtures"
 # Real response captured by scripts/fetch_test_election_fixture.py.
@@ -23,6 +29,8 @@ REAL_FIXTURE_PATH = FIXTURES_DIR / "voter_info_2000.json"
 # Hand-written response following the documented voterinfo schema. The real test
 # election currently returns no locations, so this covers the "live" parsing path.
 SYNTHETIC_LIVE_FIXTURE_PATH = FIXTURES_DIR / "voter_info_synthetic_live.json"
+# Real /civicinfo/v2/elections response (2026 midterm plus Google's two test elections).
+ELECTIONS_FIXTURE_PATH = FIXTURES_DIR / "civic_elections.json"
 
 
 @pytest.fixture
@@ -42,12 +50,18 @@ def reset_app_state(monkeypatch):
     """Ensure in-memory rate limiter and caches are clean and test env vars are set."""
     rate_limiter.clear()
     response_cache.clear()
+    # Default: a fresh, empty elections list so tests that only mock voterinfo
+    # keep the "let Google pick" behavior. Election-selection tests clear it.
+    elections_cache.clear()
+    elections_cache.elections = []
+    elections_cache.refresh_after = float("inf")
     monkeypatch.setenv("GOOGLE_CIVIC_API_KEY", "test-civic-api-key")
     monkeypatch.delenv("CLIENT_IP_HEADER", raising=False)
     monkeypatch.delenv("CIVIC_ELECTION_ID_OVERRIDE", raising=False)
     yield
     rate_limiter.clear()
     response_cache.clear()
+    elections_cache.clear()
 
 
 @pytest_asyncio.fixture
@@ -630,3 +644,143 @@ async def test_voter_info_observed_upstream_400s(client, message, reason, ui_sta
     data = res.json()
     assert data["uiState"] == ui_state
     assert data["upstreamStatus"] == upstream_status
+
+
+
+@pytest.fixture
+def real_elections():
+    with open(ELECTIONS_FIXTURE_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)["elections"]
+
+
+def _election(e_id, name, day, division="ocd-division/country:us"):
+    return {"id": e_id, "name": name, "electionDay": day, "ocdDivisionId": division}
+
+
+def test_upcoming_elections_skips_test_elections(real_elections):
+    before = upcoming_elections(real_elections, "TX", date(2026, 10, 12))
+    assert [e["id"] for e in before] == ["12000"]
+
+    # Election day itself still counts; the day after, only test elections remain
+    assert [e["id"] for e in upcoming_elections(real_elections, "TX", date(2026, 11, 3))] == ["12000"]
+    assert upcoming_elections(real_elections, "TX", date(2026, 11, 4)) == []
+
+
+def test_upcoming_elections_state_matching():
+    elections = [
+        _election("1", "General", "2026-11-03"),
+        _election("2", "Texas Special", "2026-10-20", "ocd-division/country:us/state:tx"),
+        _election("3", "DC Special", "2026-10-25", "ocd-division/country:us/district:dc"),
+        _election("4", "Travis County Bond", "2026-10-15", "ocd-division/country:us/state:tx/county:travis"),
+        _election("5", "Old Primary", "2026-03-03"),
+    ]
+    today = date(2026, 10, 12)
+    assert [e["id"] for e in upcoming_elections(elections, "TX", today)] == ["2", "1"]
+    assert [e["id"] for e in upcoming_elections(elections, "dc", today)] == ["3", "1"]
+    assert [e["id"] for e in upcoming_elections(elections, "CA", today)] == ["1"]
+    assert [e["id"] for e in upcoming_elections(elections, None, today)] == ["1"]
+
+    # Same day: the state election sorts before the national one
+    same_day = [
+        _election("1", "General", "2026-11-03"),
+        _election("2", "Texas Prop", "2026-11-03", "ocd-division/country:us/state:tx"),
+    ]
+    assert [e["id"] for e in upcoming_elections(same_day, "TX", today)] == ["2", "1"]
+
+
+@pytest.mark.asyncio
+async def test_voter_info_picks_election_from_cached_list(client, monkeypatch, real_elections):
+    """Texas regression: without electionId Google answered "Election unknown"."""
+    elections_cache.clear()
+    monkeypatch.setattr(voter_info_module, "us_today", lambda: date(2026, 10, 12))
+    with respx.mock:
+        elections_route = respx.get(CIVIC_ELECTIONS_URL).respond(
+            200, json={"kind": "civicinfo#electionsQueryResponse", "elections": real_elections}
+        )
+        voterinfo_route = respx.get(CIVIC_VOTER_INFO_URL).respond(
+            200,
+            json={"election": {"id": "12000", "name": "2026 General Midterm Election", "electionDay": "2026-11-03"}},
+        )
+
+        res = await client.post(
+            "/api/voter-info", json={"address": "1100 Congress Ave, Austin, TX 78701", "state": "TX"}
+        )
+        assert res.status_code == 200
+        assert res.json()["uiState"] == "no_locations_yet"
+        assert res.json()["election"]["id"] == "12000"
+        assert voterinfo_route.calls.last.request.url.params["electionId"] == "12000"
+
+        # A second address reuses the cached elections list
+        await client.post("/api/voter-info", json={"address": "901 Bagby St, Houston, TX 77002"})
+        assert elections_route.call_count == 1
+        assert voterinfo_route.calls.last.request.url.params["electionId"] == "12000"
+
+
+@pytest.mark.asyncio
+async def test_voter_info_lists_other_matching_elections(client, monkeypatch):
+    elections_cache.clear()
+    monkeypatch.setattr(voter_info_module, "us_today", lambda: date(2026, 10, 12))
+    elections = [
+        _election("1", "General", "2026-11-03"),
+        _election("2", "Texas Special", "2026-10-20", "ocd-division/country:us/state:tx"),
+    ]
+    with respx.mock:
+        respx.get(CIVIC_ELECTIONS_URL).respond(200, json={"elections": elections})
+        voterinfo_route = respx.get(CIVIC_VOTER_INFO_URL).respond(
+            200, json={"election": {"id": "2", "name": "Texas Special", "electionDay": "2026-10-20"}}
+        )
+        res = await client.post("/api/voter-info", json={"address": "1 Main St, Austin, TX", "state": "tx"})
+
+    assert voterinfo_route.calls.last.request.url.params["electionId"] == "2"
+    assert res.json()["otherElections"] == [{"id": "1", "name": "General", "date": "2026-11-03"}]
+
+
+@pytest.mark.asyncio
+async def test_voter_info_no_matching_election_lets_google_pick(client, monkeypatch, real_elections):
+    elections_cache.clear()
+    # After the midterm only test elections remain; they must not be sent
+    monkeypatch.setattr(voter_info_module, "us_today", lambda: date(2026, 11, 4))
+    with respx.mock:
+        respx.get(CIVIC_ELECTIONS_URL).respond(200, json={"elections": real_elections})
+        voterinfo_route = respx.get(CIVIC_VOTER_INFO_URL).respond(
+            400, json={"error": {"code": 400, "message": "Election unknown", "errors": [{"reason": "invalid"}]}}
+        )
+        res = await client.post("/api/voter-info", json={"address": "1 Main St, Austin, TX"})
+
+    assert "electionId" not in voterinfo_route.calls.last.request.url.params
+    assert res.json()["uiState"] == "no_election"
+
+
+@pytest.mark.asyncio
+async def test_voter_info_elections_list_failure_falls_back(client):
+    elections_cache.clear()
+    with respx.mock:
+        elections_route = respx.get(CIVIC_ELECTIONS_URL).respond(500, json={})
+        voterinfo_route = respx.get(CIVIC_VOTER_INFO_URL).respond(200, json={"pollingLocations": []})
+
+        res = await client.post("/api/voter-info", json={"address": "1 Main St, Austin, TX"})
+        assert res.status_code == 200
+        assert "electionId" not in voterinfo_route.calls.last.request.url.params
+
+        # Failed refresh is not retried on every request
+        await client.post("/api/voter-info", json={"address": "2 Main St, Austin, TX"})
+        assert elections_route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_voter_info_explicit_election_id_skips_elections_list(client):
+    elections_cache.clear()
+    with respx.mock:
+        elections_route = respx.get(CIVIC_ELECTIONS_URL).respond(200, json={"elections": []})
+        voterinfo_route = respx.get(CIVIC_VOTER_INFO_URL).respond(200, json={"pollingLocations": []})
+        await client.post("/api/voter-info", json={"address": "1 Main St", "electionId": "777"})
+
+    assert elections_route.call_count == 0
+    assert voterinfo_route.calls.last.request.url.params["electionId"] == "777"
+
+
+def test_voter_info_request_state_hint_normalized():
+    assert VoterInfoRequest(address="1 Main St", state=" tx ").state == "TX"
+    assert VoterInfoRequest(address="1 Main St", state="Texas").state is None
+    assert VoterInfoRequest(address="1 Main St", state=None).state is None
+

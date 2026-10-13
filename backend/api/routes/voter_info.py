@@ -1,6 +1,6 @@
 import asyncio
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import logging
 import re
@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 CIVIC_VOTER_INFO_URL = "https://www.googleapis.com/civicinfo/v2/voterinfo"
+CIVIC_ELECTIONS_URL = "https://www.googleapis.com/civicinfo/v2/elections"
 REQUEST_TIMEOUT_SECONDS = 8.0
 # Google sends no Cache-Control on voterinfo responses, so without a default
 # nothing would ever be cached. Upstream max-age (capped at 1h) wins when present.
@@ -161,8 +162,127 @@ class VoterInfoCache:
         self.entries.clear()
 
 
+# Google's elections list always includes test elections dated years ahead
+# (VIP Test Election 2000, Google Test Election 1001). They must never be picked
+# as the "next" election for a real address.
+TEST_ELECTION_IDS = frozenset({"2000", "1001"})
+ELECTIONS_CACHE_TTL_SECONDS = 3600
+ELECTIONS_RETRY_AFTER_FAILURE_SECONDS = 60
+ELECTIONS_REQUEST_TIMEOUT_SECONDS = 3.0
+COUNTRY_DIVISION = "ocd-division/country:us"
+# Election day is a local date; keep an election "upcoming" until it is over in
+# the last US timezone (Hawaii, UTC-10, no DST).
+LAST_US_TIMEZONE = timezone(timedelta(hours=-10))
+
+
+def us_today() -> date:
+    return datetime.now(LAST_US_TIMEZONE).date()
+
+
+class ElectionsCache:
+    """The Civic elections list, shared by all requests and refreshed hourly.
+
+    On a failed refresh the last good list is kept; with no list at all,
+    callers fall back to letting Google pick the election per address.
+    """
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.elections: Optional[list[dict]] = None
+        self.refresh_after = 0.0
+
+    async def get(self, client: Optional[httpx.AsyncClient], api_key: str) -> Optional[list[dict]]:
+        if time.monotonic() < self.refresh_after:
+            return self.elections
+        async with self.lock:
+            if time.monotonic() < self.refresh_after:
+                return self.elections
+            fetched = await self._fetch(client, api_key)
+            if fetched is not None:
+                self.elections = fetched
+                self.refresh_after = time.monotonic() + ELECTIONS_CACHE_TTL_SECONDS
+            else:
+                self.refresh_after = time.monotonic() + ELECTIONS_RETRY_AFTER_FAILURE_SECONDS
+            return self.elections
+
+    async def _fetch(self, client: Optional[httpx.AsyncClient], api_key: str) -> Optional[list[dict]]:
+        start_time = time.monotonic()
+        try:
+            if client is None:
+                async with httpx.AsyncClient(timeout=ELECTIONS_REQUEST_TIMEOUT_SECONDS) as own:
+                    res = await own.get(CIVIC_ELECTIONS_URL, headers={"X-Goog-Api-Key": api_key})
+            else:
+                res = await client.get(
+                    CIVIC_ELECTIONS_URL,
+                    headers={"X-Goog-Api-Key": api_key},
+                    timeout=ELECTIONS_REQUEST_TIMEOUT_SECONDS,
+                )
+            res.raise_for_status()
+            elections = res.json().get("elections")
+            if not isinstance(elections, list):
+                raise ValueError("missing elections list")
+        except Exception as exc:  # never let the elections list break a lookup
+            logger.warning(
+                "Civic elections list refresh failed (%s): latency=%.3fs",
+                type(exc).__name__,
+                time.monotonic() - start_time,
+            )
+            return None
+        logger.info(
+            "Civic elections list refreshed: count=%d latency=%.3fs",
+            len(elections),
+            time.monotonic() - start_time,
+        )
+        return [e for e in elections if isinstance(e, dict)]
+
+    def clear(self) -> None:
+        self.elections = None
+        self.refresh_after = 0.0
+
+
+def state_division(state_code: Optional[str]) -> Optional[str]:
+    if not state_code:
+        return None
+    code = state_code.lower()
+    if code == "dc":
+        return f"{COUNTRY_DIVISION}/district:dc"
+    return f"{COUNTRY_DIVISION}/state:{code}"
+
+
+def upcoming_elections(
+    elections: list[dict], state_code: Optional[str], today: date
+) -> list[dict]:
+    """Real (non-test) elections on or after today covering the whole US or the state.
+
+    Sorted soonest first; on the same day a state election sorts before a
+    national one. County/city elections are not matched (we only know the
+    state); Google's own per-address pick covers those when nothing matches.
+    """
+    divisions = {COUNTRY_DIVISION}
+    if state_division(state_code):
+        divisions.add(state_division(state_code))
+
+    matches = []
+    for e in elections:
+        e_id = str(e.get("id", ""))
+        name = str(e.get("name", ""))
+        if e_id in TEST_ELECTION_IDS or "test" in name.lower():
+            continue
+        if e.get("ocdDivisionId") not in divisions:
+            continue
+        try:
+            day = date.fromisoformat(str(e.get("electionDay")))
+        except ValueError:
+            continue
+        if day >= today:
+            matches.append((day, e.get("ocdDivisionId") == COUNTRY_DIVISION, e))
+    matches.sort(key=lambda m: (m[0], m[1]))
+    return [m[2] for m in matches]
+
+
 rate_limiter = SlidingWindowRateLimiter()
 response_cache = VoterInfoCache()
+elections_cache = ElectionsCache()
 
 
 def parse_cache_control_ttl(header_val: Optional[str]) -> Optional[int]:
@@ -301,7 +421,22 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
             detail="Voting information service is not configured.",
         )
 
+    # Use application-level shared client if available
+    client = getattr(request.app.state, "http_client", None)
+
+    # Pick the election ourselves from the cached list. Without an electionId,
+    # Google only picks an election it already has location data for, so states
+    # that have not published data yet (e.g. Texas weeks before early voting)
+    # came back as "Election unknown" even with an election coming up.
     election_id = body.election_id or get_civic_election_id_override()
+    candidate_elections: list[dict] = []
+    if not election_id:
+        elections = await elections_cache.get(client, api_key)
+        if elections:
+            candidate_elections = upcoming_elections(elections, body.state, us_today())
+            if candidate_elections:
+                election_id = str(candidate_elections[0].get("id"))
+
     cache_key = hashlib.sha256(
         f"{normalized_address}:{election_id or ''}".encode("utf-8")
     ).hexdigest()
@@ -322,8 +457,6 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
     if election_id:
         params["electionId"] = election_id
 
-    # Use application-level shared client if available
-    client = getattr(request.app.state, "http_client", None)
     own_client = False
     if client is None:
         client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS)
@@ -500,6 +633,17 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
         for e in payload.get("otherElections", [])
         if isinstance(e, dict)
     ]
+    if not other_elections:
+        chosen_id = election_out.id if election_out else election_id
+        other_elections = [
+            ElectionOut(
+                id=str(e.get("id", "")),
+                name=str(e.get("name", "")),
+                date=e.get("electionDay") or None,
+            )
+            for e in candidate_elections
+            if str(e.get("id", "")) != chosen_id
+        ]
 
     mail_only = bool(payload.get("mailOnly", False))
 
