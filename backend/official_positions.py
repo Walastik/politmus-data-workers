@@ -78,6 +78,36 @@ def utcnow() -> datetime:
 
 
 @dataclass(frozen=True)
+class OfficialSnapshot:
+    """Plain copy of the Official fields the worker needs.
+
+    The crawl runs on a background thread; ORM objects must stay on the
+    thread that owns the session, because reading an expired attribute
+    issues a query on that session.
+    """
+
+    id: str
+    name: str | None
+    party: str | None
+    state: str | None
+    district: int | None
+    office: str | None
+    website_url: str | None
+
+    @classmethod
+    def of(cls, official) -> "OfficialSnapshot":
+        return cls(
+            official.id,
+            official.name,
+            official.party,
+            official.state,
+            official.district,
+            official.office,
+            official.website_url,
+        )
+
+
+@dataclass(frozen=True)
 class Prompts:
     positions: str
     link_selection: str
@@ -424,13 +454,25 @@ def run_positions(
             owns_crawler = True
         vocabulary = [] if crawl_only else target_vocabulary(session)
 
-        def crawl(official):
+        # Snapshot before any commit expires the ORM objects.
+        rows = [(OfficialSnapshot.of(official), sync) for official, sync in rows]
+
+        def crawl(official: OfficialSnapshot):
             selector = (
                 make_link_selector(chat_fn, official, prompts.link_selection)
                 if chat_fn is not None and prompts is not None
                 else None
             )
-            return crawler.crawl(official.website_url, select_links_fn=selector)
+            try:
+                return crawler.crawl(official.website_url, select_links_fn=selector)
+            except Exception as exc:  # one bad site must not end the run
+                from services.site_crawler import CrawlResult
+
+                return CrawlResult(
+                    status="failed",
+                    start_url=official.website_url,
+                    error=f"crawler error: {type(exc).__name__}: {exc}",
+                )
 
         # Crawl the next official in the background while the model works on
         # the current one. The crawler is only ever used by this one thread.

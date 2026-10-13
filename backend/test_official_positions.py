@@ -471,6 +471,7 @@ class RunPositionsDatabaseTests(unittest.TestCase):
     def tearDown(self):
         from models import PolicyTarget
 
+        self._cleanup_extra()
         self._cleanup()
         session = self.SessionLocal()
         session.query(PolicyTarget).filter(~PolicyTarget.id.in_(self.existing_targets or {-1})).delete(
@@ -593,6 +594,102 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         self.assertEqual(stats["extracted"], 1)
         self.assertEqual(self._sync().status, "ok")
         self.assertEqual(self._sync().attempts, 0)
+
+    def test_background_crawls_never_touch_the_session(self):
+        """Regression: the prefetch thread read expired ORM attributes
+        (official.website_url / name) while the main thread used the session,
+        which Postgres sessions reject ("concurrent operations are not
+        permitted"). Several officials, slow crawls and model calls, and a
+        crawler that uses the link-selection fallback (describe_official)."""
+        import time as _time
+        from models import Official
+        from official_positions import run_positions
+        from services.site_crawler import CrawlResult, CrawledPage, content_hash
+
+        session = self.SessionLocal()
+        for n in (2, 3, 4):
+            session.add(Official(
+                id=f"ZZTEST000{n}", name=f"Rep {n}", state="Ohio", party="Independent",
+                office="Representative", district=n, current_member=True,
+                website_url=f"https://rep{n}.example.gov", level="zztest",
+            ))
+        session.query(Official).filter(Official.id == self.OFFICIAL_ID).update({"level": "zztest"})
+        session.commit()
+        session.close()
+
+        test = self
+
+        class SlowCrawler:
+            def crawl(self, website_url, select_links_fn=None):
+                _time.sleep(0.15)
+                if select_links_fn is not None:
+                    select_links_fn([SimpleNamespace(url=website_url + "/issues", text="Issues")])
+                return CrawlResult(status="ok", start_url=website_url, pages=[
+                    CrawledPage(website_url + "/issues", "issues_index", "Issues", CONGRESS_TEXT, content_hash(CONGRESS_TEXT), 200)
+                ])
+
+            def close(self):
+                pass
+
+        def chat(messages, schema):
+            _time.sleep(0.05)
+            if "link_numbers" in json.dumps(schema):
+                return json.dumps({"link_numbers": [1]})
+            return test._chat(messages, schema)
+
+        from sqlalchemy import event
+        from database import engine
+
+        sql_threads = set()
+
+        def record_thread(*_args):
+            sql_threads.add(threading.get_ident())
+
+        event.listen(engine, "before_cursor_execute", record_thread)
+        try:
+            stats = run_positions(
+                limit=0, level="zztest", chat_fn=chat, crawler=SlowCrawler(),
+                session_factory=self.SessionLocal, prompts=Prompts("P", "L"),
+                model="test-model", now_fn=lambda: self.clock[0], log=lambda _m: None,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", record_thread)
+        # Every query ran on the caller's thread, never on the crawl thread.
+        self.assertEqual(sql_threads, {threading.get_ident()})
+        self.assertEqual(stats["selected"], 4)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["extracted"], 4)
+
+    def test_crawler_exception_is_recorded_not_fatal(self):
+        from official_positions import run_positions
+
+        class Exploding:
+            def crawl(self, website_url, select_links_fn=None):
+                raise RuntimeError("socket exploded")
+
+            def close(self):
+                pass
+
+        stats = run_positions(
+            official_id=self.OFFICIAL_ID, chat_fn=self._chat, crawler=Exploding(),
+            session_factory=self.SessionLocal, prompts=Prompts("P", "L"),
+            model="test-model", now_fn=lambda: self.clock[0], log=lambda _m: None,
+        )
+        self.assertEqual(stats["failed"], 1)
+        sync = self._sync()
+        self.assertEqual(sync.status, "failed")
+        self.assertIn("socket exploded", sync.last_error)
+
+    def _cleanup_extra(self):
+        from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
+
+        session = self.SessionLocal()
+        ids = [f"ZZTEST000{n}" for n in (2, 3, 4)]
+        for model in (OfficialStance, OfficialSourcePage, OfficialPositionSync):
+            session.query(model).filter(model.official_id.in_(ids)).delete(synchronize_session=False)
+        session.query(Official).filter(Official.id.in_(ids)).delete(synchronize_session=False)
+        session.commit()
+        session.close()
 
     def test_dry_run_writes_nothing(self):
         stats = self._run(dry_run=True)
