@@ -53,6 +53,37 @@ function createMockVoterInfo(overrides: Partial<VoterInfo>): VoterInfo {
 }
 
 describe('VotingLocations Component', () => {
+  it('collapses passed early-voting dates into a "Passed dates" section', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 12, 12, 0))
+    try {
+      render(
+        <VotingLocations
+          voterInfo={createMockVoterInfo({
+            election: { id: '12000', name: '2026 General Midterm Election', date: '2026-11-03' },
+            earlyVoteSites: [
+              createMockLocation({
+                locationName: 'Burnsville City Hall',
+                pollingHours: 'Fri, Oct 9: 8:00 am - 4:30 pm\nTue, Oct 13: 8:00 am - 4:30 pm\nMon, Nov 2: 8 am - 5 pm',
+              }),
+            ],
+          })}
+          loading={false}
+          stateCode="MN"
+        />,
+      )
+      expect(screen.getByText('Tue, Oct 13: 8:00 am - 4:30 pm')).toBeVisible()
+      const summary = screen.getByText('Passed dates (1)')
+      const details = summary.closest('details')!
+      expect(details.open).toBe(false)
+      fireEvent.click(summary)
+      expect(details.open).toBe(true)
+      expect(screen.getByText('Fri, Oct 9: 8:00 am - 4:30 pm')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('election date is an add-to-calendar button that downloads an .ics file', () => {
     const createObjectURL = vi.fn(() => 'blob:election')
     const revokeObjectURL = vi.fn()

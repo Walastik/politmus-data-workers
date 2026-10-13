@@ -21,6 +21,7 @@ import {
   googleCalendarUrl,
   type CalendarElection,
 } from '../calendar'
+import { splitPollingHours } from '../pollingHours'
 import {
   formatCivicAddress,
   getVoterResources,
@@ -160,10 +161,12 @@ function LocationSection({
   title,
   locations,
   typeLabel,
+  electionDate,
 }: {
   title: string
   locations: VoterLocation[]
   typeLabel: string
+  electionDate?: string | null
 }) {
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? locations : locations.slice(0, INITIAL_LOCATIONS_SHOWN)
@@ -181,7 +184,7 @@ function LocationSection({
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {visible.map((loc, idx) => (
-          <LocationCard key={idx} location={loc} typeLabel={typeLabel} />
+          <LocationCard key={idx} location={loc} typeLabel={typeLabel} electionDate={electionDate} />
         ))}
       </div>
       {locations.length > INITIAL_LOCATIONS_SHOWN && (
@@ -207,6 +210,7 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
     <div className="space-y-6">
       {hasPolling && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Election Day Polling Places"
           locations={voterInfo.pollingLocations}
           typeLabel="Election Day"
@@ -215,6 +219,7 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
 
       {hasEarly && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Early Voting Sites"
           locations={voterInfo.earlyVoteSites}
           typeLabel="Early Voting"
@@ -223,6 +228,7 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
 
       {hasDropOff && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Ballot Drop-off Locations"
           locations={voterInfo.dropOffLocations}
           typeLabel="Drop-off Box"
@@ -257,6 +263,7 @@ function MailOnlyStateView({
 
       {voterInfo.dropOffLocations.length > 0 && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Ballot Drop-off Locations"
           locations={voterInfo.dropOffLocations}
           typeLabel="Drop-off Box"
@@ -565,12 +572,47 @@ function RegistrationBlock({
   )
 }
 
+function PollingHours({ hours, electionDate }: { hours: string; electionDate?: string | null }) {
+  const { upcoming, passed } = splitPollingHours(hours, { electionDate })
+
+  return (
+    <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-400">
+      <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+      <div className="min-w-0">
+        {upcoming.length > 0 ? (
+          <ul>
+            {upcoming.map((line, idx) => (
+              <li key={idx}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="italic text-slate-500">No upcoming hours listed for this site.</p>
+        )}
+        {passed.length > 0 && (
+          <details className="mt-1.5">
+            <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-300">
+              Passed dates ({passed.length})
+            </summary>
+            <ul className="mt-1 text-slate-500">
+              {passed.map((line, idx) => (
+                <li key={idx}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function LocationCard({
   location,
   typeLabel,
+  electionDate,
 }: {
   location: VoterLocation
   typeLabel: string
+  electionDate?: string | null
 }) {
   const addressParts = [
     location.line1,
@@ -609,10 +651,7 @@ function LocationCard({
         )}
 
         {location.pollingHours && (
-          <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-400">
-            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
-            <span className="whitespace-pre-line">{location.pollingHours}</span>
-          </div>
+          <PollingHours hours={location.pollingHours} electionDate={electionDate} />
         )}
 
         {location.notes && (
