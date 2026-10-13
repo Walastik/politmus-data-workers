@@ -49,6 +49,7 @@ export default function AddressLookup() {
   const [activeTab, setActiveTab] = useState<Tab>('representatives')
   const activeVoterInfoControllerRef = useRef<AbortController | null>(null)
   const voterInfoAddressRef = useRef<string | null>(null)
+  const lookupSeqRef = useRef(0)
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
     representatives: null,
     voting: null,
@@ -57,12 +58,18 @@ export default function AddressLookup() {
   const { user, isLoaded: userLoaded } = useUser()
   const savedAddress = user?.unsafeMetadata?.savedAddress as string | undefined
 
-  async function fetchVoterInfo(targetAddress: string, signal: AbortSignal) {
+  async function fetchVoterInfo(
+    targetAddress: string,
+    stateHint: string | null | undefined,
+    signal: AbortSignal,
+  ) {
     try {
       const response = await fetch(apiUrl('/api/voter-info'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: targetAddress }),
+        // The state (from the representative lookup) lets the backend pick
+        // state-specific elections; without it, only nationwide ones match.
+        body: JSON.stringify({ address: targetAddress, state: stateHint || undefined }),
         signal,
       })
       const data = await readJson(response)
@@ -116,14 +123,14 @@ export default function AddressLookup() {
     }
   }
 
-  function startVoterInfoFetch(targetAddress: string) {
+  function startVoterInfoFetch(targetAddress: string, stateHint?: string | null) {
     activeVoterInfoControllerRef.current?.abort()
     const controller = new AbortController()
     activeVoterInfoControllerRef.current = controller
     voterInfoAddressRef.current = targetAddress
     setVoterInfo(null)
     setVoterInfoLoading(true)
-    fetchVoterInfo(targetAddress, controller.signal)
+    fetchVoterInfo(targetAddress, stateHint, controller.signal)
   }
 
   function resetVoterInfo() {
@@ -141,7 +148,7 @@ export default function AddressLookup() {
       lookedUpAddress &&
       voterInfoAddressRef.current !== lookedUpAddress
     ) {
-      startVoterInfoFetch(lookedUpAddress)
+      startVoterInfoFetch(lookedUpAddress, lookup?.normalized_input?.state)
     }
   }
 
@@ -176,12 +183,15 @@ export default function AddressLookup() {
     setLookedUpAddress(trimmed)
 
     // Drop voter info for the previous address. If the user is already viewing the
-    // Voting Locations tab, fetch for the new address right away (without blocking
-    // the representative lookup); otherwise wait until they open the tab.
+    // Voting Locations tab, fetch for the new address once the representative
+    // lookup settles (it supplies the state hint); otherwise wait for the tab.
+    const lookupSeq = ++lookupSeqRef.current
+    const votingTabOpen = activeTab === 'voting'
     resetVoterInfo()
-    if (activeTab === 'voting') {
-      startVoterInfoFetch(trimmed)
+    if (votingTabOpen) {
+      setVoterInfoLoading(true)
     }
+    let lookupState: string | null | undefined
 
     try {
       const response = await fetch(
@@ -192,6 +202,7 @@ export default function AddressLookup() {
         throw new Error(apiDetail(body, `Lookup failed (${response.status})`))
       }
       setLookup(body as CivicLookup)
+      lookupState = (body as CivicLookup).normalized_input?.state
     } catch (err: unknown) {
       console.error(err)
       setLookup(null)
@@ -202,6 +213,10 @@ export default function AddressLookup() {
       )
     } finally {
       setLoading(false)
+    }
+
+    if (votingTabOpen && lookupSeq === lookupSeqRef.current) {
+      startVoterInfoFetch(trimmed, lookupState)
     }
   }
 
