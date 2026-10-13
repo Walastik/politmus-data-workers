@@ -227,13 +227,41 @@ describe('AddressLookup Integration & Race Handling', () => {
       expect(screen.getByRole('button', { name: /Find representatives/i })).not.toBeDisabled()
     })
 
-    // Second search while the voting tab is open fetches immediately for the new address
+    // Second search while the voting tab is open: the in-flight request is aborted
+    // immediately, and a new one starts once the representative lookup settles
     fireEvent.change(input, { target: { value: 'Second Address, Dallas, TX' } })
     fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
 
-    expect(abortSignals.length).toBe(2)
-    // First signal MUST now be aborted!
     expect(abortSignals[0].aborted).toBe(true)
+    await waitFor(() => expect(abortSignals.length).toBe(2))
     expect(abortSignals[1].aborted).toBe(false)
+  })
+
+  it('sends the state from the representative lookup as a hint', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/lookup')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ normalized_input: { line1: '1100 Congress Ave', state: 'TX' }, representatives: [] }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+      }
+      return new Promise(() => {})
+    })
+
+    render(<AddressLookup />)
+    fireEvent.change(screen.getByLabelText(/Street address/i), {
+      target: { value: '1100 Congress Ave, Austin, TX 78701' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
+    fireEvent.click(await screen.findByRole('tab', { name: /Voting Locations/i }))
+
+    const call = fetchSpy.mock.calls.find(([u]) => String(u).includes('/api/voter-info'))
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      address: '1100 Congress Ave, Austin, TX 78701',
+      state: 'TX',
+    })
   })
 })

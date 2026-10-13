@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Building2,
   Calendar,
+  CalendarPlus,
   Clock,
   ExternalLink,
   FileCheck2,
@@ -14,8 +15,17 @@ import {
 } from 'lucide-react'
 
 import {
+  buildElectionIcs,
+  downloadIcs,
+  formatElectionDate,
+  googleCalendarUrl,
+  type CalendarElection,
+} from '../calendar'
+import { splitPollingHours } from '../pollingHours'
+import {
   formatCivicAddress,
   getVoterResources,
+  unfamiliarPortalHost,
   type AdminBody,
   type VoterInfo,
   type VoterLocation,
@@ -81,10 +91,10 @@ export default function VotingLocations({
               </h2>
             </div>
             {voterInfo.election.date && (
-              <div className="flex items-center gap-1.5 text-sm text-slate-300">
-                <Calendar className="h-4 w-4 text-slate-400" />
-                <span>{voterInfo.election.date}</span>
-              </div>
+              <ElectionDate
+                election={{ ...voterInfo.election, date: voterInfo.election.date }}
+                stateCode={stateCode}
+              />
             )}
           </div>
         </div>
@@ -96,6 +106,12 @@ export default function VotingLocations({
       {/* Conditional UI based on uiState */}
       {uiState === 'live' && (
         <LiveStateView voterInfo={voterInfo} />
+      )}
+
+      {/* Live data can arrive without any election-office links (e.g. DC); the
+          other states already include the state fallback links. */}
+      {uiState === 'live' && !hasRegistrationLinks(voterInfo.adminBodies) && (
+        <StaticFallback stateCode={stateCode} />
       )}
 
       {uiState === 'mail_only' && (
@@ -145,10 +161,12 @@ function LocationSection({
   title,
   locations,
   typeLabel,
+  electionDate,
 }: {
   title: string
   locations: VoterLocation[]
   typeLabel: string
+  electionDate?: string | null
 }) {
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? locations : locations.slice(0, INITIAL_LOCATIONS_SHOWN)
@@ -166,7 +184,7 @@ function LocationSection({
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {visible.map((loc, idx) => (
-          <LocationCard key={idx} location={loc} typeLabel={typeLabel} />
+          <LocationCard key={idx} location={loc} typeLabel={typeLabel} electionDate={electionDate} />
         ))}
       </div>
       {locations.length > INITIAL_LOCATIONS_SHOWN && (
@@ -192,6 +210,7 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
     <div className="space-y-6">
       {hasPolling && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Election Day Polling Places"
           locations={voterInfo.pollingLocations}
           typeLabel="Election Day"
@@ -200,6 +219,7 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
 
       {hasEarly && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Early Voting Sites"
           locations={voterInfo.earlyVoteSites}
           typeLabel="Early Voting"
@@ -208,6 +228,7 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
 
       {hasDropOff && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Ballot Drop-off Locations"
           locations={voterInfo.dropOffLocations}
           typeLabel="Drop-off Box"
@@ -242,6 +263,7 @@ function MailOnlyStateView({
 
       {voterInfo.dropOffLocations.length > 0 && (
         <LocationSection
+          electionDate={voterInfo.election?.date}
           title="Ballot Drop-off Locations"
           locations={voterInfo.dropOffLocations}
           typeLabel="Drop-off Box"
@@ -395,6 +417,73 @@ function AddressProblemStateView({ stateCode }: { stateCode?: string | null }) {
   )
 }
 
+function ElectionDate({
+  election,
+  stateCode,
+}: {
+  election: CalendarElection
+  stateCode?: string | null
+}) {
+  const resources = getVoterResources(stateCode)
+  const infoUrl = resources.pollingPlaceUrl ?? resources.voteGovUrl
+  const ics = buildElectionIcs(election, { infoUrl })
+  const googleUrl = googleCalendarUrl(election, { infoUrl })
+  const label = formatElectionDate(election.date)
+
+  if (!ics) {
+    return (
+      <div className="flex items-center gap-1.5 text-sm text-slate-300">
+        <Calendar className="h-4 w-4 text-slate-400" aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1 sm:items-end">
+      <button
+        type="button"
+        onClick={() => downloadIcs(`election-${election.date}.ics`, ics)}
+        className="inline-flex items-center gap-1.5 rounded border border-slate-600 px-2.5 py-1 text-sm text-slate-200 transition hover:border-blue-500 hover:text-blue-300"
+        aria-label={`${label}: add to calendar with reminders`}
+      >
+        <CalendarPlus className="h-4 w-4 text-blue-400" aria-hidden="true" />
+        <span>{label}</span>
+      </button>
+      <p className="text-xs text-slate-500">
+        Adds reminders at 9 am the day before and 8 am on Election Day.
+        {googleUrl && (
+          <>
+            {' '}
+            <a
+              href={googleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-400 underline hover:text-blue-300"
+            >
+              Google Calendar
+            </a>{' '}
+            (uses your default reminders)
+          </>
+        )}
+      </p>
+    </div>
+  )
+}
+
+function hasRegistrationLinks(
+  adminBodies?: { state: AdminBody | null; local: AdminBody | null } | null,
+) {
+  return [adminBodies?.local, adminBodies?.state].some(
+    (body) =>
+      body?.electionRegistrationUrl ||
+      body?.electionRegistrationConfirmationUrl ||
+      body?.absenteeVotingInfoUrl ||
+      body?.votingLocationFinderUrl ||
+      body?.ballotInfoUrl,
+  )
+}
+
 function RegistrationBlock({
   adminBodies,
 }: {
@@ -483,12 +572,47 @@ function RegistrationBlock({
   )
 }
 
+function PollingHours({ hours, electionDate }: { hours: string; electionDate?: string | null }) {
+  const { upcoming, passed } = splitPollingHours(hours, { electionDate })
+
+  return (
+    <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-400">
+      <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
+      <div className="min-w-0">
+        {upcoming.length > 0 ? (
+          <ul>
+            {upcoming.map((line, idx) => (
+              <li key={idx}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="italic text-slate-500">No upcoming hours listed for this site.</p>
+        )}
+        {passed.length > 0 && (
+          <details className="mt-1.5">
+            <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-300">
+              Passed dates ({passed.length})
+            </summary>
+            <ul className="mt-1 text-slate-500">
+              {passed.map((line, idx) => (
+                <li key={idx}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function LocationCard({
   location,
   typeLabel,
+  electionDate,
 }: {
   location: VoterLocation
   typeLabel: string
+  electionDate?: string | null
 }) {
   const addressParts = [
     location.line1,
@@ -527,10 +651,7 @@ function LocationCard({
         )}
 
         {location.pollingHours && (
-          <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-400">
-            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
-            <span className="whitespace-pre-line">{location.pollingHours}</span>
-          </div>
+          <PollingHours hours={location.pollingHours} electionDate={electionDate} />
         )}
 
         {location.notes && (
@@ -652,6 +773,19 @@ function AdminBodyCard({
 
 function StaticFallback({ stateCode }: { stateCode?: string | null }) {
   const resources = getVoterResources(stateCode)
+  const { pollingPlaceUrl, registrationStatusUrl } = resources
+  const samePage = pollingPlaceUrl && pollingPlaceUrl === registrationStatusUrl
+  const portalHosts = [
+    ...new Set(
+      [pollingPlaceUrl, samePage ? undefined : registrationStatusUrl]
+        .map(unfamiliarPortalHost)
+        .filter((host): host is string => Boolean(host)),
+    ),
+  ]
+  const primaryClass =
+    'inline-flex items-center gap-1.5 rounded bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-blue-500'
+  const secondaryClass =
+    'inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700'
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/80 p-5">
@@ -659,40 +793,58 @@ function StaticFallback({ stateCode }: { stateCode?: string | null }) {
         Voter Resources for {resources.name}
       </h3>
       <p className="mt-1 text-xs text-slate-400">
-        Confirm voter eligibility, register, or check your registration status via official voter portals:
+        {pollingPlaceUrl
+          ? `Find your polling place or check your registration on ${resources.name}'s official election site, or register through Vote.org:`
+          : 'Register, check your registration status, or find your state election office:'}
       </p>
 
       <div className="mt-4 flex flex-wrap gap-3">
+        {pollingPlaceUrl && (
+          <a href={pollingPlaceUrl} target="_blank" rel="noopener noreferrer" className={primaryClass}>
+            <span>
+              {samePage ? 'Find Polling Place & Check Registration' : 'Find Your Polling Place'} (Official)
+            </span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
+
+        {registrationStatusUrl && !samePage && (
+          <a href={registrationStatusUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>
+            <span>Check Registration (Official)</span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
+
         <a
           href={resources.registerUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-blue-500"
+          className={pollingPlaceUrl ? secondaryClass : primaryClass}
         >
-          <span>Register to Vote in {resources.name}</span>
+          <span>Register to Vote in {resources.name} (Vote.org)</span>
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </a>
 
-        <a
-          href={resources.checkRegistrationUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
-        >
-          <span>Check Registration (Vote.org)</span>
-          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-        </a>
+        {!registrationStatusUrl && (
+          <a href={resources.checkRegistrationUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>
+            <span>Check Registration (Vote.org)</span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
 
-        <a
-          href={resources.voteGovUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
-        >
+        <a href={resources.voteGovUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>
           <span>Federal Guide (Vote.gov)</span>
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </a>
       </div>
+
+      {portalHosts.length > 0 && (
+        <p className="mt-3 text-xs text-slate-500">
+          The official {portalHosts.length > 1 ? 'links open' : 'link opens'} {resources.name}'s
+          voter portal at <span className="font-medium text-slate-400">{portalHosts.join(' and ')}</span>,
+          the address {resources.name}'s election office uses for it, so it won't look like a .gov site.
+        </p>
+      )}
     </div>
   )
 }

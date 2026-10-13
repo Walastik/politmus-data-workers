@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { STATE_VOTER_RESOURCES, getVoterResources } from './types'
+import { STATE_VOTER_RESOURCES, getVoterResources, unfamiliarPortalHost } from './types'
 
 describe('STATE_VOTER_RESOURCES and getVoterResources', () => {
   const EXPECTED_STATES = [
@@ -56,4 +56,31 @@ describe('STATE_VOTER_RESOURCES and getVoterResources', () => {
     expect(undef.name).toBe('United States')
     expect(undef.voteGovUrl).toBe('https://vote.gov')
   })
+
+  it('every state has official https polling-place and registration-status links', () => {
+    for (const [code, res] of Object.entries(STATE_VOTER_RESOURCES)) {
+      for (const key of ['pollingPlaceUrl', 'registrationStatusUrl'] as const) {
+        const url = res[key]
+        expect(url, `${code} ${key}`).toMatch(/^https:\/\//)
+        expect(new URL(url!).hostname, `${code} ${key}`).not.toMatch(/vote\.org$/)
+      }
+    }
+  })
+
+  it('nationwide fallback has no state-specific official links', () => {
+    const us = getVoterResources(null)
+    expect(us.pollingPlaceUrl).toBeUndefined()
+    expect(us.registrationStatusUrl).toBeUndefined()
+  })
+
+  it('flags official portals that land outside .gov/.us domains', () => {
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.TX.pollingPlaceUrl)).toBe(
+      'goelect.txelections.civixapps.com',
+    )
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.AZ.pollingPlaceUrl)).toBe('my.arizona.vote')
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.CA.pollingPlaceUrl)).toBeNull()
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.MN.pollingPlaceUrl)).toBeNull()
+    expect(unfamiliarPortalHost(undefined)).toBeNull()
+  })
 })
+

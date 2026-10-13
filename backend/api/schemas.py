@@ -1,4 +1,5 @@
 from datetime import date as Date, datetime
+import re
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -174,6 +175,16 @@ class CamelModel(BaseModel):
 class VoterInfoRequest(CamelModel):
     address: str = Field(..., min_length=1, max_length=300)
     election_id: Optional[str] = None
+    # Two-letter state from the representative lookup, used only to choose the
+    # election. Anything else is ignored rather than rejected.
+    state: Optional[str] = None
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def normalize_state(cls, v: object) -> Optional[str]:
+        if isinstance(v, str) and re.fullmatch(r"[A-Za-z]{2}", v.strip()):
+            return v.strip().upper()
+        return None
 
     @field_validator("address")
     @classmethod

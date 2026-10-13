@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 import os
 import sys
 from pathlib import Path
@@ -18,6 +19,16 @@ from api.schemas import HealthOut  # noqa: E402
 from init_db import ensure_schema  # noqa: E402
 
 ensure_schema()
+
+# uvicorn only configures its own loggers, so INFO logs from our modules (lookup
+# latency, cache hits, elections refresh) were dropped. Route the "api" logger
+# tree to stderr at INFO. These logs carry address hashes, never addresses.
+_api_logger = logging.getLogger("api")
+if not _api_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+    _api_logger.addHandler(_handler)
+    _api_logger.setLevel(logging.INFO)
 
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",

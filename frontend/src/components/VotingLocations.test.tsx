@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import VotingLocations from './VotingLocations'
 import type { AdminBody, VoterInfo, VoterLocation } from '../types'
 
@@ -53,6 +53,109 @@ function createMockVoterInfo(overrides: Partial<VoterInfo>): VoterInfo {
 }
 
 describe('VotingLocations Component', () => {
+  it('collapses passed early-voting dates into a "Passed dates" section', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 12, 12, 0))
+    try {
+      render(
+        <VotingLocations
+          voterInfo={createMockVoterInfo({
+            election: { id: '12000', name: '2026 General Midterm Election', date: '2026-11-03' },
+            earlyVoteSites: [
+              createMockLocation({
+                locationName: 'Burnsville City Hall',
+                pollingHours: 'Fri, Oct 9: 8:00 am - 4:30 pm\nTue, Oct 13: 8:00 am - 4:30 pm\nMon, Nov 2: 8 am - 5 pm',
+              }),
+            ],
+          })}
+          loading={false}
+          stateCode="MN"
+        />,
+      )
+      expect(screen.getByText('Tue, Oct 13: 8:00 am - 4:30 pm')).toBeVisible()
+      const summary = screen.getByText('Passed dates (1)')
+      const details = summary.closest('details')!
+      expect(details.open).toBe(false)
+      fireEvent.click(summary)
+      expect(details.open).toBe(true)
+      expect(screen.getByText('Fri, Oct 9: 8:00 am - 4:30 pm')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('election date is an add-to-calendar button that downloads an .ics file', () => {
+    const createObjectURL = vi.fn(() => 'blob:election')
+    const revokeObjectURL = vi.fn()
+    Object.assign(URL, { createObjectURL, revokeObjectURL })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({
+          uiState: 'no_locations_yet',
+          election: { id: '12000', name: '2026 General Midterm Election', date: '2026-11-03' },
+        })}
+        loading={false}
+        stateCode="TX"
+      />,
+    )
+
+    const button = screen.getByRole('button', {
+      name: 'Tuesday, November 3, 2026: add to calendar with reminders',
+    })
+    fireEvent.click(button)
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('link', { name: 'Google Calendar' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('dates=20261103%2F20261104'),
+    )
+    click.mockRestore()
+  })
+
+  it('explains official portals on unfamiliar domains', () => {
+    const { unmount } = render(<VotingLocations voterInfo={null} loading={false} stateCode="TX" />)
+    expect(screen.getByText('goelect.txelections.civixapps.com')).toBeInTheDocument()
+    unmount()
+
+    render(<VotingLocations voterInfo={null} loading={false} stateCode="CA" />)
+    expect(screen.queryByText(/voter portal at/)).not.toBeInTheDocument()
+  })
+
+  it('live data without election-office links still shows official state links', () => {
+    render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({
+          pollingLocations: [createMockLocation({ locationName: 'Central Library' })],
+        })}
+        loading={false}
+        stateCode="TX"
+      />,
+    )
+    expect(screen.getByText('Central Library')).toBeInTheDocument()
+    const official = screen.getByRole('link', { name: /Find Polling Place & Check Registration \(Official\)/ })
+    expect(official).toHaveAttribute('href', 'https://teamrv-mvp.sos.texas.gov/MVP/mvp.do')
+  })
+
+  it('live data with election-office links does not duplicate the state links', () => {
+    render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({
+          pollingLocations: [createMockLocation({ locationName: 'Central Library' })],
+          adminBodies: {
+            state: createMockAdminBody({ electionRegistrationUrl: 'https://sos.example.gov/register' }),
+            local: null,
+          },
+        })}
+        loading={false}
+        stateCode="TX"
+      />,
+    )
+    expect(screen.queryByText(/Voter Resources for Texas/)).not.toBeInTheDocument()
+  })
+
   it('shows the first 5 locations of a long list and expands on request', () => {
     const pollingLocations = Array.from({ length: 75 }, (_, i) =>
       createMockLocation({ locationName: `Vote Center ${i + 1}`, line1: `${i + 1} Main St` }),
