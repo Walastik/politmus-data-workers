@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Building2,
   Calendar,
+  CalendarPlus,
   Clock,
   ExternalLink,
   FileCheck2,
@@ -13,6 +14,13 @@ import {
   Phone,
 } from 'lucide-react'
 
+import {
+  buildElectionIcs,
+  downloadIcs,
+  formatElectionDate,
+  googleCalendarUrl,
+  type CalendarElection,
+} from '../calendar'
 import {
   formatCivicAddress,
   getVoterResources,
@@ -81,10 +89,10 @@ export default function VotingLocations({
               </h2>
             </div>
             {voterInfo.election.date && (
-              <div className="flex items-center gap-1.5 text-sm text-slate-300">
-                <Calendar className="h-4 w-4 text-slate-400" />
-                <span>{voterInfo.election.date}</span>
-              </div>
+              <ElectionDate
+                election={{ ...voterInfo.election, date: voterInfo.election.date }}
+                stateCode={stateCode}
+              />
             )}
           </div>
         </div>
@@ -397,6 +405,60 @@ function AddressProblemStateView({ stateCode }: { stateCode?: string | null }) {
         </div>
       </div>
       <StaticFallback stateCode={stateCode} />
+    </div>
+  )
+}
+
+function ElectionDate({
+  election,
+  stateCode,
+}: {
+  election: CalendarElection
+  stateCode?: string | null
+}) {
+  const resources = getVoterResources(stateCode)
+  const infoUrl = resources.pollingPlaceUrl ?? resources.voteGovUrl
+  const ics = buildElectionIcs(election, { infoUrl })
+  const googleUrl = googleCalendarUrl(election, { infoUrl })
+  const label = formatElectionDate(election.date)
+
+  if (!ics) {
+    return (
+      <div className="flex items-center gap-1.5 text-sm text-slate-300">
+        <Calendar className="h-4 w-4 text-slate-400" aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1 sm:items-end">
+      <button
+        type="button"
+        onClick={() => downloadIcs(`election-${election.date}.ics`, ics)}
+        className="inline-flex items-center gap-1.5 rounded border border-slate-600 px-2.5 py-1 text-sm text-slate-200 transition hover:border-blue-500 hover:text-blue-300"
+        aria-label={`${label}: add to calendar with reminders`}
+      >
+        <CalendarPlus className="h-4 w-4 text-blue-400" aria-hidden="true" />
+        <span>{label}</span>
+      </button>
+      <p className="text-xs text-slate-500">
+        Adds reminders at 9 am the day before and 8 am on Election Day.
+        {googleUrl && (
+          <>
+            {' '}
+            <a
+              href={googleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-400 underline hover:text-blue-300"
+            >
+              Google Calendar
+            </a>{' '}
+            (uses your default reminders)
+          </>
+        )}
+      </p>
     </div>
   )
 }
