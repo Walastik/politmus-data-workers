@@ -1,0 +1,231 @@
+import os
+import unittest
+from pathlib import Path
+
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/politmus_test",
+)
+
+import httpx
+import respx
+
+from services.site_crawler import (
+    CrawlConfig,
+    SiteCrawler,
+    clean_link,
+    host_key,
+    is_negative_path,
+    normalize_start_url,
+    score_link,
+)
+
+FIXTURES = Path(__file__).resolve().parent / "tests" / "fixtures" / "official_site"
+SITE = "https://example-rep.house.gov"
+
+
+def fixture(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def html(body: str, status: int = 200) -> httpx.Response:
+    return httpx.Response(status, text=body, headers={"Content-Type": "text/html; charset=utf-8"})
+
+
+def mount_site(router, robots: str | None = None):
+    router.get(f"{SITE}/robots.txt").mock(
+        return_value=httpx.Response(200, text=robots if robots is not None else fixture("robots.txt"))
+    )
+    router.get(f"{SITE}/").mock(return_value=html(fixture("home.html")))
+    router.get(f"{SITE}/congress").mock(return_value=html(fixture("congress.html")))
+    router.get(f"{SITE}/issues/climate").mock(return_value=html(fixture("climate.html")))
+    router.get(f"{SITE}/issues/health-care").mock(return_value=html(fixture("health-care.html")))
+    router.get(f"{SITE}/issues/criminal-justice-reform").mock(
+        return_value=html("<html><body><main><h1>CJR</h1><p>Should never be fetched.</p></main></body></html>")
+    )
+
+
+def make_crawler(sleeps=None, **config):
+    sleeps = sleeps if sleeps is not None else []
+    return SiteCrawler(
+        CrawlConfig(**{"delay_seconds": 3.0, **config}),
+        client=httpx.Client(),
+        sleep=sleeps.append,
+        clock=lambda: 0.0,
+        log=lambda _msg: None,
+    )
+
+
+class UrlHelperTests(unittest.TestCase):
+    def test_normalize_start_url_adds_scheme_and_path(self):
+        self.assertEqual(normalize_start_url("example-rep.house.gov"), "https://example-rep.house.gov/")
+        self.assertEqual(normalize_start_url("//Example-Rep.house.gov/x?y=1"), "https://example-rep.house.gov/x")
+        self.assertIsNone(normalize_start_url("  "))
+
+    def test_host_key_ignores_www(self):
+        self.assertEqual(host_key("www.Example.senate.gov"), "example.senate.gov")
+
+    def test_clean_link_keeps_same_host_html_paths_only(self):
+        host = "example-rep.house.gov"
+        self.assertEqual(clean_link(SITE + "/", "/issues/climate/#top", host), SITE + "/issues/climate")
+        self.assertIsNone(clean_link(SITE + "/", "https://twitter.com/x", host))
+        self.assertIsNone(clean_link(SITE + "/", "/search?q=x", host))
+        self.assertIsNone(clean_link(SITE + "/", "/calendar?date=2026-01-01", host))
+        self.assertEqual(
+            clean_link(SITE + "/", "/issues/issue/?IssueID=14895", host),
+            SITE + "/issues/issue?IssueID=14895",
+        )
+        self.assertIsNone(clean_link(SITE + "/", "/files/plan.pdf", host))
+        self.assertIsNone(clean_link(SITE + "/", "mailto:a@b.gov", host))
+
+    def test_scoring_prefers_issue_pages_and_rejects_news_and_services(self):
+        self.assertGreater(score_link(SITE + "/issues", "Issues"), 0)
+        self.assertGreater(score_link(SITE + "/congress", "In Congress"), 0)
+        self.assertGreater(score_link(SITE + "/priorities", ""), 0)
+        self.assertEqual(score_link(SITE + "/media/press-releases", "Issues in the news"), 0)
+        self.assertEqual(score_link(SITE + "/services/issues", "Issues"), 0)
+        self.assertTrue(is_negative_path(SITE + "/newsroom"))
+        self.assertFalse(is_negative_path(SITE + "/issues/financial-services"))
+
+
+class CrawlTests(unittest.TestCase):
+    @respx.mock
+    def test_discovers_index_and_child_pages_and_honors_robots(self):
+        mount_site(respx)
+        sleeps = []
+        result = make_crawler(sleeps).crawl("example-rep.house.gov")
+
+        self.assertEqual(result.status, "ok")
+        urls = [p.url for p in result.pages]
+        self.assertEqual(urls, [
+            SITE + "/congress",
+            SITE + "/issues/climate",
+            SITE + "/issues/health-care",
+        ])
+        kinds = {p.url: p.page_kind for p in result.pages}
+        self.assertEqual(kinds[SITE + "/congress"], "issues_index")
+        self.assertEqual(kinds[SITE + "/issues/climate"], "issue_detail")
+        congress = next(p for p in result.pages if p.url.endswith("/congress"))
+        self.assertIn("## Climate", congress.text)
+        self.assertIn("Clean Jobs Act", congress.text)
+        self.assertNotIn("Contact", congress.text.split("\n")[0])
+        self.assertEqual(len(congress.content_hash), 64)
+
+        fetched = {str(call.request.url) for call in respx.calls}
+        self.assertNotIn(SITE + "/issues/criminal-justice-reform", fetched)
+        self.assertNotIn(SITE + "/media/press-releases", fetched)
+        self.assertNotIn(SITE + "/contact", fetched)
+        # Every request after the first waits out the per-host delay.
+        self.assertTrue(sleeps)
+        self.assertTrue(all(s == 3.0 for s in sleeps))
+
+    @respx.mock
+    def test_respects_max_pages(self):
+        mount_site(respx)
+        result = make_crawler(max_pages=2).crawl(SITE)
+        self.assertEqual(len(result.pages), 2)
+
+    @respx.mock
+    def test_forbidden_homepage_is_blocked(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get(f"{SITE}/").mock(return_value=html("Access denied", status=403))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.pages, [])
+
+    @respx.mock
+    def test_robots_disallow_all_blocks_without_fetching_homepage(self):
+        respx.get(f"{SITE}/robots.txt").mock(
+            return_value=httpx.Response(200, text="User-agent: *\nDisallow: /\n")
+        )
+        home = respx.get(f"{SITE}/").mock(return_value=html(fixture("home.html")))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "blocked")
+        self.assertFalse(home.called)
+
+    @respx.mock
+    def test_offsite_redirect_is_not_followed(self):
+        mount_site(respx)
+        respx.get(f"{SITE}/congress").mock(
+            return_value=httpx.Response(302, headers={"Location": "https://evil.example.com/congress"})
+        )
+        evil = respx.get("https://evil.example.com/congress").mock(return_value=html("<p>x</p>"))
+        result = make_crawler().crawl(SITE)
+        self.assertFalse(evil.called)
+        self.assertNotIn(SITE + "/congress", [p.url for p in result.pages])
+
+    @respx.mock
+    def test_homepage_redirect_to_new_host_is_adopted(self):
+        respx.get("https://old-rep.house.gov/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get("https://old-rep.house.gov/").mock(
+            return_value=httpx.Response(301, headers={"Location": SITE + "/"})
+        )
+        mount_site(respx)
+        result = make_crawler().crawl("https://old-rep.house.gov")
+        self.assertEqual(result.status, "ok")
+        self.assertTrue(all(p.url.startswith(SITE) for p in result.pages))
+
+    @respx.mock
+    def test_probes_common_paths_when_nav_has_no_issue_link(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get(f"{SITE}/").mock(return_value=html(
+            "<html><body><nav><a href='/contact'>Contact</a></nav><main><p>Welcome.</p></main></body></html>"
+        ))
+        respx.get(f"{SITE}/issues").mock(return_value=html(fixture("congress.html")))
+        respx.get(url__regex=rf"{SITE}/issues/.+").mock(return_value=html(fixture("climate.html")))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.pages[0].url, SITE + "/issues")
+
+    @respx.mock
+    def test_link_selector_fallback_is_used_last(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=html("", status=404))
+        respx.get(f"{SITE}/").mock(return_value=html(
+            "<html><body><nav><a href='/what-matters'>What Matters</a>"
+            "<a href='/contact'>Contact</a></nav></body></html>"
+        ))
+        respx.get(url__regex=rf"{SITE}/(issues|issues-and-legislation|priorities|on-the-issues|legislation)$").mock(
+            return_value=httpx.Response(404, text="nope", headers={"Content-Type": "text/html"})
+        )
+        respx.get(f"{SITE}/what-matters").mock(return_value=html(fixture("congress.html")))
+        respx.get(url__regex=rf"{SITE}/issues/.+").mock(return_value=html(fixture("climate.html")))
+        seen = []
+
+        def selector(candidates):
+            seen.extend(c.url for c in candidates)
+            return [SITE + "/what-matters", "https://elsewhere.example.com/"]
+
+        result = make_crawler().crawl(SITE, select_links_fn=selector)
+        self.assertIn(SITE + "/what-matters", seen)
+        self.assertNotIn(SITE + "/contact", seen)
+        self.assertEqual(result.status, "ok")
+        self.assertIn(SITE + "/what-matters", [p.url for p in result.pages])
+
+    @respx.mock
+    def test_script_only_site_needs_js(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get(f"{SITE}/").mock(return_value=html(
+            "<html><body><div id='root'></div><script src='/app.js'></script></body></html>"
+        ))
+        respx.get(url__regex=rf"{SITE}/.+").mock(return_value=httpx.Response(404, headers={"Content-Type": "text/html"}))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "needs_js")
+
+    @respx.mock
+    def test_retries_server_errors_then_succeeds(self):
+        mount_site(respx)
+        respx.get(f"{SITE}/").mock(side_effect=[
+            httpx.Response(503, headers={"Retry-After": "7"}),
+            html(fixture("home.html")),
+        ])
+        sleeps = []
+        result = make_crawler(sleeps).crawl(SITE)
+        self.assertEqual(result.status, "ok")
+        self.assertIn(7.0, sleeps)
+
+    def test_missing_website_url(self):
+        self.assertEqual(make_crawler().crawl(None).status, "no_website")
+
+
+if __name__ == "__main__":
+    unittest.main()

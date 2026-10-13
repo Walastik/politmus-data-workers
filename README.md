@@ -16,6 +16,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    python -m venv venv
    source venv/bin/activate
    pip install -r backend/requirements.txt
+   # Mac Mini workers (official_positions.py crawler): pip install -r backend/requirements-worker.txt
    # For running tests: pip install -r backend/requirements-dev.txt
    ```
 
@@ -51,7 +52,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    python init_db.py
    ```
 
-   This creates `officials`, `bills`, `roll_calls`, `votes`, `policy_targets`, `bill_effects`, and `extraction_guidelines`, and adds any new bill columns that an older database is missing.
+   This creates `officials`, `bills`, `roll_calls`, `votes`, `policy_targets`, `bill_effects`, `extraction_guidelines`, `official_stances`, `official_source_pages`, and `official_position_sync`, and adds any new columns that an older database is missing.
 
    Re-running `init_db.py` after the roll-call schema change drops the old `votes` table (member positions used to hang directly off `bills`). Re-run `congress_client.py bills` and `senate-votes` to backfill.
 
@@ -152,6 +153,42 @@ On a Mac Mini, an hourly cron is enough:
 ```
 
 All Congress.gov requests pause briefly between calls and retry with exponential backoff on HTTP 429 and 5xx responses. Re-running these commands is idempotent: existing bills are updated in place, and votes are upserted per official per bill.
+
+### `official_positions.py`
+
+Builds a citable record of what each official **says** they stand for, so it can later be compared with how they vote. For each current federal member with a `website_url` it:
+
+1. **Crawls** the official site (from Congress.gov). It follows nav links that look like an issues section (`Issues`, `Priorities`, `On the Issues`, `In Congress`, …) and then the issue pages beneath them. If none are found it tries common paths (`/issues`, `/priorities`, …), then asks the model to pick from the homepage's links. Press releases, news, contact forms and constituent services are skipped. The crawler stays on the official's own host, obeys `robots.txt`, waits 3 seconds between requests to a site, fetches at most 12 HTML pages, does not run JavaScript, and identifies itself with an honest User-Agent (`POLITMUS_CRAWLER_UA`). Sites that answer 403 are recorded as `blocked` and are not worked around.
+2. **Extracts** positions with the local Ollama model. Page text (markdown with headings kept) is split at headings into chunks of about 10,000 characters, and each chunk is its own small request (fixed `num_ctx`, default 16k; `--concurrency 2` parallel requests). The prompts come from the gitignored `backend/positions_llm_config.py` (see below). Each request also gets the most-used bill target names so both sides reuse the same nouns.
+3. **Verifies** every position: its `evidence_quote` must appear on the page (ignoring whitespace, curly quotes, markdown, and case). Positions whose quote is not on the page are discarded and counted as "Rejected (bad quote)".
+4. **Saves** one row per (target, mechanism) in `official_stances`. Each row has `target_id` (shared `policy_targets`, joins `bill_effects`), `target_name`/`target_slug` (joins `bills.classification_metadata` intents), `policy_area` (CRS area, joins `bills.policy_area`), `mechanism`, `direction`, `emphasis`, `issue_label`, `summary`, `evidence_quote`, and `source_url`. Crawled page text goes in `official_source_pages`. `GET /api/officials/{id}` returns the rows as `stated_positions`.
+
+Re-running is idempotent. `official_position_sync` records each official's status (`ok`, `no_positions`, `no_issue_pages`, `blocked`, `needs_js`, `no_website`, `failed`), a hash of their pages, and the extractor version (schema, prompt row, and model). An official is only picked up when never processed, older than `--max-age-days` (default 30), a prompt or the model changed, or a failure is past its backoff. If the pages are unchanged, the model is not called. Each official is written in one transaction, so a failed run keeps their previous positions. A lock file stops overlapping runs.
+
+```bash
+python official_positions.py --limit 20 --crawl-only        # see which pages are found; no model calls
+python official_positions.py --official-id O000172 --dry-run # crawl + model, print JSON, write nothing
+python official_positions.py --limit 3                      # test on a few
+python official_positions.py --show O000172                 # print stored positions
+python official_positions.py --extract-only --force         # re-run the model on stored pages
+python official_positions.py --limit 0                      # everything due
+```
+
+Other options: `--force`, `--max-age-days`, `--concurrency`, `--chunk-chars`, `--crawl-delay`, `--max-pages`, `--model` (default `OFFICIAL_POSITIONS_MODEL`, then `OLLAMA_MODEL`), `--host`, `--timeout`, `--num-ctx`, `--num-predict`, `--level`.
+
+On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`. A nightly run refreshes all ~535 members inside the 30-day window:
+
+```
+15 2 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --limit 40 >> /tmp/official_positions.log 2>&1
+```
+
+**Prompts are local, not in the repo.** Like `backend/scripts/llm_config.py` for the bill classifier, the worker reads `POSITIONS_SYSTEM_PROMPT` and `LINK_SELECTION_PROMPT` from `backend/positions_llm_config.py`, which is gitignored. Create it on the machine that runs the worker:
+
+```bash
+cp backend/positions_llm_config.example.py backend/positions_llm_config.py   # then write the prompts
+```
+
+Without it, every mode except `--crawl-only` stops with an error saying the file is missing. Editing either prompt changes the extractor version (a hash of both prompts plus the model), so each official is re-extracted on their next run, or right away from stored pages with `--extract-only`.
 
 ### `openstates_client.py`
 

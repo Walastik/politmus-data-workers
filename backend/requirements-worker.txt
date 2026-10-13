@@ -1,0 +1,6 @@
+# Extra packages for the Mac Mini workers (official_positions.py crawler).
+# Not installed in the API image.
+-r requirements.txt
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+trafilatura>=2.0.0
