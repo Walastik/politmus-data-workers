@@ -98,6 +98,12 @@ export default function VotingLocations({
         <LiveStateView voterInfo={voterInfo} />
       )}
 
+      {/* Live data can arrive without any election-office links (e.g. DC); the
+          other states already include the state fallback links. */}
+      {uiState === 'live' && !hasRegistrationLinks(voterInfo.adminBodies) && (
+        <StaticFallback stateCode={stateCode} />
+      )}
+
       {uiState === 'mail_only' && (
         <MailOnlyStateView voterInfo={voterInfo} stateCode={stateCode} />
       )}
@@ -395,6 +401,19 @@ function AddressProblemStateView({ stateCode }: { stateCode?: string | null }) {
   )
 }
 
+function hasRegistrationLinks(
+  adminBodies?: { state: AdminBody | null; local: AdminBody | null } | null,
+) {
+  return [adminBodies?.local, adminBodies?.state].some(
+    (body) =>
+      body?.electionRegistrationUrl ||
+      body?.electionRegistrationConfirmationUrl ||
+      body?.absenteeVotingInfoUrl ||
+      body?.votingLocationFinderUrl ||
+      body?.ballotInfoUrl,
+  )
+}
+
 function RegistrationBlock({
   adminBodies,
 }: {
@@ -652,6 +671,12 @@ function AdminBodyCard({
 
 function StaticFallback({ stateCode }: { stateCode?: string | null }) {
   const resources = getVoterResources(stateCode)
+  const { pollingPlaceUrl, registrationStatusUrl } = resources
+  const samePage = pollingPlaceUrl && pollingPlaceUrl === registrationStatusUrl
+  const primaryClass =
+    'inline-flex items-center gap-1.5 rounded bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-blue-500'
+  const secondaryClass =
+    'inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700'
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/80 p-5">
@@ -659,36 +684,46 @@ function StaticFallback({ stateCode }: { stateCode?: string | null }) {
         Voter Resources for {resources.name}
       </h3>
       <p className="mt-1 text-xs text-slate-400">
-        Confirm voter eligibility, register, or check your registration status via official voter portals:
+        {pollingPlaceUrl
+          ? `Find your polling place or check your registration on ${resources.name}'s official election site, or register through Vote.org:`
+          : 'Register, check your registration status, or find your state election office:'}
       </p>
 
       <div className="mt-4 flex flex-wrap gap-3">
+        {pollingPlaceUrl && (
+          <a href={pollingPlaceUrl} target="_blank" rel="noopener noreferrer" className={primaryClass}>
+            <span>
+              {samePage ? 'Find Polling Place & Check Registration' : 'Find Your Polling Place'} (Official)
+            </span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
+
+        {registrationStatusUrl && !samePage && (
+          <a href={registrationStatusUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>
+            <span>Check Registration (Official)</span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
+
         <a
           href={resources.registerUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-blue-500"
+          className={pollingPlaceUrl ? secondaryClass : primaryClass}
         >
-          <span>Register to Vote in {resources.name}</span>
+          <span>Register to Vote in {resources.name} (Vote.org)</span>
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </a>
 
-        <a
-          href={resources.checkRegistrationUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
-        >
-          <span>Check Registration (Vote.org)</span>
-          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-        </a>
+        {!registrationStatusUrl && (
+          <a href={resources.checkRegistrationUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>
+            <span>Check Registration (Vote.org)</span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
 
-        <a
-          href={resources.voteGovUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
-        >
+        <a href={resources.voteGovUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>
           <span>Federal Guide (Vote.gov)</span>
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </a>

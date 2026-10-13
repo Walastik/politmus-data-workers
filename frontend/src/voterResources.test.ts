@@ -56,4 +56,21 @@ describe('STATE_VOTER_RESOURCES and getVoterResources', () => {
     expect(undef.name).toBe('United States')
     expect(undef.voteGovUrl).toBe('https://vote.gov')
   })
+
+  it('every state has official https polling-place and registration-status links', () => {
+    for (const [code, res] of Object.entries(STATE_VOTER_RESOURCES)) {
+      for (const key of ['pollingPlaceUrl', 'registrationStatusUrl'] as const) {
+        const url = res[key]
+        expect(url, `${code} ${key}`).toMatch(/^https:\/\//)
+        expect(new URL(url!).hostname, `${code} ${key}`).not.toMatch(/vote\.org$/)
+      }
+    }
+  })
+
+  it('nationwide fallback has no state-specific official links', () => {
+    const us = getVoterResources(null)
+    expect(us.pollingPlaceUrl).toBeUndefined()
+    expect(us.registrationStatusUrl).toBeUndefined()
+  })
 })
+

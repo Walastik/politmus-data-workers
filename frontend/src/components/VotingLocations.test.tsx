@@ -53,6 +53,38 @@ function createMockVoterInfo(overrides: Partial<VoterInfo>): VoterInfo {
 }
 
 describe('VotingLocations Component', () => {
+  it('live data without election-office links still shows official state links', () => {
+    render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({
+          pollingLocations: [createMockLocation({ locationName: 'Central Library' })],
+        })}
+        loading={false}
+        stateCode="TX"
+      />,
+    )
+    expect(screen.getByText('Central Library')).toBeInTheDocument()
+    const official = screen.getByRole('link', { name: /Find Polling Place & Check Registration \(Official\)/ })
+    expect(official).toHaveAttribute('href', 'https://teamrv-mvp.sos.texas.gov/MVP/mvp.do')
+  })
+
+  it('live data with election-office links does not duplicate the state links', () => {
+    render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({
+          pollingLocations: [createMockLocation({ locationName: 'Central Library' })],
+          adminBodies: {
+            state: createMockAdminBody({ electionRegistrationUrl: 'https://sos.example.gov/register' }),
+            local: null,
+          },
+        })}
+        loading={false}
+        stateCode="TX"
+      />,
+    )
+    expect(screen.queryByText(/Voter Resources for Texas/)).not.toBeInTheDocument()
+  })
+
   it('shows the first 5 locations of a long list and expands on request', () => {
     const pollingLocations = Array.from({ length: 75 }, (_, i) =>
       createMockLocation({ locationName: `Vote Center ${i + 1}`, line1: `${i + 1} Main St` }),
