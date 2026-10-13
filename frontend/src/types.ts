@@ -1096,6 +1096,29 @@ export const STATE_VOTER_RESOURCES: Record<string, StateVoterResource> = {
   },
 }
 
+// Official links whose .gov address redirects elsewhere. votetexas.gov itself
+// links straight to the Civix-hosted portal (checked 2026-10-12).
+const PORTAL_REDIRECTS: Record<string, string> = {
+  'teamrv-mvp.sos.texas.gov': 'goelect.txelections.civixapps.com',
+}
+
+// Host a voter actually lands on, when it is not a .gov/.us domain. Several
+// states run official portals on other domains (Texas on its vendor's
+// civixapps.com, Arizona on arizona.vote, ...), which can look like phishing
+// without a word of explanation.
+export function unfamiliarPortalHost(url?: string): string | null {
+  if (!url) return null
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+  host = PORTAL_REDIRECTS[host] ?? host
+  if (/\.(gov|us)$/.test(host)) return null
+  return host.replace(/^www\./, '')
+}
+
 export function getVoterResources(stateCode?: string | null): StateVoterResource {
   if (!stateCode) {
     return {

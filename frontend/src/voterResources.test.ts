@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { STATE_VOTER_RESOURCES, getVoterResources } from './types'
+import { STATE_VOTER_RESOURCES, getVoterResources, unfamiliarPortalHost } from './types'
 
 describe('STATE_VOTER_RESOURCES and getVoterResources', () => {
   const EXPECTED_STATES = [
@@ -71,6 +71,16 @@ describe('STATE_VOTER_RESOURCES and getVoterResources', () => {
     const us = getVoterResources(null)
     expect(us.pollingPlaceUrl).toBeUndefined()
     expect(us.registrationStatusUrl).toBeUndefined()
+  })
+
+  it('flags official portals that land outside .gov/.us domains', () => {
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.TX.pollingPlaceUrl)).toBe(
+      'goelect.txelections.civixapps.com',
+    )
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.AZ.pollingPlaceUrl)).toBe('my.arizona.vote')
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.CA.pollingPlaceUrl)).toBeNull()
+    expect(unfamiliarPortalHost(STATE_VOTER_RESOURCES.MN.pollingPlaceUrl)).toBeNull()
+    expect(unfamiliarPortalHost(undefined)).toBeNull()
   })
 })
 

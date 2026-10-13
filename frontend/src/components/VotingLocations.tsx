@@ -24,6 +24,7 @@ import {
 import {
   formatCivicAddress,
   getVoterResources,
+  unfamiliarPortalHost,
   type AdminBody,
   type VoterInfo,
   type VoterLocation,
@@ -735,6 +736,13 @@ function StaticFallback({ stateCode }: { stateCode?: string | null }) {
   const resources = getVoterResources(stateCode)
   const { pollingPlaceUrl, registrationStatusUrl } = resources
   const samePage = pollingPlaceUrl && pollingPlaceUrl === registrationStatusUrl
+  const portalHosts = [
+    ...new Set(
+      [pollingPlaceUrl, samePage ? undefined : registrationStatusUrl]
+        .map(unfamiliarPortalHost)
+        .filter((host): host is string => Boolean(host)),
+    ),
+  ]
   const primaryClass =
     'inline-flex items-center gap-1.5 rounded bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-blue-500'
   const secondaryClass =
@@ -790,6 +798,14 @@ function StaticFallback({ stateCode }: { stateCode?: string | null }) {
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </a>
       </div>
+
+      {portalHosts.length > 0 && (
+        <p className="mt-3 text-xs text-slate-500">
+          The official {portalHosts.length > 1 ? 'links open' : 'link opens'} {resources.name}'s
+          voter portal at <span className="font-medium text-slate-400">{portalHosts.join(' and ')}</span>,
+          the address {resources.name}'s election office uses for it, so it won't look like a .gov site.
+        </p>
+      )}
     </div>
   )
 }

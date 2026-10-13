@@ -84,6 +84,15 @@ describe('VotingLocations Component', () => {
     click.mockRestore()
   })
 
+  it('explains official portals on unfamiliar domains', () => {
+    const { unmount } = render(<VotingLocations voterInfo={null} loading={false} stateCode="TX" />)
+    expect(screen.getByText('goelect.txelections.civixapps.com')).toBeInTheDocument()
+    unmount()
+
+    render(<VotingLocations voterInfo={null} loading={false} stateCode="CA" />)
+    expect(screen.queryByText(/voter portal at/)).not.toBeInTheDocument()
+  })
+
   it('live data without election-office links still shows official state links', () => {
     render(
       <VotingLocations
