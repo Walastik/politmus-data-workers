@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import importlib
+import importlib.util
 import json
 import os
 import sys
@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -65,7 +66,8 @@ LOCK_PATH = os.getenv(
     os.path.join(tempfile.gettempdir(), "politmus_official_positions.lock"),
 )
 
-LOCAL_CONFIG_MODULE = "positions_llm_config"
+# Gitignored local prompts, next to scripts/llm_config.py for the bill classifier.
+LOCAL_CONFIG_PATH = Path(__file__).resolve().parent / "scripts" / "positions_llm_config.py"
 
 # Statuses where the site was read and the model ran (or had nothing to read).
 EXTRACTED_STATUSES = ("ok", "no_positions", "no_issue_pages")
@@ -81,23 +83,25 @@ class Prompts:
     link_selection: str
 
 
-def load_local_prompts() -> Prompts:
-    """Prompts from the gitignored backend/positions_llm_config.py."""
-    try:
-        config = importlib.import_module(LOCAL_CONFIG_MODULE)
-    except ModuleNotFoundError as exc:
-        if exc.name != LOCAL_CONFIG_MODULE:
-            raise
+def load_local_prompts(path: Path = LOCAL_CONFIG_PATH) -> Prompts:
+    """Prompts from the gitignored backend/scripts/positions_llm_config.py.
+
+    Loaded by file path so the worker finds it from any working directory.
+    """
+    if not path.is_file():
         raise RuntimeError(
-            "backend/positions_llm_config.py is missing. Copy "
-            "positions_llm_config.example.py to positions_llm_config.py and "
-            "fill in the prompts (the file is gitignored)."
-        ) from None
+            f"{path} is missing. Copy backend/scripts/positions_llm_config.example.py "
+            "to backend/scripts/positions_llm_config.py and fill in the prompts "
+            "(the file is gitignored)."
+        )
+    spec = importlib.util.spec_from_file_location("positions_llm_config", path)
+    config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config)
     positions = getattr(config, "POSITIONS_SYSTEM_PROMPT", "") or ""
     link_selection = getattr(config, "LINK_SELECTION_PROMPT", "") or ""
     if not positions.strip() or not link_selection.strip():
         raise RuntimeError(
-            "positions_llm_config.py must define non-empty POSITIONS_SYSTEM_PROMPT "
+            f"{path.name} must define non-empty POSITIONS_SYSTEM_PROMPT "
             "and LINK_SELECTION_PROMPT."
         )
     return Prompts(positions, link_selection)
@@ -331,7 +335,7 @@ def run_positions(
         else:
             prompts = prompts or load_local_prompts()
             version = extractor_version((prompts.positions, prompts.link_selection), model_name)
-            stats["prompt"] = f"{LOCAL_CONFIG_MODULE}.py ({version.split('|')[1]})"
+            stats["prompt"] = f"scripts/{LOCAL_CONFIG_PATH.name} ({version.split('|')[1]})"
         stats["version"] = version
 
         rows = select_officials(

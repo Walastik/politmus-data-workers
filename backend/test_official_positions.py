@@ -3,8 +3,9 @@ import os
 import threading
 import unittest
 from datetime import datetime, timedelta
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -32,7 +33,7 @@ from services.official_positions import (
     quote_in_text,
     verify_positions,
 )
-from official_positions import Prompts, extract_positions, is_due, load_local_prompts
+from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, load_local_prompts
 
 OFFICIAL = SimpleNamespace(
     id="E000001",
@@ -234,22 +235,34 @@ class VersionAndHashTests(unittest.TestCase):
 
 
 class LocalPromptsTests(unittest.TestCase):
+    def _config(self, body: str) -> Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "positions_llm_config.py"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_default_path_is_in_scripts(self):
+        self.assertEqual(LOCAL_CONFIG_PATH.parent.name, "scripts")
+
     def test_missing_local_config_explains_how_to_create_it(self):
-        with patch("official_positions.LOCAL_CONFIG_MODULE", "positions_llm_config_does_not_exist"):
-            with self.assertRaises(RuntimeError) as ctx:
-                load_local_prompts()
-        self.assertIn("positions_llm_config.example.py", str(ctx.exception))
+        with self.assertRaises(RuntimeError) as ctx:
+            load_local_prompts(Path(tempfile.gettempdir()) / "no_such_dir" / "positions_llm_config.py")
+        self.assertIn("scripts/positions_llm_config.example.py", str(ctx.exception))
 
     def test_empty_prompts_are_rejected(self):
-        fake = SimpleNamespace(POSITIONS_SYSTEM_PROMPT="  ", LINK_SELECTION_PROMPT="links")
-        with patch("official_positions.importlib.import_module", return_value=fake):
-            with self.assertRaises(RuntimeError):
-                load_local_prompts()
+        path = self._config('POSITIONS_SYSTEM_PROMPT = "  "\nLINK_SELECTION_PROMPT = "links"\n')
+        with self.assertRaises(RuntimeError):
+            load_local_prompts(path)
 
     def test_loads_both_prompts(self):
-        fake = SimpleNamespace(POSITIONS_SYSTEM_PROMPT="positions", LINK_SELECTION_PROMPT="links")
-        with patch("official_positions.importlib.import_module", return_value=fake):
-            self.assertEqual(load_local_prompts(), Prompts("positions", "links"))
+        path = self._config('POSITIONS_SYSTEM_PROMPT = "positions"\nLINK_SELECTION_PROMPT = "links"\n')
+        self.assertEqual(load_local_prompts(path), Prompts("positions", "links"))
+
+    def test_example_template_loads(self):
+        example = LOCAL_CONFIG_PATH.with_name("positions_llm_config.example.py")
+        prompts = load_local_prompts(example)
+        self.assertIn("mechanism:", prompts.positions)
 
 
 class IsDueTests(unittest.TestCase):

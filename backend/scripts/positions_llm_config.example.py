@@ -1,6 +1,7 @@
-"""Template for the gitignored backend/positions_llm_config.py.
+"""Template for the gitignored backend/scripts/positions_llm_config.py.
 
-Copy this file to positions_llm_config.py and write the prompts there. The
+Copy this file to positions_llm_config.py (same folder) and write the
+prompts there. The
 official_positions.py worker imports both names; changing either one changes
 the extractor version, so every official is re-extracted on their next run.
 

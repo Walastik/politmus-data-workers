@@ -6,7 +6,7 @@ bill_effects (see services/bill_effects.py) so the accountability engine can
 compare what an official says with how they vote.
 
 The prompts themselves are not in the repo: they live in the gitignored
-backend/positions_llm_config.py (see positions_llm_config.example.py).
+backend/scripts/positions_llm_config.py (see positions_llm_config.example.py there).
 """
 
 from __future__ import annotations

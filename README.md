@@ -159,7 +159,7 @@ All Congress.gov requests pause briefly between calls and retry with exponential
 Builds a citable record of what each official **says** they stand for, so it can later be compared with how they vote. For each current federal member with a `website_url` it:
 
 1. **Crawls** the official site (from Congress.gov). It follows nav links that look like an issues section (`Issues`, `Priorities`, `On the Issues`, `In Congress`, …) and then the issue pages beneath them. If none are found it tries common paths (`/issues`, `/priorities`, …), then asks the model to pick from the homepage's links. Press releases, news, contact forms and constituent services are skipped. The crawler stays on the official's own host, obeys `robots.txt`, waits 3 seconds between requests to a site, fetches at most 12 HTML pages, does not run JavaScript, and identifies itself with an honest User-Agent (`POLITMUS_CRAWLER_UA`). Sites that answer 403 are recorded as `blocked` and are not worked around.
-2. **Extracts** positions with the local Ollama model. Page text (markdown with headings kept) is split at headings into chunks of about 10,000 characters, and each chunk is its own small request (fixed `num_ctx`, default 16k; `--concurrency 2` parallel requests). The prompts come from the gitignored `backend/positions_llm_config.py` (see below). Each request also gets the most-used bill target names so both sides reuse the same nouns.
+2. **Extracts** positions with the local Ollama model. Page text (markdown with headings kept) is split at headings into chunks of about 10,000 characters, and each chunk is its own small request (fixed `num_ctx`, default 16k; `--concurrency 2` parallel requests). The prompts come from the gitignored `backend/scripts/positions_llm_config.py` (see below). Each request also gets the most-used bill target names so both sides reuse the same nouns.
 3. **Verifies** every position: its `evidence_quote` must appear on the page (ignoring whitespace, curly quotes, markdown, and case). Positions whose quote is not on the page are discarded and counted as "Rejected (bad quote)".
 4. **Saves** one row per (target, mechanism) in `official_stances`. Each row has `target_id` (shared `policy_targets`, joins `bill_effects`), `target_name`/`target_slug` (joins `bills.classification_metadata` intents), `policy_area` (CRS area, joins `bills.policy_area`), `mechanism`, `direction`, `emphasis`, `issue_label`, `summary`, `evidence_quote`, and `source_url`. Crawled page text goes in `official_source_pages`. `GET /api/officials/{id}` returns the rows as `stated_positions`.
 
@@ -182,10 +182,10 @@ On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`
 15 2 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --limit 40 >> /tmp/official_positions.log 2>&1
 ```
 
-**Prompts are local, not in the repo.** Like `backend/scripts/llm_config.py` for the bill classifier, the worker reads `POSITIONS_SYSTEM_PROMPT` and `LINK_SELECTION_PROMPT` from `backend/positions_llm_config.py`, which is gitignored. Create it on the machine that runs the worker:
+**Prompts are local, not in the repo.** Like `backend/scripts/llm_config.py` for the bill classifier, the worker reads `POSITIONS_SYSTEM_PROMPT` and `LINK_SELECTION_PROMPT` from `backend/scripts/positions_llm_config.py`, which is gitignored. Create it on the machine that runs the worker:
 
 ```bash
-cp backend/positions_llm_config.example.py backend/positions_llm_config.py   # then write the prompts
+cp backend/scripts/positions_llm_config.example.py backend/scripts/positions_llm_config.py   # then write the prompts
 ```
 
 Without it, every mode except `--crawl-only` stops with an error saying the file is missing. Editing either prompt changes the extractor version (a hash of both prompts plus the model), so each official is re-extracted on their next run, or right away from stored pages with `--extract-only`.
