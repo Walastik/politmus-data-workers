@@ -29,6 +29,8 @@ REAL_FIXTURE_PATH = FIXTURES_DIR / "voter_info_2000.json"
 # Hand-written response following the documented voterinfo schema. The real test
 # election currently returns no locations, so this covers the "live" parsing path.
 SYNTHETIC_LIVE_FIXTURE_PATH = FIXTURES_DIR / "voter_info_synthetic_live.json"
+# Real response for a live address (1600 Pennsylvania Ave NW, DC) in the 2026 midterm.
+LIVE_DC_FIXTURE_PATH = FIXTURES_DIR / "voter_info_live_dc.json"
 # Real /civicinfo/v2/elections response (2026 midterm plus Google's two test elections).
 ELECTIONS_FIXTURE_PATH = FIXTURES_DIR / "civic_elections.json"
 
@@ -784,3 +786,45 @@ def test_voter_info_request_state_hint_normalized():
     assert VoterInfoRequest(address="1 Main St", state="Texas").state is None
     assert VoterInfoRequest(address="1 Main St", state=None).state is None
 
+
+
+@pytest.mark.asyncio
+async def test_voter_info_real_live_dc_response(client):
+    """Real live response: vote-center lists, multi-line hours, no admin bodies, no status."""
+    with open(LIVE_DC_FIXTURE_PATH, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    with respx.mock:
+        respx.get(CIVIC_VOTER_INFO_URL).respond(200, json=raw)
+        res = await client.post(
+            "/api/voter-info",
+            json={"address": "1600 Pennsylvania Ave NW, Washington, DC 20500", "state": "DC"},
+        )
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["uiState"] == "live"
+    assert data["upstreamStatus"] == "success"
+    assert data["mailOnly"] is False
+    assert data["election"]["id"] == raw["election"]["id"]
+    assert data["election"]["date"] == raw["election"]["electionDay"]
+
+    for ours, theirs in (
+        ("pollingLocations", "pollingLocations"),
+        ("earlyVoteSites", "earlyVoteSites"),
+        ("dropOffLocations", "dropOffLocations"),
+    ):
+        assert len(data[ours]) == len(raw[theirs]) > 0
+
+    poll, raw_poll = data["pollingLocations"][0], raw["pollingLocations"][0]
+    assert poll["locationName"] == raw_poll["address"]["locationName"]
+    assert poll["line1"] == raw_poll["address"]["line1"]
+    assert poll["zip"] == raw_poll["address"]["zip"]
+    assert poll["pollingHours"] == raw_poll["pollingHours"]
+    assert poll["sources"] == [{"name": "Voting Information Project", "official": True}]
+
+    # Early voting hours are one line per day and must survive intact
+    assert "\n" in data["earlyVoteSites"][0]["pollingHours"]
+
+    # DC sends state info without an electionAdministrationBody
+    assert data["adminBodies"] == {"state": None, "local": None}
