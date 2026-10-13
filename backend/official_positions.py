@@ -45,6 +45,8 @@ from services.official_positions import (
     target_vocabulary,
     upsert_source_pages,
     verify_positions,
+    REJECT_BILL_TARGET,
+    REJECT_QUOTE,
 )
 
 load_dotenv()
@@ -191,8 +193,12 @@ def make_chat_fn(
 
     def chat_fn(messages, format_schema) -> str:
         details = []
+        # The retry gets double the output budget, but never more than the
+        # context window leaves after the prompt (~3 characters per token).
+        prompt_tokens = sum(len(m.get("content") or "") for m in messages) // 3
+        retry_budget = max(num_predict, min(num_predict * 2, num_ctx - prompt_tokens - 256))
         for attempt, (temperature, budget) in enumerate(
-            ((0, num_predict), (0.2, num_predict * 2)), start=1
+            ((0, num_predict), (0.2, retry_budget)), start=1
         ):
             response = call(messages, format_schema, temperature, budget)
             message = _field(response, "message")
@@ -306,11 +312,11 @@ def extract_positions(
     """Map each chunk through the model, verify quotes, and merge.
 
     Raises if any chunk fails, so a partial result is never saved.
-    Returns (merged positions, chunk count, rejected count).
+    Returns (merged positions, chunk count, rejection counts by reason).
     """
     chunks = [chunk for source in sources for chunk in chunk_source(source, chunk_chars)]
     if not chunks:
-        return [], 0, 0
+        return [], 0, {}
     total = len(chunks)
     if log:
         log(f"  sending {total} chunk(s) to the model...")
@@ -327,7 +333,7 @@ def extract_positions(
             where = chunk.url + (f" [{chunk.heading}]" if chunk.heading else "")
             raise RuntimeError(f"chunk {number}/{total} {where}: {exc}") from exc
         if log:
-            log(f"    chunk {number}/{total}: {len(result[0])} kept, {result[1]} rejected")
+            log(f"    chunk {number}/{total}: {len(result[0])} kept, {sum(result[1].values())} rejected")
         return result
 
     numbered = list(enumerate(chunks, start=1))
@@ -338,7 +344,10 @@ def extract_positions(
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(run, numbered))
     verified = [item for kept, _ in results for item in kept]
-    rejected = sum(count for _, count in results)
+    rejected: dict[str, int] = {}
+    for _, counts in results:
+        for reason, count in counts.items():
+            rejected[reason] = rejected.get(reason, 0) + count
     return merge_positions(verified), len(chunks), rejected
 
 
@@ -366,6 +375,7 @@ def _empty_stats(model, dry_run):
         "no_positions": 0,
         "stances_saved": 0,
         "rejected_unverified": 0,
+        "rejected_bill_target": 0,
         "chunks": 0,
         "crawled_only": 0,
         "blocked": 0,
@@ -605,10 +615,12 @@ def _process_official(
             log=log,
         )
         stats["chunks"] += chunk_count
-        stats["rejected_unverified"] += rejected
+        stats["rejected_unverified"] += rejected.get(REJECT_QUOTE, 0)
+        stats["rejected_bill_target"] += rejected.get(REJECT_BILL_TARGET, 0)
+        reasons = ", ".join(f"{n} {reason}" for reason, n in rejected.items() if n) or "none"
         log(
             f"  -> {len(positions)} position(s) from {chunk_count} chunk(s) "
-            f"in {time.time() - t0:.1f}s ({rejected} rejected: quote not on page)"
+            f"in {time.time() - t0:.1f}s (rejected: {reasons})"
         )
 
         if dry_run:
@@ -730,6 +742,7 @@ def print_stats(stats: dict) -> None:
     print(f"  Stances saved:        {stats['stances_saved']}")
     print(f"  Chunks sent to model: {stats['chunks']}")
     print(f"  Rejected (bad quote): {stats['rejected_unverified']}")
+    print(f"  Rejected (bill name): {stats['rejected_bill_target']}")
     if stats["crawled_only"]:
         print(f"  Crawled only:         {stats['crawled_only']}")
     print(f"  Blocked:              {stats['blocked']}")

@@ -27,6 +27,9 @@ from services.official_positions import (
     combined_hash,
     extractor_version,
     make_link_selector,
+    REJECT_BILL_TARGET,
+    REJECT_QUOTE,
+    is_bill_name,
     merge_positions,
     official_direction,
     parse_positions,
@@ -144,7 +147,7 @@ class QuoteVerificationTests(unittest.TestCase):
             position(target_name="Fossil Fuels", mechanism="regulation", evidence_quote="We will ban fracking nationwide immediately."),
         ))
         kept, rejected = verify_positions(output, Chunk("https://x.gov/congress", "Climate", CONGRESS_TEXT, 7))
-        self.assertEqual(rejected, 1)
+        self.assertEqual(rejected, {REJECT_QUOTE: 1, REJECT_BILL_TARGET: 0})
         self.assertEqual([k.position.target_name for k in kept], ["Renewable Energy"])
         self.assertEqual(kept[0].source_url, "https://x.gov/congress")
         self.assertEqual(kept[0].page_id, 7)
@@ -196,6 +199,43 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(sent[0][0]["content"], "PICK LINKS")
 
 
+class BillNameTargetTests(unittest.TestCase):
+    def test_bill_and_act_names_are_detected(self):
+        for name in (
+            "National Defense Authorization Act",
+            "Medicare for All Act of 2021",
+            "One Big Beautiful Bill Act",
+            "Inflation Reduction Act",
+            "H.R. 1976",
+            "S. 22",
+        ):
+            self.assertTrue(is_bill_name(name), name)
+
+    def test_policy_nouns_and_standing_laws_are_kept(self):
+        for name in (
+            "Medicaid",
+            "Faircloth Amendment",
+            "Affordable Care Act",
+            "voting rights act",
+            "Clean Water Act Enforcement",
+            "Impact Aid",
+        ):
+            self.assertFalse(is_bill_name(name), name)
+
+    def test_verify_rejects_bill_name_targets_separately(self):
+        output = parse_positions(model_json(
+            position(),
+            position(
+                target_name="Clean Jobs Act",
+                mechanism="regulation",
+                evidence_quote="The Congresswoman’s first bill was the Clean Jobs Act.",
+            ),
+        ))
+        kept, rejected = verify_positions(output, Chunk("u", "Climate", CONGRESS_TEXT))
+        self.assertEqual([k.position.target_name for k in kept], ["Renewable Energy"])
+        self.assertEqual(rejected, {REJECT_QUOTE: 0, REJECT_BILL_TARGET: 1})
+
+
 class StanceTests(unittest.TestCase):
     def test_official_direction_follows_stance(self):
         cases = {
@@ -231,14 +271,31 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].direction, "increase")
 
-    def test_conflicting_directions_become_mixed(self):
+    def test_weighted_majority_wins_over_a_weaker_conflict(self):
+        # AOC: "Voting Rights" came out "mixed" from one off-phrased chunk.
         merged = merge_positions([
-            self._verified(direction="increase", emphasis="medium"),
+            self._verified(direction="increase", emphasis="high", summary="strong"),
             self._verified(target_name="renewable energy", direction="decrease", emphasis="low"),
         ])
         self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].direction, "increase")
+        self.assertEqual(merged[0].position.summary, "strong")
+
+    def test_two_weaker_statements_outvote_one_strong(self):
+        merged = merge_positions([
+            self._verified(direction="increase", emphasis="high"),
+            self._verified(direction="decrease", emphasis="medium", summary="a"),
+            self._verified(direction="decrease", emphasis="medium", summary="b"),
+        ])
+        self.assertEqual(merged[0].direction, "decrease")
+        self.assertEqual(merged[0].position.direction, "decrease")
+
+    def test_exact_tie_becomes_mixed(self):
+        merged = merge_positions([
+            self._verified(direction="increase", emphasis="medium"),
+            self._verified(direction="decrease", emphasis="medium"),
+        ])
         self.assertEqual(merged[0].direction, "mixed")
-        self.assertEqual(merged[0].position.emphasis, "medium")
 
     def test_highest_emphasis_supplies_statement_and_sorts_first(self):
         merged = merge_positions([
@@ -362,7 +419,7 @@ class ExtractPositionsTests(unittest.TestCase):
             OFFICIAL, sources, prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=2
         )
         self.assertEqual(chunks, 2)
-        self.assertEqual(rejected, 1)
+        self.assertEqual(rejected[REJECT_QUOTE], 1)
         self.assertEqual(sorted(m.position.target_name for m in merged), ["Medicaid", "Renewable Energy"])
 
     def test_any_chunk_failure_raises(self):
@@ -423,6 +480,17 @@ class ChatFnTests(unittest.TestCase):
         self.assertEqual(self.make(client)([], {}), '{"positions": []}')
         self.assertEqual([c["options"]["num_predict"] for c in client.calls], [100, 200])
         self.assertEqual(client.calls[0]["options"]["num_ctx"], client.calls[1]["options"]["num_ctx"])
+
+    def test_retry_budget_stays_inside_the_context_window(self):
+        from official_positions import make_chat_fn
+
+        client = FakeOllamaClient([ollama_response(""), ollama_response('{"positions": []}')])
+        chat_fn = make_chat_fn("m", "h", 1, num_ctx=16384, num_predict=8192, client=client)
+        chat_fn([{"role": "user", "content": "x" * 15000}], {})  # ~5000 prompt tokens
+        budgets = [c["options"]["num_predict"] for c in client.calls]
+        self.assertEqual(budgets[0], 8192)
+        self.assertLessEqual(budgets[1], 16384 - 5000)
+        self.assertGreaterEqual(budgets[1], 8192)
 
     def test_error_explains_why_the_answer_was_empty(self):
         client = FakeOllamaClient([

@@ -34,7 +34,7 @@ from services.bill_effects import (
 
 # Bump when the output schema or verification rules change so every official
 # is re-extracted on the next run.
-SCHEMA_VERSION = "positions-v2"
+SCHEMA_VERSION = "positions-v3"
 SOURCE_OFFICIAL_SITE = "official_site"
 
 DEFAULT_CHUNK_CHARS = 10_000
@@ -403,13 +403,62 @@ def quote_in_text(quote: str, source_text: str) -> bool:
     return needle in normalize_for_match(source_text)
 
 
-def verify_positions(output: StatedPositionsOutput, chunk: Chunk) -> tuple[list[VerifiedPosition], int]:
-    """Keep positions whose quote is in the chunk and whose target is usable."""
+# Bill or act names ("National Defense Authorization Act", "Medicare for All
+# Act of 2021", "H.R. 1976") say nothing about which policy moves which way, so
+# they can never be matched to a bill effect. Amendments ("Faircloth
+# Amendment") are kept: they name a standing provision.
+_BILL_NAME_RE = re.compile(
+    r"(\b(Act|Bill)(\s+of\s+\d{4})?$)|(^(H\.?\s?R|S|H\.?\s?Res|S\.?\s?Res)\.?\s?\d+\b)",
+    re.IGNORECASE,
+)
+
+REJECT_QUOTE = "quote not on page"
+REJECT_BILL_TARGET = "bill name as target"
+
+
+# Long-standing laws that people treat as the program itself ("protect the
+# ACA"); bills and recent acts are still rejected.
+STANDING_LAW_TARGETS = frozenset(
+    slugify_target(name)
+    for name in (
+        "Affordable Care Act",
+        "Americans with Disabilities Act",
+        "Civil Rights Act",
+        "Clean Air Act",
+        "Clean Water Act",
+        "Endangered Species Act",
+        "Fair Housing Act",
+        "Fair Labor Standards Act",
+        "Freedom of Information Act",
+        "National Environmental Policy Act",
+        "Safe Drinking Water Act",
+        "Voting Rights Act",
+    )
+)
+
+
+def is_bill_name(target_name: str) -> bool:
+    name = clean_target_name(target_name)
+    if slugify_target(name) in STANDING_LAW_TARGETS:
+        return False
+    return bool(_BILL_NAME_RE.search(name))
+
+
+def verify_positions(
+    output: StatedPositionsOutput, chunk: Chunk
+) -> tuple[list[VerifiedPosition], dict[str, int]]:
+    """Keep positions whose quote is in the chunk and whose target is usable.
+
+    Returns the kept positions and rejection counts by reason.
+    """
     kept: list[VerifiedPosition] = []
-    rejected = 0
+    rejected = {REJECT_QUOTE: 0, REJECT_BILL_TARGET: 0}
     for position in output.positions:
         if not slugify_target(position.target_name) or not quote_in_text(position.evidence_quote, chunk.text):
-            rejected += 1
+            rejected[REJECT_QUOTE] += 1
+            continue
+        if is_bill_name(position.target_name):
+            rejected[REJECT_BILL_TARGET] += 1
             continue
         position.target_name = clean_target_name(position.target_name)
         position.evidence_quote = clean_quote(position.evidence_quote)
@@ -418,29 +467,34 @@ def verify_positions(output: StatedPositionsOutput, chunk: Chunk) -> tuple[list[
 
 
 _EMPHASIS_RANK = {"low": 0, "medium": 1, "high": 2}
+_EMPHASIS_WEIGHT = {"low": 1, "medium": 2, "high": 3}
 
 
 def merge_positions(verified: list[VerifiedPosition]) -> list[VerifiedPosition]:
     """One position per (target slug, mechanism).
 
-    Conflicting desired directions become "mixed"; the highest-emphasis statement
-    supplies the summary and quote. Result is capped and sorted by emphasis.
+    Statements about the same target and mechanism vote on the official's
+    desired direction, weighted by emphasis (high 3, medium 2, low 1). The
+    winner's strongest statement supplies the summary and quote; a tie
+    between different directions becomes "mixed". Result is capped and
+    sorted by emphasis.
     """
-    merged: dict[tuple[str, str], VerifiedPosition] = {}
-    directions: dict[tuple[str, str], set[str]] = {}
+    groups: dict[tuple[str, str], list[VerifiedPosition]] = {}
     for item in verified:
         key = (slugify_target(item.position.target_name), item.position.mechanism)
-        directions.setdefault(key, set()).add(item.direction)
-        existing = merged.get(key)
-        if existing is None or _EMPHASIS_RANK[item.position.emphasis] > _EMPHASIS_RANK[existing.position.emphasis]:
-            merged[key] = VerifiedPosition(
-                item.position.model_copy(), item.source_url, item.page_id, item.direction
-            )
+        groups.setdefault(key, []).append(item)
+
     out = []
-    for key, item in merged.items():
-        if len(directions[key]) > 1:
-            item.direction = "mixed"
-        out.append(item)
+    for items in groups.values():
+        weights: dict[str, int] = {}
+        for item in items:
+            weights[item.direction] = weights.get(item.direction, 0) + _EMPHASIS_WEIGHT[item.position.emphasis]
+        best = max(weights.values())
+        leaders = [d for d, w in weights.items() if w == best]
+        direction = leaders[0] if len(leaders) == 1 else "mixed"
+        pool = [i for i in items if i.direction == direction] or items
+        chosen = max(pool, key=lambda i: _EMPHASIS_RANK[i.position.emphasis])
+        out.append(VerifiedPosition(chosen.position.model_copy(), chosen.source_url, chosen.page_id, direction))
     out.sort(key=lambda v: (-_EMPHASIS_RANK[v.position.emphasis], v.position.policy_area, v.position.target_name))
     return out[:MAX_STANCES_PER_OFFICIAL]
 
