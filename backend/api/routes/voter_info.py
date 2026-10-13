@@ -24,8 +24,8 @@ from api.schemas import (
 )
 from config import (
     get_civic_election_id_override,
+    get_client_ip_header,
     get_google_civic_api_key,
-    get_trusted_proxy,
 )
 
 # Suppress request URL logging from lower-level HTTP clients to prevent address leakage
@@ -38,6 +38,9 @@ router = APIRouter()
 
 CIVIC_VOTER_INFO_URL = "https://www.googleapis.com/civicinfo/v2/voterinfo"
 REQUEST_TIMEOUT_SECONDS = 8.0
+# Google sends no Cache-Control on voterinfo responses, so without a default
+# nothing would ever be cached. Upstream max-age (capped at 1h) wins when present.
+DEFAULT_CACHE_TTL_SECONDS = 900
 
 
 def sanitize_url(url: Optional[str]) -> Optional[str]:
@@ -55,13 +58,18 @@ def sanitize_url(url: Optional[str]) -> Optional[str]:
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP, honoring X-Forwarded-For only when TRUSTED_PROXY is enabled."""
-    if get_trusted_proxy():
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            ip = forwarded.split(",")[0].strip()
-            if ip:
-                return ip
+    """Resolve the client IP for rate limiting.
+
+    When CLIENT_IP_HEADER is configured, trust only that header (our nginx
+    overwrites it from Fly-Client-IP, so clients cannot spoof it). Otherwise use
+    the socket peer. X-Forwarded-For is never trusted: its first entry is
+    client-controlled.
+    """
+    header = get_client_ip_header()
+    if header:
+        ip = request.headers.get(header, "").strip()
+        if ip:
+            return ip
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
@@ -158,19 +166,19 @@ response_cache = VoterInfoCache()
 
 
 def parse_cache_control_ttl(header_val: Optional[str]) -> Optional[int]:
-    """Parse Cache-Control: max-age from upstream, capping at 3600 seconds."""
+    """Parse upstream Cache-Control into a TTL capped at 3600 seconds.
+
+    Returns None when the header gives no guidance (caller applies a default),
+    and 0 when upstream forbids caching (no-store, no-cache, private, max-age=0).
+    """
     if not header_val:
         return None
+    if re.search(r"\b(no-store|no-cache|private)\b", header_val, re.IGNORECASE):
+        return 0
     match = re.search(r"max-age=(\d+)", header_val, re.IGNORECASE)
     if not match:
         return None
-    try:
-        seconds = int(match.group(1))
-        if seconds <= 0:
-            return None
-        return min(seconds, 3600)
-    except ValueError:
-        return None
+    return min(int(match.group(1)), 3600)
 
 
 def parse_location(item: dict) -> LocationOut:
@@ -410,10 +418,14 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
             address_hash,
         )
 
-        if "election" in err_msg or "election" in err_reason or err_reason == "electionunknown":
+        # Observed upstream 400s: unknown election -> message "Election unknown",
+        # reason "invalid" (generic, so the message is the only signal); unparseable
+        # address -> message "Failed to parse address", reason "parseError".
+        # Exact matches first, keyword fallback in case Google rewords them.
+        if err_msg == "election unknown" or "election" in err_msg or "election" in err_reason:
             response_model = VoterInfoOut(
                 ui_state="no_election",
-                upstream_status=err_reason or "electionUnknown",
+                upstream_status="electionUnknown",
                 fetched_at=datetime.now(timezone.utc).isoformat(),
             )
             return JSONResponse(
@@ -423,13 +435,14 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
             )
 
         if (
-            "address" in err_msg
+            err_reason == "parseerror"
+            or err_msg == "failed to parse address"
+            or "address" in err_msg
             or "address" in err_reason
-            or err_reason in ("addressunparseable", "noaddressparameter")
         ):
             response_model = VoterInfoOut(
                 ui_state="address_problem",
-                upstream_status=err_reason or "addressUnparseable",
+                upstream_status="addressUnparseable",
                 fetched_at=datetime.now(timezone.utc).isoformat(),
             )
             return JSONResponse(
@@ -509,7 +522,9 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
 
     admin_bodies = AdminBodiesOut(state=state_body, local=local_body)
 
-    # Determine uiState
+    # Determine uiState. Note: no real voterinfo response observed so far (VIP test
+    # election, a live DC address) has included a top-level "status" field, so the
+    # status-driven branches below are unverified against live data.
     ui_state: str
     status_lower = upstream_status_str.lower()
 
@@ -554,7 +569,9 @@ async def get_voter_info(request: Request, body: VoterInfoRequest):
     # Check upstream Cache-Control
     cache_control = upstream_response.headers.get("cache-control")
     ttl = parse_cache_control_ttl(cache_control)
-    if ttl is not None and ttl > 0:
+    if ttl is None:
+        ttl = DEFAULT_CACHE_TTL_SECONDS
+    if ttl > 0:
         await response_cache.set(cache_key, response_dict, ttl)
 
     return JSONResponse(

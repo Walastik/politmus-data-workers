@@ -99,6 +99,90 @@ describe('AddressLookup Integration & Race Handling', () => {
     })
   })
 
+  it('does not call voter-info until the Voting Locations tab is opened', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/lookup')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ normalized_input: { line1: 'Test St', state: 'TX' }, representatives: [] }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+      }
+      if (url.includes('/api/voter-info')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ uiState: 'unavailable', upstreamStatus: 'x', detail: 'x' }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }
+      return Promise.reject(new Error('Unknown url'))
+    })
+    const voterInfoCalls = () => fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/voter-info'))
+
+    render(<AddressLookup />)
+    fireEvent.change(screen.getByLabelText(/Street address/i), { target: { value: '1 Test St, Austin, TX' } })
+    fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
+
+    const votingTab = await screen.findByRole('tab', { name: /Voting Locations/i })
+    expect(voterInfoCalls()).toHaveLength(0)
+
+    fireEvent.click(votingTab)
+    expect(voterInfoCalls()).toHaveLength(1)
+
+    // Switching away and back for the same address does not refetch
+    fireEvent.click(screen.getByRole('tab', { name: /Representatives/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /Voting Locations/i }))
+    expect(voterInfoCalls()).toHaveLength(1)
+  })
+
+  it('still offers the Voting Locations tab when the representative lookup fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/lookup')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: 'Census geocoder unavailable' }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }
+      if (url.includes('/api/voter-info')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              uiState: 'no_election',
+              upstreamStatus: 'electionUnknown',
+              election: null,
+              mailOnly: false,
+              pollingLocations: [],
+              earlyVoteSites: [],
+              dropOffLocations: [],
+              adminBodies: { state: null, local: null },
+              otherElections: [],
+              fetchedAt: '2026-01-01T00:00:00Z',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+      }
+      return Promise.reject(new Error('Unknown url'))
+    })
+
+    render(<AddressLookup />)
+    fireEvent.change(screen.getByLabelText(/Street address/i), { target: { value: '1 Test St, Austin, TX' } })
+    fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
+
+    expect(await screen.findByText('Census geocoder unavailable')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /Voting Locations/i }))
+    await waitFor(() => {
+      expect(screen.queryByText('Census geocoder unavailable')).not.toBeInTheDocument()
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'panel-voting')
+    })
+  })
+
   it('aborts prior voter-info request when new address is submitted (race condition prevention)', async () => {
     const abortSignals: AbortSignal[] = []
 
@@ -130,21 +214,20 @@ describe('AddressLookup Integration & Race Handling', () => {
     render(<AddressLookup />)
 
     const input = screen.getByLabelText(/Street address/i)
-    const submitBtn = screen.getByRole('button', { name: /Find representatives/i })
 
-    // First search
+    // First search, then open the voting tab to start a (slow) voter-info request
     fireEvent.change(input, { target: { value: 'First Address, Austin, TX' } })
-    fireEvent.click(submitBtn)
+    fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
+    fireEvent.click(await screen.findByRole('tab', { name: /Voting Locations/i }))
 
     expect(abortSignals.length).toBe(1)
     expect(abortSignals[0].aborted).toBe(false)
 
-    // Wait for the lookup request to finish so button is enabled
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Find representatives/i })).not.toBeDisabled()
     })
 
-    // Second search
+    // Second search while the voting tab is open fetches immediately for the new address
     fireEvent.change(input, { target: { value: 'Second Address, Dallas, TX' } })
     fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
 

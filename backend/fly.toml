@@ -10,6 +10,8 @@ primary_region = "ord"
 
 [env]
   PORT = "8080"
+  # Set by frontend/nginx.conf from Fly-Client-IP. Safe only while the API stays Flycast-only (no public IP).
+  CLIENT_IP_HEADER = "X-Politmus-Client-IP"
   CORS_ORIGINS = "https://politmus.com,https://www.politmus.com,https://politmus-web.fly.dev,http://localhost:5173,http://127.0.0.1:5173"
 
 [http_service]

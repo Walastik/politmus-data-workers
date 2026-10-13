@@ -12,16 +12,28 @@ from api.main import app
 from api.routes.voter_info import (
     CIVIC_VOTER_INFO_URL,
     rate_limiter,
+    parse_cache_control_ttl,
     response_cache,
     sanitize_url,
 )
 
-FIXTURE_PATH = Path(__file__).parent / "tests" / "fixtures" / "voter_info_2000.json"
+FIXTURES_DIR = Path(__file__).parent / "tests" / "fixtures"
+# Real response captured by scripts/fetch_test_election_fixture.py.
+REAL_FIXTURE_PATH = FIXTURES_DIR / "voter_info_2000.json"
+# Hand-written response following the documented voterinfo schema. The real test
+# election currently returns no locations, so this covers the "live" parsing path.
+SYNTHETIC_LIVE_FIXTURE_PATH = FIXTURES_DIR / "voter_info_synthetic_live.json"
 
 
 @pytest.fixture
 def sample_vip_fixture():
-    with open(FIXTURE_PATH, "r", encoding="utf-8") as f:
+    with open(SYNTHETIC_LIVE_FIXTURE_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def real_vip_fixture():
+    with open(REAL_FIXTURE_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -31,7 +43,7 @@ def reset_app_state(monkeypatch):
     rate_limiter.clear()
     response_cache.clear()
     monkeypatch.setenv("GOOGLE_CIVIC_API_KEY", "test-civic-api-key")
-    monkeypatch.setenv("TRUSTED_PROXY", "false")
+    monkeypatch.delenv("CLIENT_IP_HEADER", raising=False)
     monkeypatch.delenv("CIVIC_ELECTION_ID_OVERRIDE", raising=False)
     yield
     rate_limiter.clear()
@@ -53,8 +65,34 @@ async def client():
 
 
 @pytest.mark.asyncio
-async def test_voter_info_fixture_2000_live(client, sample_vip_fixture):
-    """Test full parsing and serialization of authentic Google Civic 2000 test election fixture."""
+async def test_voter_info_real_vip_2000_response(client, real_vip_fixture):
+    """The real test-election response: election only, no status field, no locations."""
+    with respx.mock:
+        respx.get(CIVIC_VOTER_INFO_URL).respond(200, json=real_vip_fixture)
+
+        res = await client.post(
+            "/api/voter-info",
+            json={"address": "1263 Pacific Ave, Kansas City, KS 66102"},
+        )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["uiState"] == "no_locations_yet"
+        assert data["upstreamStatus"] == "success"
+        assert data["election"] == {
+            "id": "2000",
+            "name": "VIP Test Election",
+            "date": real_vip_fixture["election"]["electionDay"],
+        }
+        assert data["pollingLocations"] == []
+        assert data["earlyVoteSites"] == []
+        assert data["dropOffLocations"] == []
+        assert data["adminBodies"] == {"state": None, "local": None}
+
+
+@pytest.mark.asyncio
+async def test_voter_info_synthetic_live_parsing(client, sample_vip_fixture):
+    """Full parsing and serialization of a hand-written response with every location type."""
     with respx.mock:
         respx.get(CIVIC_VOTER_INFO_URL).respond(
             200,
@@ -376,55 +414,52 @@ async def test_voter_info_rate_limiter_local(client):
 
 
 @pytest.mark.asyncio
-async def test_voter_info_trusted_proxy_ip_resolution(client, monkeypatch):
+async def test_voter_info_client_ip_resolution(client, monkeypatch):
     with respx.mock:
         respx.get(CIVIC_VOTER_INFO_URL).respond(
             200, json={"status": "success", "pollingLocations": []}
         )
 
-        # Case 1: TRUSTED_PROXY=false -> X-Forwarded-For is ignored
-        monkeypatch.setenv("TRUSTED_PROXY", "false")
+        # Case 1: no CLIENT_IP_HEADER -> proxy headers are ignored, socket peer is used
         for _ in range(30):
             res = await client.post(
                 "/api/voter-info",
                 json={"address": "Dallas, TX"},
-                headers={"X-Forwarded-For": "203.0.113.1"},
+                headers={"X-Forwarded-For": "203.0.113.1", "X-Client-IP": "203.0.113.1"},
             )
             assert res.status_code == 200
-        # 31st request with different forwarded IP is still rate limited because client.host was used
         res = await client.post(
             "/api/voter-info",
             json={"address": "Dallas, TX"},
-            headers={"X-Forwarded-For": "203.0.113.2"},
+            headers={"X-Forwarded-For": "203.0.113.2", "X-Client-IP": "203.0.113.2"},
         )
         assert res.status_code == 429
 
-        # Reset rate limiter
         await rate_limiter.reset()
 
-        # Case 2: TRUSTED_PROXY=true -> X-Forwarded-For IS honored
-        monkeypatch.setenv("TRUSTED_PROXY", "true")
+        # Case 2: CLIENT_IP_HEADER set -> only that header is honored
+        monkeypatch.setenv("CLIENT_IP_HEADER", "X-Client-IP")
         for _ in range(30):
             res = await client.post(
                 "/api/voter-info",
                 json={"address": "Dallas, TX"},
-                headers={"X-Forwarded-For": "198.51.100.1"},
+                headers={"X-Client-IP": "198.51.100.1"},
             )
             assert res.status_code == 200
 
-        # Same IP is blocked
+        # Same IP is blocked, even when X-Forwarded-For claims another address
         res = await client.post(
             "/api/voter-info",
             json={"address": "Dallas, TX"},
-            headers={"X-Forwarded-For": "198.51.100.1"},
+            headers={"X-Client-IP": "198.51.100.1", "X-Forwarded-For": "198.51.100.9"},
         )
         assert res.status_code == 429
 
-        # Different IP passes through!
+        # Different IP in the trusted header passes
         res = await client.post(
             "/api/voter-info",
             json={"address": "Dallas, TX"},
-            headers={"X-Forwarded-For": "198.51.100.2"},
+            headers={"X-Client-IP": "198.51.100.2"},
         )
         assert res.status_code == 200
 
@@ -493,12 +528,11 @@ async def test_voter_info_caching_max_age(client):
     # Reset cache
     await response_cache.reset()
 
-    # Test case 2: upstream provides NO Cache-Control -> not cached
+    # Test case 2: upstream provides NO Cache-Control (what Google actually sends) -> default TTL
     with respx.mock:
         route2 = respx.get(CIVIC_VOTER_INFO_URL).respond(
             200,
-            json={"status": "success", "pollingLocations": []},
-            # No cache-control header
+            json={"pollingLocations": []},
         )
 
         res3 = await client.post("/api/voter-info", json={"address": "Nashville, TN"})
@@ -507,7 +541,31 @@ async def test_voter_info_caching_max_age(client):
 
         res4 = await client.post("/api/voter-info", json={"address": "Nashville, TN"})
         assert res4.status_code == 200
-        assert route2.call_count == 2
+        assert route2.call_count == 1
+
+    await response_cache.reset()
+
+    # Test case 3: upstream forbids caching -> not cached
+    with respx.mock:
+        route3 = respx.get(CIVIC_VOTER_INFO_URL).respond(
+            200,
+            json={"pollingLocations": []},
+            headers={"Cache-Control": "no-store"},
+        )
+
+        await client.post("/api/voter-info", json={"address": "Nashville, TN"})
+        await client.post("/api/voter-info", json={"address": "Nashville, TN"})
+        assert route3.call_count == 2
+
+
+def test_parse_cache_control_ttl():
+    assert parse_cache_control_ttl(None) is None
+    assert parse_cache_control_ttl("public") is None
+    assert parse_cache_control_ttl("public, max-age=120") == 120
+    assert parse_cache_control_ttl("max-age=86400") == 3600
+    assert parse_cache_control_ttl("max-age=0") == 0
+    assert parse_cache_control_ttl("no-store") == 0
+    assert parse_cache_control_ttl("private, max-age=600") == 0
 
 
 @pytest.mark.asyncio
@@ -543,3 +601,32 @@ async def test_voter_info_no_logging_leak(client, caplog):
 
         # Assert address hash IS present in caplog
         assert expected_hash in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "reason", "ui_state", "upstream_status"),
+    [
+        # Bodies captured from the live API with scripts/fetch_test_election_fixture.py
+        ("Failed to parse address", "parseError", "address_problem", "addressUnparseable"),
+        ("Election unknown", "invalid", "no_election", "electionUnknown"),
+    ],
+)
+async def test_voter_info_observed_upstream_400s(client, message, reason, ui_state, upstream_status):
+    with respx.mock:
+        respx.get(CIVIC_VOTER_INFO_URL).respond(
+            400,
+            json={
+                "error": {
+                    "code": 400,
+                    "message": message,
+                    "errors": [{"message": message, "domain": "global", "reason": reason}],
+                }
+            },
+        )
+        res = await client.post("/api/voter-info", json={"address": "1 Main St, Austin, TX"})
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["uiState"] == ui_state
+    assert data["upstreamStatus"] == upstream_status

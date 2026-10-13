@@ -1,5 +1,5 @@
 import { Search, Users, Vote } from 'lucide-react'
-import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import { useUser } from '@clerk/clerk-react'
 
 import { apiUrl } from './api'
@@ -19,6 +19,8 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
+type Tab = 'representatives' | 'voting'
+
 interface PhotonResult {
   formattedAddress: string
   coordinates: [number, number]
@@ -37,12 +39,20 @@ export default function AddressLookup() {
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
 
-  // Voter info state (independent from representative lookup)
+  // Address of the most recent lookup, kept even when the representative lookup fails
+  const [lookedUpAddress, setLookedUpAddress] = useState<string | null>(null)
+
+  // Voter info state (independent from representative lookup). Fetched lazily: the
+  // address is only sent to Google Civic once the Voting Locations tab is opened.
   const [voterInfo, setVoterInfo] = useState<VoterInfo | null>(null)
   const [voterInfoLoading, setVoterInfoLoading] = useState(false)
-  const [voterInfoError, setVoterInfoError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'representatives' | 'voting'>('representatives')
+  const [activeTab, setActiveTab] = useState<Tab>('representatives')
   const activeVoterInfoControllerRef = useRef<AbortController | null>(null)
+  const voterInfoAddressRef = useRef<string | null>(null)
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
+    representatives: null,
+    voting: null,
+  })
 
   const { user, isLoaded: userLoaded } = useUser()
   const savedAddress = user?.unsafeMetadata?.savedAddress as string | undefined
@@ -106,30 +116,72 @@ export default function AddressLookup() {
     }
   }
 
+  function startVoterInfoFetch(targetAddress: string) {
+    activeVoterInfoControllerRef.current?.abort()
+    const controller = new AbortController()
+    activeVoterInfoControllerRef.current = controller
+    voterInfoAddressRef.current = targetAddress
+    setVoterInfo(null)
+    setVoterInfoLoading(true)
+    fetchVoterInfo(targetAddress, controller.signal)
+  }
+
+  function resetVoterInfo() {
+    activeVoterInfoControllerRef.current?.abort()
+    activeVoterInfoControllerRef.current = null
+    voterInfoAddressRef.current = null
+    setVoterInfo(null)
+    setVoterInfoLoading(false)
+  }
+
+  function selectTab(tab: Tab) {
+    setActiveTab(tab)
+    if (
+      tab === 'voting' &&
+      lookedUpAddress &&
+      voterInfoAddressRef.current !== lookedUpAddress
+    ) {
+      startVoterInfoFetch(lookedUpAddress)
+    }
+  }
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const tabs: Tab[] = ['representatives', 'voting']
+    const index = tabs.indexOf(activeTab)
+    let next: Tab | null = null
+    if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length]
+    else if (event.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length]
+    else if (event.key === 'Home') next = tabs[0]
+    else if (event.key === 'End') next = tabs[tabs.length - 1]
+    if (!next) return
+    event.preventDefault()
+    selectTab(next)
+    tabRefs.current[next]?.focus()
+  }
+
   // Extract fetch logic into a standalone function
   async function performLookup(targetAddress: string) {
     const trimmed = targetAddress.trim()
     if (!trimmed) {
       setError('Enter a U.S. street address.')
       setLookup(null)
-      setVoterInfo(null)
+      setLookedUpAddress(null)
+      resetVoterInfo()
       return
     }
 
     setLoading(true)
     setError(null)
     setSelectedOfficial(null)
+    setLookedUpAddress(trimmed)
 
-    // Reset voter-info state and abort any active prior voter-info request
-    activeVoterInfoControllerRef.current?.abort()
-    const voterController = new AbortController()
-    activeVoterInfoControllerRef.current = voterController
-    setVoterInfo(null)
-    setVoterInfoLoading(true)
-    setVoterInfoError(null)
-
-    // Fire voter info concurrently without blocking representative lookup
-    fetchVoterInfo(trimmed, voterController.signal)
+    // Drop voter info for the previous address. If the user is already viewing the
+    // Voting Locations tab, fetch for the new address right away (without blocking
+    // the representative lookup); otherwise wait until they open the tab.
+    resetVoterInfo()
+    if (activeTab === 'voting') {
+      startVoterInfoFetch(trimmed)
+    }
 
     try {
       const response = await fetch(
@@ -166,6 +218,9 @@ export default function AddressLookup() {
       setHasAutoLoaded(true)
       performLookup(savedAddress)
     }
+    // Runs once (guarded by hasAutoLoaded) on the initial Representatives tab, so the
+    // performLookup closure is never stale here; voter info is not fetched on auto-load.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [userLoaded, savedAddress, hasAutoLoaded, lookup, loading])
 
   useEffect(() => {
@@ -256,16 +311,17 @@ export default function AddressLookup() {
       </form>
 
       <div className="mt-8" aria-live="polite">
-        {error ? <p className="text-red-400">{error}</p> : null}
+        {error && !lookedUpAddress ? <p className="text-red-400">{error}</p> : null}
         {loading && !lookup ? (
           <p className="text-slate-400">Looking up that address…</p>
         ) : null}
-        {lookup ? (
+        {lookedUpAddress && (lookup || !loading) ? (
           <div>
             <div
               className="mb-6 flex border-b border-slate-700"
               role="tablist"
               aria-label="Address lookup results views"
+              onKeyDown={onTabKeyDown}
             >
               <button
                 type="button"
@@ -273,7 +329,11 @@ export default function AddressLookup() {
                 id="tab-representatives"
                 aria-controls="panel-representatives"
                 aria-selected={activeTab === 'representatives'}
-                onClick={() => setActiveTab('representatives')}
+                tabIndex={activeTab === 'representatives' ? 0 : -1}
+                ref={(el) => {
+                  tabRefs.current.representatives = el
+                }}
+                onClick={() => selectTab('representatives')}
                 className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
                   activeTab === 'representatives'
                     ? 'border-blue-500 text-blue-400'
@@ -289,7 +349,11 @@ export default function AddressLookup() {
                 id="tab-voting"
                 aria-controls="panel-voting"
                 aria-selected={activeTab === 'voting'}
-                onClick={() => setActiveTab('voting')}
+                tabIndex={activeTab === 'voting' ? 0 : -1}
+                ref={(el) => {
+                  tabRefs.current.voting = el
+                }}
+                onClick={() => selectTab('voting')}
                 className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
                   activeTab === 'voting'
                     ? 'border-blue-500 text-blue-400'
@@ -313,12 +377,15 @@ export default function AddressLookup() {
               aria-labelledby="tab-representatives"
               hidden={activeTab !== 'representatives'}
             >
-              {activeTab === 'representatives' && (
-                <LookupResults
-                  lookup={lookup}
-                  onSelectOfficial={setSelectedOfficial}
-                />
-              )}
+              {activeTab === 'representatives' &&
+                (lookup ? (
+                  <LookupResults
+                    lookup={lookup}
+                    onSelectOfficial={setSelectedOfficial}
+                  />
+                ) : error ? (
+                  <p className="text-red-400">{error}</p>
+                ) : null)}
             </div>
 
             <div
@@ -331,8 +398,7 @@ export default function AddressLookup() {
                 <VotingLocations
                   voterInfo={voterInfo}
                   loading={voterInfoLoading}
-                  error={voterInfoError}
-                  stateCode={lookup.normalized_input?.state}
+                  stateCode={lookup?.normalized_input?.state}
                 />
               )}
             </div>

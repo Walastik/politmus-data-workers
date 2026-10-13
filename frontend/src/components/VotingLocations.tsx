@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   AlertCircle,
   Building2,
@@ -136,6 +137,52 @@ export default function VotingLocations({
   )
 }
 
+// Vote-center jurisdictions can return dozens of sites per address (75 polling
+// places for a DC address in testing), so show a few and let the user expand.
+const INITIAL_LOCATIONS_SHOWN = 5
+
+function LocationSection({
+  title,
+  locations,
+  typeLabel,
+}: {
+  title: string
+  locations: VoterLocation[]
+  typeLabel: string
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const visible = showAll ? locations : locations.slice(0, INITIAL_LOCATIONS_SHOWN)
+  const hiddenCount = locations.length - visible.length
+
+  return (
+    <section>
+      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+        {title}
+        {locations.length > INITIAL_LOCATIONS_SHOWN && (
+          <span className="ml-2 font-normal normal-case tracking-normal text-slate-500">
+            ({locations.length})
+          </span>
+        )}
+      </h3>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {visible.map((loc, idx) => (
+          <LocationCard key={idx} location={loc} typeLabel={typeLabel} />
+        ))}
+      </div>
+      {locations.length > INITIAL_LOCATIONS_SHOWN && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          className="mt-3 text-sm font-semibold text-blue-400 hover:text-blue-300"
+        >
+          {showAll ? 'Show fewer' : `Show all ${locations.length} (${hiddenCount} more)`}
+        </button>
+      )}
+    </section>
+  )
+}
+
 function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
   const hasPolling = voterInfo.pollingLocations.length > 0
   const hasEarly = voterInfo.earlyVoteSites.length > 0
@@ -144,42 +191,27 @@ function LiveStateView({ voterInfo }: { voterInfo: VoterInfo }) {
   return (
     <div className="space-y-6">
       {hasPolling && (
-        <section>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Election Day Polling Places
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {voterInfo.pollingLocations.map((loc, idx) => (
-              <LocationCard key={`poll-${idx}`} location={loc} typeLabel="Election Day" />
-            ))}
-          </div>
-        </section>
+        <LocationSection
+          title="Election Day Polling Places"
+          locations={voterInfo.pollingLocations}
+          typeLabel="Election Day"
+        />
       )}
 
       {hasEarly && (
-        <section>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Early Voting Sites
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {voterInfo.earlyVoteSites.map((loc, idx) => (
-              <LocationCard key={`early-${idx}`} location={loc} typeLabel="Early Voting" />
-            ))}
-          </div>
-        </section>
+        <LocationSection
+          title="Early Voting Sites"
+          locations={voterInfo.earlyVoteSites}
+          typeLabel="Early Voting"
+        />
       )}
 
       {hasDropOff && (
-        <section>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Ballot Drop-off Locations
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {voterInfo.dropOffLocations.map((loc, idx) => (
-              <LocationCard key={`drop-${idx}`} location={loc} typeLabel="Drop-off Box" />
-            ))}
-          </div>
-        </section>
+        <LocationSection
+          title="Ballot Drop-off Locations"
+          locations={voterInfo.dropOffLocations}
+          typeLabel="Drop-off Box"
+        />
       )}
     </div>
   )
@@ -209,16 +241,11 @@ function MailOnlyStateView({
       </div>
 
       {voterInfo.dropOffLocations.length > 0 && (
-        <section>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Ballot Drop-off Locations
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {voterInfo.dropOffLocations.map((loc, idx) => (
-              <LocationCard key={`mail-drop-${idx}`} location={loc} typeLabel="Drop-off Box" />
-            ))}
-          </div>
-        </section>
+        <LocationSection
+          title="Ballot Drop-off Locations"
+          locations={voterInfo.dropOffLocations}
+          typeLabel="Drop-off Box"
+        />
       )}
 
       <StaticFallback stateCode={stateCode} />

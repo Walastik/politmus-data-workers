@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import VotingLocations from './VotingLocations'
 import type { AdminBody, VoterInfo, VoterLocation } from '../types'
@@ -53,6 +53,29 @@ function createMockVoterInfo(overrides: Partial<VoterInfo>): VoterInfo {
 }
 
 describe('VotingLocations Component', () => {
+  it('shows the first 5 locations of a long list and expands on request', () => {
+    const pollingLocations = Array.from({ length: 75 }, (_, i) =>
+      createMockLocation({ locationName: `Vote Center ${i + 1}`, line1: `${i + 1} Main St` }),
+    )
+    render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({ pollingLocations })}
+        loading={false}
+        stateCode="DC"
+      />,
+    )
+
+    expect(screen.getByText('Vote Center 5')).toBeInTheDocument()
+    expect(screen.queryByText('Vote Center 6')).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: /Show all 75 \(70 more\)/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(toggle)
+
+    expect(screen.getByText('Vote Center 75')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Show fewer/ })).toHaveAttribute('aria-expanded', 'true')
+  })
+
   it('renders loading state with aria-live polite and role status', () => {
     render(<VotingLocations voterInfo={null} loading={true} stateCode="KS" />)
 

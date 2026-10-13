@@ -19,12 +19,16 @@ def get_civic_election_id_override() -> Optional[str]:
     return os.getenv("CIVIC_ELECTION_ID_OVERRIDE") or None
 
 
-def get_trusted_proxy() -> bool:
-    val = os.getenv("TRUSTED_PROXY", "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+def get_client_ip_header() -> Optional[str]:
+    """Header carrying the real client IP, set by a trusted reverse proxy.
+
+    Only set this when the API is reachable exclusively through that proxy and
+    the proxy overwrites the header on every request (see frontend/nginx.conf).
+    """
+    return os.getenv("CLIENT_IP_HEADER", "").strip() or None
 
 
 GOOGLE_CIVIC_API_KEY: Optional[str] = get_google_civic_api_key()
 CIVIC_ELECTION_ID_OVERRIDE: Optional[str] = get_civic_election_id_override()
-TRUSTED_PROXY: bool = get_trusted_proxy()
+CLIENT_IP_HEADER: Optional[str] = get_client_ip_header()
 

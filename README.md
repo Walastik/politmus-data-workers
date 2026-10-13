@@ -16,6 +16,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    python -m venv venv
    source venv/bin/activate
    pip install -r backend/requirements.txt
+   # For running tests: pip install -r backend/requirements-dev.txt
    ```
 
 3. Copy environment variables into `.env` in the project root:
@@ -26,7 +27,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    OPENSTATES_API_KEY=your_key_here
    GOOGLE_CIVIC_API_KEY=your_google_civic_api_key_here
    CIVIC_ELECTION_ID_OVERRIDE=
-   TRUSTED_PROXY=false
+   CLIENT_IP_HEADER=
    OLLAMA_HOST=http://localhost:11434
    OLLAMA_MODEL=qwen2.5-coder:32b
    OLLAMA_TIMEOUT_SECONDS=180
@@ -38,7 +39,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
      - Enable the **Google Civic Information API** in the [Google Cloud Console](https://console.cloud.google.com/).
      - Create an API key and **restrict the key** under "API restrictions" to only allow calls to the *Google Civic Information API* to minimize risk.
      - Optional: Set `CIVIC_ELECTION_ID_OVERRIDE` to target a specific election ID (such as `2000` for VIP test election).
-     - Set `TRUSTED_PROXY=true` in production deployments behind a reverse proxy (e.g. Fly.io, Cloudflare, nginx) so the rate limiter parses client IP from `X-Forwarded-For`.
+     - `CLIENT_IP_HEADER` names the header the voter-info rate limiter trusts for the client IP. Leave it empty locally (the socket peer is used). In production it is set in `backend/fly.toml` to `X-Politmus-Client-IP`, which `frontend/nginx.conf` overwrites from Fly's `Fly-Client-IP` on every request. This is only safe because the API has no public IP (Flycast only); `X-Forwarded-For` is never trusted.
    - Representative address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table and does not require Google API credentials.
    - `OLLAMA_*` is only required for the local bill classifier.
    - **Privacy Policy Notice**: Addresses entered for voting location lookups are proxied to the Google Civic Information API. Ensure the public privacy policy explicitly discloses that user addresses are sent upstream for polling place resolution.
@@ -218,7 +219,7 @@ gh secret set FLY_API_TOKEN
 Use an org or personal token, not a deploy-only token (`fly ssh` rejects those). Set `OPENSTATES_API_KEY` on the Fly app (not as a GitHub secret):
 
 ```bash
-fly secrets set OPENSTATES_API_KEY=your_key_here GOOGLE_CIVIC_API_KEY=your_civic_key TRUSTED_PROXY=true -a politmus-api
+fly secrets set OPENSTATES_API_KEY=your_key_here GOOGLE_CIVIC_API_KEY=your_civic_key -a politmus-api
 ```
 
 Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, or **Senate Votes Ingestion** from the Actions tab, or load data once by hand:
