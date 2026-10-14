@@ -127,6 +127,18 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE bills ADD COLUMN IF NOT EXISTS classification_metadata JSONB"
         ))
+        for column_sql in (
+            "classification_status VARCHAR",
+            "classification_version VARCHAR",
+            "classification_input_hash VARCHAR",
+            "classification_attempts INTEGER NOT NULL DEFAULT 0",
+            "classification_error TEXT",
+            "classification_attempted_at TIMESTAMP",
+            "classified_at TIMESTAMP",
+        ):
+            conn.execute(text(
+                f"ALTER TABLE bills ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
         conn.execute(text(
             "ALTER TABLE bills DROP COLUMN IF EXISTS classification"
         ))

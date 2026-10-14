@@ -50,6 +50,18 @@ class Bill(Base):
     status = Column(String, nullable=True)
     level = Column(String, nullable=False, default="federal", server_default="federal")
     classification_metadata = Column(JSONB, nullable=True)
+    # Bill classifier state (scripts/classify_bills.py):
+    # ok | incomplete | failed | no_summary; NULL = never run by classifier v2.
+    classification_status = Column(String, nullable=True)
+    # Schema version + local prompt hash + model of the stored metadata.
+    classification_version = Column(String, nullable=True)
+    # sha256 of title, policy area and summary the metadata was made from.
+    classification_input_hash = Column(String, nullable=True)
+    # Consecutive failed/incomplete attempts (drives retry backoff).
+    classification_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    classification_error = Column(Text, nullable=True)
+    classification_attempted_at = Column(DateTime, nullable=True)
+    classified_at = Column(DateTime, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     roll_calls = relationship("RollCall", back_populates="bill")

@@ -1,190 +1,109 @@
-import os
+"""Manual check: classify one bill with the local model (writes nothing) and
+score its intents against sample stances, as if an official voted Yea.
+
+    python backend/scripts/test_classify.py [bill_id] [--model qwen3.6:27b]
+
+Not a pytest test (pytest runs with --ignore=scripts).
+"""
+
+import argparse
 import json
-import re
-import httpx
-from ollama import Client
-from sqlalchemy.orm import Session
+import os
 import sys
 
-def clean_html(text: str | None) -> str:
-    """Strip HTML tags and normalize whitespace from CRS summaries."""
-    if not text:
-        return ""
-    text = (
-        text.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", '"')
-    )
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return re.sub(r"\s+([.,;:!?])", r"\1", text)
-
-# Ensure backend and scripts directories are in path
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-SCRIPTS_DIR = os.path.abspath(os.path.dirname(__file__))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
-if SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, SCRIPTS_DIR)
 
-from models import Bill, OfficialStance, PolicyTarget, Official
-from database import SessionLocal
-from llm_config import SYSTEM_PROMPT, ClassificationMetadata
+from bill_classifier import (  # noqa: E402
+    DEFAULT_HOST,
+    DEFAULT_MODEL,
+    DEFAULT_NUM_CTX,
+    DEFAULT_NUM_PREDICT,
+    DEFAULT_TIMEOUT_SECONDS,
+    load_local_prompts,
+)
+from database import SessionLocal  # noqa: E402
+from models import Bill  # noqa: E402
+from services.bill_classification import BillSnapshot, classify_bill, summary_text  # noqa: E402
+from services.llm_runtime import make_chat_fn  # noqa: E402
+
+SAMPLE_STANCES = [
+    {"target": "Immigration Enforcement", "mechanism": "funding", "direction": "increase"},
+    {"target": "Taxation", "mechanism": "taxation", "direction": "decrease"},
+    {"target": "Climate Change", "mechanism": "regulation", "direction": "increase"},
+    {"target": "Healthcare", "mechanism": "funding", "direction": "increase"},
+]
+
 
 def evaluate_intents(intents, stances):
-    """Evaluate intents against official stances to generate scores and receipts."""
+    """Score intents against stances as if the official voted Yea."""
     total_score = 0
     receipts = []
-
-    stance_map = {s['target']: s for s in stances}
-
+    stance_map = {s["target"]: s for s in stances}
     for intent in intents:
-        if intent.target in stance_map:
-            stance = stance_map[intent.target]
-            if stance['mechanism'] != intent.mechanism:
-                continue
-                
-            stance_dir = stance['direction']
-            effect_dir = intent.direction
-
-            # Simulate evaluation if they voted 'Yea'
-            # Yea means they support the bill's intent
-            if stance_dir == effect_dir:
-                score = 1
-            elif stance_dir in ['increase', 'decrease'] and effect_dir in ['increase', 'decrease']:
-                score = -1
-            else:
-                score = 0
-
-            if score != 0:
-                total_score += score
-                receipt = {
-                    "target": intent.target,
-                    "mechanism": intent.mechanism,
-                    "stance_direction": stance_dir,
-                    "effect_direction": effect_dir,
-                    "simulated_vote": "Yea",
-                    "score_delta": score,
-                    "rationale": intent.rationale,
-                }
-                if getattr(intent, "citation", None):
-                    receipt["citation"] = intent.citation
-                receipts.append(receipt)
-
+        stance = stance_map.get(intent.target)
+        if stance is None or stance["mechanism"] != intent.mechanism:
+            continue
+        if stance["direction"] == intent.direction:
+            score = 1
+        elif stance["direction"] in ("increase", "decrease") and intent.direction in ("increase", "decrease"):
+            score = -1
+        else:
+            score = 0
+        if score:
+            total_score += score
+            receipts.append({
+                "target": intent.target,
+                "mechanism": intent.mechanism,
+                "stance_direction": stance["direction"],
+                "effect_direction": intent.direction,
+                "simulated_vote": "Yea",
+                "score_delta": score,
+                "rationale": intent.rationale,
+                "citation": intent.citation,
+            })
     return total_score, receipts
 
+
 def main():
-    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    client = Client(
-        host=ollama_host,
-        timeout=httpx.Timeout(180.0, connect=10.0),
-    )
-    
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("bill_id", nargs="?")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    args = parser.parse_args()
+
     db = SessionLocal()
     try:
-        # Allow passing a specific bill ID via command line argument: python test_classify.py [bill_id]
-        target_bill_id = sys.argv[1] if len(sys.argv) > 1 else None
-
-        if target_bill_id:
-            bill = db.query(Bill).filter(Bill.id == target_bill_id).first()
-            if not bill:
-                print(f"Error: Bill with ID '{target_bill_id}' not found.")
-                return
+        query = db.query(Bill)
+        if args.bill_id:
+            bill = query.filter(Bill.id == args.bill_id).first()
         else:
-            # Find one bill where classification_metadata is null and has a non-empty summary
-            bill = (
-                db.query(Bill)
-                .filter(
-                    Bill.classification_metadata == None,
-                    Bill.summary.isnot(None),
-                    Bill.summary != "",
-                )
-                .first()
-            )
-            if not bill:
-                print("No unclassified bills found with available summaries.")
-                print("Tip: You can pass a specific bill ID: python backend/scripts/test_classify.py <bill_id>")
-                return
-
-        print(f"Found bill: {bill.id} - {bill.title}")
-        if bill.summary:
-            preview = bill.summary[:200] + ("..." if len(bill.summary) > 200 else "")
-            print(f"Summary ({len(bill.summary)} chars): {preview}\n")
-        else:
-            print("Warning: Bill has no summary, relying on title.\n")
-
-        # Provide all available bill context for comprehensive LLM extraction
-        parts = [f"Bill ID: {bill.id}"]
-        if bill.title:
-            parts.append(f"Title: {bill.title}")
-        if bill.policy_area:
-            parts.append(f"Policy Area: {bill.policy_area}")
-        if bill.sponsor_name:
-            sponsor_info = bill.sponsor_name
-            if bill.sponsor_party:
-                sponsor_info += f" ({bill.sponsor_party})"
-            parts.append(f"Sponsor: {sponsor_info}")
-        if bill.bipartisan_type:
-            parts.append(f"Bipartisan Status: {bill.bipartisan_type}")
-        if bill.status:
-            parts.append(f"Legislative Status: {bill.status}")
-        if bill.latest_action_text:
-            parts.append(f"Latest Action: {bill.latest_action_text}")
-        if bill.summary:
-            cleaned_summary = clean_html(bill.summary)
-            if len(cleaned_summary) > 60000:
-                cleaned_summary = cleaned_summary[:60000] + "\n\n[Summary truncated for length]"
-            parts.append(f"Congressional Research Service (CRS) Summary:\n{cleaned_summary}")
-        text_to_analyze = "\n\n".join(parts)
-
-        print("Running inference through nemotron-3.5-lightning:30b...")
-        response = client.chat(
-            model='nemotron-3.5-lightning:30b',
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPT},
-                {'role': 'user', 'content': f"Analyze this bill:\n{text_to_analyze}"}
-            ],
-            format=ClassificationMetadata.model_json_schema(),
-            options={
-                "temperature": 0.1,
-                "num_ctx": 32768,
-                "num_predict": 4096,
-            },
-        )
-
-        parsed_json_str = response['message']['content']
-        print("\nParsed JSON:")
-        print(parsed_json_str)
-
-        # Parse into Pydantic model
-        parsed_data = ClassificationMetadata.model_validate_json(parsed_json_str)
-
-        # Store the results back in the metadata
-        bill.classification_metadata = json.loads(parsed_json_str)
-        db.commit()
-        print("\nSuccessfully saved classification_metadata to the database.")
-
-        # Sample official stances for evaluation
-        sample_stances = [
-            {"target": "Immigration Enforcement", "mechanism": "funding", "direction": "increase"},
-            {"target": "Taxation", "mechanism": "taxation", "direction": "decrease"},
-            {"target": "Climate Change", "mechanism": "regulation", "direction": "increase"},
-            {"target": "Healthcare", "mechanism": "funding", "direction": "increase"}
-        ]
-
-        print("\nEvaluating alignment matrix against sample official stances (Assuming 'Yea' vote)...")
-        print("Sample Stances:", json.dumps(sample_stances, indent=2))
-        
-        total_score, receipts = evaluate_intents(parsed_data.intents, sample_stances)
-        
-        print(f"\nFinal Score (Simulated Yea): {total_score}")
-        print("Receipts:")
-        print(json.dumps(receipts, indent=2))
-        
+            bill = query.filter(Bill.classification_metadata.is_(None), Bill.summary.isnot(None), Bill.summary != "").first()
+        if bill is None:
+            print("No matching bill. Pass a bill id: python backend/scripts/test_classify.py <bill_id>")
+            return
+        snapshot = BillSnapshot.of(bill)
     finally:
         db.close()
+
+    text = summary_text(snapshot.summary)
+    print(f"Found bill: {snapshot.id} - {snapshot.title}")
+    print(f"Summary text: {len(text):,} chars\n")
+    if not text:
+        print("No CRS summary yet; nothing to classify.")
+        return
+
+    print(f"Running inference through {args.model}...")
+    chat_fn = make_chat_fn(args.model, DEFAULT_HOST, DEFAULT_TIMEOUT_SECONDS, DEFAULT_NUM_CTX, DEFAULT_NUM_PREDICT)
+    prompts = load_local_prompts()
+    result = classify_bill(snapshot, text, prompt=prompts.system, summary_prompt=prompts.summary, chat_fn=chat_fn, log=print)
+    print(json.dumps(result.metadata(model=args.model, version="manual", classified_at=""), indent=2))
+
+    print("\nEvaluating against sample stances (assuming a 'Yea' vote)...")
+    total_score, receipts = evaluate_intents(result.intents, SAMPLE_STANCES)
+    print(f"Final Score (Simulated Yea): {total_score}")
+    print(json.dumps(receipts, indent=2))
+
 
 if __name__ == "__main__":
     main()
