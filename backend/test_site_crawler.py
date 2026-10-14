@@ -75,6 +75,9 @@ class UrlHelperTests(unittest.TestCase):
             clean_link(SITE + "/", "/issues/issue/?IssueID=14895", host),
             SITE + "/issues/issue?IssueID=14895",
         )
+        # Pagination under an issue lists related news, not more positions.
+        self.assertIsNone(clean_link(SITE + "/", "/legislation/climate?page=2", host))
+        self.assertIsNone(clean_link(SITE + "/", "/issues/values?Page=1", host))
         self.assertIsNone(clean_link(SITE + "/", "/files/plan.pdf", host))
         self.assertIsNone(clean_link(SITE + "/", "mailto:a@b.gov", host))
 
@@ -96,6 +99,7 @@ class UrlHelperTests(unittest.TestCase):
             ("/issues/military-academy-nomination-application-form", "Academy Nominations"),
             ("/public/index.cfm/privacypolicy", "Privacy Policy"),
             ("/public/index.cfm/news-releases", "News"),
+            ("/legislation/committees-and-caucuses", "Committees and Caucuses"),
         ]
         for path, text in noise:
             self.assertEqual(score_link(SITE + path, text), 0, path)

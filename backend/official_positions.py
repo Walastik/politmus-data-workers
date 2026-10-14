@@ -20,6 +20,8 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+import httpx
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -56,7 +58,9 @@ DEFAULT_MODEL = os.getenv(
     os.getenv("OLLAMA_MODEL", "nemotron-3.5-lightning:30b"),
 )
 DEFAULT_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300"))
+# Not OLLAMA_TIMEOUT_SECONDS: the bill classifier's short value is too tight for
+# dense models or --think, which can spend several minutes on one chunk.
+DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OFFICIAL_POSITIONS_TIMEOUT_SECONDS", "900"))
 DEFAULT_NUM_CTX = 16384
 DEFAULT_NUM_PREDICT = 4096
 DEFAULT_CONCURRENCY = 2
@@ -183,6 +187,11 @@ def make_chat_fn(
             kwargs["think"] = state["think"]
         try:
             return client.chat(**kwargs)
+        except httpx.TimeoutException as exc:
+            raise TimeoutError(
+                f"Ollama did not answer within {timeout:.0f}s; raise --timeout "
+                "(or OFFICIAL_POSITIONS_TIMEOUT_SECONDS) for slower models or --think"
+            ) from exc
         except Exception as exc:
             # Models without a thinking mode reject the parameter; drop it.
             if state["think"] is not None and "think" in str(exc).lower():
@@ -351,6 +360,19 @@ def extract_positions(
     return merge_positions(verified), len(chunks), rejected
 
 
+def _duration(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return f"{minutes // 60}h{minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"
+
+
+def _progress(done: int, total: int, elapsed: float) -> str:
+    """'  (elapsed 1h05m, ~3h10m left)' once at least one official is done."""
+    if done == 0 or total <= 1:
+        return ""
+    remaining = elapsed / done * (total - done)
+    return f"  (elapsed {_duration(elapsed)}, ~{_duration(remaining)} left)"
+
+
 def _record_attempt(session, official_id, sync, *, status, now, error=None, **fields):
     if sync is None:
         sync = OfficialPositionSync(official_id=official_id, status=status, attempts=0)
@@ -488,13 +510,17 @@ def run_positions(
         # the current one. The crawler is only ever used by this one thread.
         prefetch = ThreadPoolExecutor(max_workers=1) if not extract_only else None
         futures = {}
+        run_started = time.monotonic()
         if prefetch is not None:
             futures[0] = prefetch.submit(crawl, rows[0][0])
         try:
             for index, (official, sync) in enumerate(rows):
                 if prefetch is not None and index + 1 < len(rows):
                     futures[index + 1] = prefetch.submit(crawl, rows[index + 1][0])
-                log(f"[{index + 1}/{len(rows)}] {official.id} {official.name or ''} - {official.website_url}")
+                log(
+                    f"[{index + 1}/{len(rows)}] {official.id} {official.name or ''} - "
+                    f"{official.website_url}{_progress(index, len(rows), time.monotonic() - run_started)}"
+                )
                 crawl_future = futures.pop(index, None)
                 _process_official(
                     session,

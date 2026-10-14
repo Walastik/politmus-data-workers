@@ -174,11 +174,17 @@ python official_positions.py --extract-only --force         # re-run the model o
 python official_positions.py --limit 0                      # everything due
 ```
 
-Other options: `--force`, `--max-age-days`, `--concurrency`, `--chunk-chars`, `--crawl-delay`, `--max-pages`, `--model` (default `OFFICIAL_POSITIONS_MODEL`, then `OLLAMA_MODEL`), `--host`, `--timeout`, `--num-ctx`, `--num-predict`, `--think`, `--level`.
+Other options: `--force`, `--max-age-days`, `--concurrency`, `--chunk-chars`, `--crawl-delay`, `--max-pages`, `--model` (default `OFFICIAL_POSITIONS_MODEL`, then `OLLAMA_MODEL`), `--host`, `--timeout` (default `OFFICIAL_POSITIONS_TIMEOUT_SECONDS`, 900; separate from the bill classifier's `OLLAMA_TIMEOUT_SECONDS`), `--num-ctx`, `--num-predict`, `--think`, `--level`.
 
 **Choosing a model.** Changing `--model` (or `OFFICIAL_POSITIONS_MODEL`) changes the extractor version, so compare models with `--dry-run` on the same official before switching: `python official_positions.py --official-id O000172 --dry-run --model <tag>`. Count positions whose `official_direction`, mechanism, or target is wrong, and note the time per official.
 
-On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`. A nightly run refreshes all ~535 members inside the 30-day window:
+On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`. **Full backfill, back to back.** `--limit 0` processes everyone due in one run. Each official is saved as soon as it finishes, so you can stop with Ctrl+C at any time and re-run to pick up where it left off; the progress line shows elapsed time and an estimate of what is left. Keep the Mac awake and keep a log:
+
+```bash
+caffeinate -i ./scripts/run_positions.sh --limit 0 2>&1 | tee -a ~/official_positions.log
+```
+
+Officials that failed are retried by later runs after a 6-hour backoff (`--force` retries them now). After the backfill, a nightly run only redoes officials older than `--max-age-days` or whose pages changed:
 
 ```
 15 2 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --limit 40 >> /tmp/official_positions.log 2>&1

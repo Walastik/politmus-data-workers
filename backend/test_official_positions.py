@@ -325,6 +325,15 @@ class VersionAndHashTests(unittest.TestCase):
         self.assertNotEqual(base, extractor_version(("positions", "links v2"), "m1"))
 
 
+class ProgressTests(unittest.TestCase):
+    def test_eta_after_first_official(self):
+        from official_positions import _progress
+
+        self.assertEqual(_progress(0, 10, 0), "")
+        self.assertEqual(_progress(2, 10, 600), "  (elapsed 10m, ~40m left)")
+        self.assertEqual(_progress(5, 200, 3 * 3600), "  (elapsed 3h00m, ~117h00m left)")
+
+
 class LocalPromptsTests(unittest.TestCase):
     def _config(self, body: str) -> Path:
         directory = tempfile.TemporaryDirectory()
@@ -480,6 +489,20 @@ class ChatFnTests(unittest.TestCase):
         self.assertEqual(self.make(client)([], {}), '{"positions": []}')
         self.assertEqual([c["options"]["num_predict"] for c in client.calls], [100, 200])
         self.assertEqual(client.calls[0]["options"]["num_ctx"], client.calls[1]["options"]["num_ctx"])
+
+    def test_timeout_names_the_setting_to_raise(self):
+        import httpx
+        from official_positions import make_chat_fn
+
+        class SlowClient:
+            def chat(self, **kwargs):
+                raise httpx.ReadTimeout("timed out")
+
+        chat_fn = make_chat_fn("m", "h", 900, num_ctx=16384, num_predict=100, client=SlowClient())
+        with self.assertRaises(TimeoutError) as ctx:
+            chat_fn([], {})
+        self.assertIn("within 900s", str(ctx.exception))
+        self.assertIn("--timeout", str(ctx.exception))
 
     def test_retry_budget_stays_inside_the_context_window(self):
         from official_positions import make_chat_fn

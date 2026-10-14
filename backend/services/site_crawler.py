@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 from urllib import robotparser
-from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urldefrag, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -128,6 +128,8 @@ NEGATIVE_PATH_SUBSTRINGS = (
     "press-release",
     "newsletter",
     "casework",
+    "committee",
+    "caucus",
 )
 
 # Anchor text that marks a non-position link even if it also says "policy" etc.
@@ -258,6 +260,9 @@ def clean_link(base_url: str, href: str | None, allowed_host: str) -> str | None
         # Older House/Senate CMSs address issues as /issues/issue/?IssueID=123.
         # Keep queries only there; elsewhere they are search/calendar traps.
         if score_link(urlunsplit((parts.scheme, parts.netloc, path, "", "")), "") <= 0:
+            return None
+        # ?page=N is a listing of related news under an issue, not more of it.
+        if any(key.lower() == "page" for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
             return None
         query = parts.query
     return urlunsplit((parts.scheme, parts.netloc.lower(), path, query, ""))
