@@ -12,8 +12,6 @@ skipped without calling the model. Runs are round-robin by last attempt.
 from __future__ import annotations
 
 import argparse
-import fcntl
-import importlib.util
 import json
 import os
 import sys
@@ -21,8 +19,6 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +28,8 @@ from dotenv import load_dotenv
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
+from services import llm_runtime
+from services.llm_runtime import load_local_module, required_strings
 from services.official_positions import (
     DEFAULT_CHUNK_CHARS,
     SourceText,
@@ -124,109 +122,18 @@ def load_local_prompts(path: Path = LOCAL_CONFIG_PATH) -> Prompts:
 
     Loaded by file path so the worker finds it from any working directory.
     """
-    if not path.is_file():
-        raise RuntimeError(
-            f"{path} is missing. Copy backend/scripts/positions_llm_config.example.py "
-            "to backend/scripts/positions_llm_config.py and fill in the prompts "
-            "(the file is gitignored)."
-        )
-    spec = importlib.util.spec_from_file_location("positions_llm_config", path)
-    config = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config)
-    positions = getattr(config, "POSITIONS_SYSTEM_PROMPT", "") or ""
-    link_selection = getattr(config, "LINK_SELECTION_PROMPT", "") or ""
-    if not positions.strip() or not link_selection.strip():
-        raise RuntimeError(
-            f"{path.name} must define non-empty POSITIONS_SYSTEM_PROMPT "
-            "and LINK_SELECTION_PROMPT."
-        )
-    return Prompts(positions, link_selection)
+    config = load_local_module(path, example="positions_llm_config.example.py")
+    values = required_strings(config, ("POSITIONS_SYSTEM_PROMPT", "LINK_SELECTION_PROMPT"))
+    return Prompts(values["POSITIONS_SYSTEM_PROMPT"], values["LINK_SELECTION_PROMPT"])
 
 
 # -- Ollama ------------------------------------------------------------------
 
 
-def _field(obj, name):
-    """Read a field from an ollama response object or plain dict."""
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
-
-
-def make_chat_fn(
-    model: str,
-    host: str,
-    timeout: float,
-    num_ctx: int,
-    num_predict: int,
-    think: bool = False,
-    client=None,
-):
-    """chat_fn(messages, schema) -> JSON string.
-
-    Thinking is off by default: reasoning models (e.g. Nemotron) otherwise
-    spend the num_predict budget on hidden reasoning and return no answer.
-    An empty answer is retried once with double the output budget (that does
-    not reload the model; only a num_ctx change does, so num_ctx is fixed).
-    """
-    if client is None:
-        from llm_extractor import make_ollama_client
-
-        client = make_ollama_client(host, timeout)
-    state = {"think": think}
-
-    def call(messages, format_schema, temperature, budget):
-        kwargs = dict(
-            model=model,
-            messages=messages,
-            format=format_schema,
-            options={"temperature": temperature, "num_ctx": num_ctx, "num_predict": budget},
-            keep_alive="30m",
-        )
-        if state["think"] is not None:
-            kwargs["think"] = state["think"]
-        try:
-            return client.chat(**kwargs)
-        except httpx.TimeoutException as exc:
-            raise TimeoutError(
-                f"Ollama did not answer within {timeout:.0f}s; raise --timeout "
-                "(or OFFICIAL_POSITIONS_TIMEOUT_SECONDS) for slower models or --think"
-            ) from exc
-        except Exception as exc:
-            # Models without a thinking mode reject the parameter; drop it.
-            if state["think"] is not None and "think" in str(exc).lower():
-                state["think"] = None
-                kwargs.pop("think")
-                return client.chat(**kwargs)
-            raise
-
-    def chat_fn(messages, format_schema) -> str:
-        details = []
-        # The retry gets double the output budget, but never more than the
-        # context window leaves after the prompt (~3 characters per token).
-        prompt_tokens = sum(len(m.get("content") or "") for m in messages) // 3
-        retry_budget = max(num_predict, min(num_predict * 2, num_ctx - prompt_tokens - 256))
-        for attempt, (temperature, budget) in enumerate(
-            ((0, num_predict), (0.2, retry_budget)), start=1
-        ):
-            response = call(messages, format_schema, temperature, budget)
-            message = _field(response, "message")
-            content = _field(message, "content") if message is not None else None
-            if content and content.strip():
-                return content
-            thinking = (_field(message, "thinking") if message is not None else None) or ""
-            details.append(
-                f"attempt {attempt}: done_reason={_field(response, 'done_reason')}, "
-                f"output_tokens={_field(response, 'eval_count')}, "
-                f"thinking_chars={len(thinking)}, num_predict={budget}"
-            )
-        raise ValueError(
-            "Ollama returned an empty response ("
-            + "; ".join(details)
-            + "). If done_reason is 'length', raise --num-predict or keep --think off."
-        )
-
-    return chat_fn
+def make_chat_fn(*args, **kwargs):
+    """services.llm_runtime.make_chat_fn, naming this worker's timeout setting."""
+    kwargs.setdefault("timeout_env", "OFFICIAL_POSITIONS_TIMEOUT_SECONDS")
+    return llm_runtime.make_chat_fn(*args, **kwargs)
 
 
 # -- selection ---------------------------------------------------------------
@@ -360,17 +267,8 @@ def extract_positions(
     return merge_positions(verified), len(chunks), rejected
 
 
-def _duration(seconds: float) -> str:
-    minutes = int(seconds // 60)
-    return f"{minutes // 60}h{minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"
-
-
-def _progress(done: int, total: int, elapsed: float) -> str:
-    """'  (elapsed 1h05m, ~3h10m left)' once at least one official is done."""
-    if done == 0 or total <= 1:
-        return ""
-    remaining = elapsed / done * (total - done)
-    return f"  (elapsed {_duration(elapsed)}, ~{_duration(remaining)} left)"
+_duration = llm_runtime.duration
+_progress = llm_runtime.progress
 
 
 def _record_attempt(session, official_id, sync, *, status, now, error=None, **fields):
@@ -720,18 +618,8 @@ def _process_official(
 # -- CLI ---------------------------------------------------------------------
 
 
-@contextmanager
 def run_lock(path: str = LOCK_PATH):
-    """Exclusive non-blocking lock so overlapping cron runs exit early."""
-    handle = open(path, "w")
-    try:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RuntimeError(f"another official_positions run holds {path}")
-        yield
-    finally:
-        handle.close()
+    return llm_runtime.run_lock(path, "official_positions")
 
 
 def show_official(official_id: str, session_factory=None) -> int:

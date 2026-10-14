@@ -6,11 +6,11 @@ import argparse
 import os
 import sys
 
-import httpx
 from dotenv import load_dotenv
 
 from database import SessionLocal
 from init_db import ensure_schema
+from services.llm_runtime import make_ollama_client
 from services.bill_effects import (
     extract_one_bill,
     ensure_default_guidelines,
@@ -25,19 +25,6 @@ load_dotenv()
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:32b")
 DEFAULT_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))
-
-
-def make_ollama_client(host: str, timeout_seconds: float):
-    try:
-        import ollama
-    except ImportError as exc:
-        raise RuntimeError(
-            "The ollama package is required. pip install ollama"
-        ) from exc
-    return ollama.Client(
-        host=host,
-        timeout=httpx.Timeout(timeout_seconds, connect=10.0),
-    )
 
 
 def ollama_chat_fn(client, model: str):
