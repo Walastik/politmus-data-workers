@@ -4,3 +4,4 @@
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 trafilatura>=2.0.0
+ollama>=0.5.0  # think= parameter for reasoning models

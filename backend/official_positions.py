@@ -20,6 +20,8 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+import httpx
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -45,6 +47,8 @@ from services.official_positions import (
     target_vocabulary,
     upsert_source_pages,
     verify_positions,
+    REJECT_BILL_TARGET,
+    REJECT_QUOTE,
 )
 
 load_dotenv()
@@ -54,9 +58,11 @@ DEFAULT_MODEL = os.getenv(
     os.getenv("OLLAMA_MODEL", "nemotron-3.5-lightning:30b"),
 )
 DEFAULT_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300"))
+# Not OLLAMA_TIMEOUT_SECONDS: the bill classifier's short value is too tight for
+# dense models or --think, which can spend several minutes on one chunk.
+DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OFFICIAL_POSITIONS_TIMEOUT_SECONDS", "900"))
 DEFAULT_NUM_CTX = 16384
-DEFAULT_NUM_PREDICT = 2048
+DEFAULT_NUM_PREDICT = 4096
 DEFAULT_CONCURRENCY = 2
 DEFAULT_MAX_AGE_DAYS = 30
 FAILED_BACKOFF_HOURS = 6
@@ -75,6 +81,36 @@ EXTRACTED_STATUSES = ("ok", "no_positions", "no_issue_pages")
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+@dataclass(frozen=True)
+class OfficialSnapshot:
+    """Plain copy of the Official fields the worker needs.
+
+    The crawl runs on a background thread; ORM objects must stay on the
+    thread that owns the session, because reading an expired attribute
+    issues a query on that session.
+    """
+
+    id: str
+    name: str | None
+    party: str | None
+    state: str | None
+    district: int | None
+    office: str | None
+    website_url: str | None
+
+    @classmethod
+    def of(cls, official) -> "OfficialSnapshot":
+        return cls(
+            official.id,
+            official.name,
+            official.party,
+            official.state,
+            official.district,
+            official.office,
+            official.website_url,
+        )
 
 
 @dataclass(frozen=True)
@@ -110,36 +146,85 @@ def load_local_prompts(path: Path = LOCAL_CONFIG_PATH) -> Prompts:
 # -- Ollama ------------------------------------------------------------------
 
 
-def make_chat_fn(model: str, host: str, timeout: float, num_ctx: int, num_predict: int):
-    """chat_fn(messages, schema) -> JSON string, with one retry on empty output.
+def _field(obj, name):
+    """Read a field from an ollama response object or plain dict."""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
-    num_ctx is the same for every call: changing it makes Ollama reload the model.
+
+def make_chat_fn(
+    model: str,
+    host: str,
+    timeout: float,
+    num_ctx: int,
+    num_predict: int,
+    think: bool = False,
+    client=None,
+):
+    """chat_fn(messages, schema) -> JSON string.
+
+    Thinking is off by default: reasoning models (e.g. Nemotron) otherwise
+    spend the num_predict budget on hidden reasoning and return no answer.
+    An empty answer is retried once with double the output budget (that does
+    not reload the model; only a num_ctx change does, so num_ctx is fixed).
     """
-    from llm_extractor import make_ollama_client
+    if client is None:
+        from llm_extractor import make_ollama_client
 
-    client = make_ollama_client(host, timeout)
+        client = make_ollama_client(host, timeout)
+    state = {"think": think}
+
+    def call(messages, format_schema, temperature, budget):
+        kwargs = dict(
+            model=model,
+            messages=messages,
+            format=format_schema,
+            options={"temperature": temperature, "num_ctx": num_ctx, "num_predict": budget},
+            keep_alive="30m",
+        )
+        if state["think"] is not None:
+            kwargs["think"] = state["think"]
+        try:
+            return client.chat(**kwargs)
+        except httpx.TimeoutException as exc:
+            raise TimeoutError(
+                f"Ollama did not answer within {timeout:.0f}s; raise --timeout "
+                "(or OFFICIAL_POSITIONS_TIMEOUT_SECONDS) for slower models or --think"
+            ) from exc
+        except Exception as exc:
+            # Models without a thinking mode reject the parameter; drop it.
+            if state["think"] is not None and "think" in str(exc).lower():
+                state["think"] = None
+                kwargs.pop("think")
+                return client.chat(**kwargs)
+            raise
 
     def chat_fn(messages, format_schema) -> str:
-        for attempt in (1, 2):
-            response = client.chat(
-                model=model,
-                messages=messages,
-                format=format_schema,
-                options={
-                    "temperature": 0 if attempt == 1 else 0.2,
-                    "num_ctx": num_ctx,
-                    "num_predict": num_predict,
-                },
-                keep_alive="30m",
-            )
-            message = getattr(response, "message", None)
-            content = getattr(message, "content", None) if message is not None else None
-            if not content and isinstance(response, dict):
-                content = (response.get("message") or {}).get("content")
+        details = []
+        # The retry gets double the output budget, but never more than the
+        # context window leaves after the prompt (~3 characters per token).
+        prompt_tokens = sum(len(m.get("content") or "") for m in messages) // 3
+        retry_budget = max(num_predict, min(num_predict * 2, num_ctx - prompt_tokens - 256))
+        for attempt, (temperature, budget) in enumerate(
+            ((0, num_predict), (0.2, retry_budget)), start=1
+        ):
+            response = call(messages, format_schema, temperature, budget)
+            message = _field(response, "message")
+            content = _field(message, "content") if message is not None else None
             if content and content.strip():
                 return content
-            time.sleep(1.0)
-        raise ValueError("Ollama returned an empty response")
+            thinking = (_field(message, "thinking") if message is not None else None) or ""
+            details.append(
+                f"attempt {attempt}: done_reason={_field(response, 'done_reason')}, "
+                f"output_tokens={_field(response, 'eval_count')}, "
+                f"thinking_chars={len(thinking)}, num_predict={budget}"
+            )
+        raise ValueError(
+            "Ollama returned an empty response ("
+            + "; ".join(details)
+            + "). If done_reason is 'length', raise --num-predict or keep --think off."
+        )
 
     return chat_fn
 
@@ -231,32 +316,61 @@ def extract_positions(
     vocabulary: list[str],
     concurrency: int,
     chunk_chars: int = DEFAULT_CHUNK_CHARS,
+    log=None,
 ):
     """Map each chunk through the model, verify quotes, and merge.
 
     Raises if any chunk fails, so a partial result is never saved.
-    Returns (merged positions, chunk count, rejected count).
+    Returns (merged positions, chunk count, rejection counts by reason).
     """
     chunks = [chunk for source in sources for chunk in chunk_source(source, chunk_chars)]
     if not chunks:
-        return [], 0, 0
+        return [], 0, {}
+    total = len(chunks)
+    if log:
+        log(f"  sending {total} chunk(s) to the model...")
 
-    def run(chunk):
-        raw = chat_fn(
-            build_position_messages(prompt, official, chunk, vocabulary),
-            StatedPositionsOutput.model_json_schema(),
-        )
-        return verify_positions(parse_positions(raw), chunk)
+    def run(numbered):
+        number, chunk = numbered
+        try:
+            raw = chat_fn(
+                build_position_messages(prompt, official, chunk, vocabulary),
+                StatedPositionsOutput.model_json_schema(),
+            )
+            result = verify_positions(parse_positions(raw), chunk)
+        except Exception as exc:
+            where = chunk.url + (f" [{chunk.heading}]" if chunk.heading else "")
+            raise RuntimeError(f"chunk {number}/{total} {where}: {exc}") from exc
+        if log:
+            log(f"    chunk {number}/{total}: {len(result[0])} kept, {sum(result[1].values())} rejected")
+        return result
 
-    workers = max(1, min(concurrency, len(chunks)))
+    numbered = list(enumerate(chunks, start=1))
+    workers = max(1, min(concurrency, total))
     if workers == 1:
-        results = [run(chunk) for chunk in chunks]
+        results = [run(item) for item in numbered]
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(run, chunks))
+            results = list(pool.map(run, numbered))
     verified = [item for kept, _ in results for item in kept]
-    rejected = sum(count for _, count in results)
+    rejected: dict[str, int] = {}
+    for _, counts in results:
+        for reason, count in counts.items():
+            rejected[reason] = rejected.get(reason, 0) + count
     return merge_positions(verified), len(chunks), rejected
+
+
+def _duration(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return f"{minutes // 60}h{minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"
+
+
+def _progress(done: int, total: int, elapsed: float) -> str:
+    """'  (elapsed 1h05m, ~3h10m left)' once at least one official is done."""
+    if done == 0 or total <= 1:
+        return ""
+    remaining = elapsed / done * (total - done)
+    return f"  (elapsed {_duration(elapsed)}, ~{_duration(remaining)} left)"
 
 
 def _record_attempt(session, official_id, sync, *, status, now, error=None, **fields):
@@ -283,6 +397,7 @@ def _empty_stats(model, dry_run):
         "no_positions": 0,
         "stances_saved": 0,
         "rejected_unverified": 0,
+        "rejected_bill_target": 0,
         "chunks": 0,
         "crawled_only": 0,
         "blocked": 0,
@@ -313,6 +428,7 @@ def run_positions(
     timeout: float | None = None,
     num_ctx: int = DEFAULT_NUM_CTX,
     num_predict: int = DEFAULT_NUM_PREDICT,
+    think: bool = False,
     crawl_config=None,
     prompts: Prompts | None = None,
     chat_fn=None,
@@ -361,6 +477,7 @@ def run_positions(
                 timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS,
                 num_ctx,
                 num_predict,
+                think=think,
             )
         if crawler is None and not extract_only:
             from services.site_crawler import SiteCrawler
@@ -368,26 +485,46 @@ def run_positions(
             crawler = SiteCrawler(crawl_config, log=log)
             owns_crawler = True
         vocabulary = [] if crawl_only else target_vocabulary(session)
+        # Nothing to write yet: end the read transaction so no connection
+        # sits open (and gets closed by the server) while crawls and model
+        # calls run. Later queries check out a fresh, pre-pinged connection.
+        session.rollback()
 
-        def crawl(official):
+        # Snapshot before any commit expires the ORM objects.
+        rows = [(OfficialSnapshot.of(official), sync) for official, sync in rows]
+
+        def crawl(official: OfficialSnapshot):
             selector = (
                 make_link_selector(chat_fn, official, prompts.link_selection)
                 if chat_fn is not None and prompts is not None
                 else None
             )
-            return crawler.crawl(official.website_url, select_links_fn=selector)
+            try:
+                return crawler.crawl(official.website_url, select_links_fn=selector)
+            except Exception as exc:  # one bad site must not end the run
+                from services.site_crawler import CrawlResult
+
+                return CrawlResult(
+                    status="failed",
+                    start_url=official.website_url,
+                    error=f"crawler error: {type(exc).__name__}: {exc}",
+                )
 
         # Crawl the next official in the background while the model works on
         # the current one. The crawler is only ever used by this one thread.
         prefetch = ThreadPoolExecutor(max_workers=1) if not extract_only else None
         futures = {}
+        run_started = time.monotonic()
         if prefetch is not None:
             futures[0] = prefetch.submit(crawl, rows[0][0])
         try:
             for index, (official, sync) in enumerate(rows):
                 if prefetch is not None and index + 1 < len(rows):
                     futures[index + 1] = prefetch.submit(crawl, rows[index + 1][0])
-                log(f"[{index + 1}/{len(rows)}] {official.id} {official.name or ''} - {official.website_url}")
+                log(
+                    f"[{index + 1}/{len(rows)}] {official.id} {official.name or ''} - "
+                    f"{official.website_url}{_progress(index, len(rows), time.monotonic() - run_started)}"
+                )
                 crawl_future = futures.pop(index, None)
                 _process_official(
                     session,
@@ -418,7 +555,10 @@ def run_positions(
     finally:
         if owns_crawler:
             crawler.close()
-        session.close()
+        try:
+            session.close()
+        except Exception as exc:  # a dropped idle connection must not mask the results
+            log(f"(ignored error closing the DB session: {type(exc).__name__})")
 
 
 def _process_official(
@@ -496,6 +636,9 @@ def _process_official(
                 session.commit()
             return
 
+        # Model calls can take many minutes; hold no DB connection meanwhile.
+        # Only reads happened above, so there is nothing to lose here.
+        session.rollback()
         t0 = time.time()
         positions, chunk_count, rejected = extract_positions(
             official,
@@ -505,17 +648,24 @@ def _process_official(
             vocabulary=vocabulary,
             concurrency=concurrency,
             chunk_chars=chunk_chars,
+            log=log,
         )
         stats["chunks"] += chunk_count
-        stats["rejected_unverified"] += rejected
+        stats["rejected_unverified"] += rejected.get(REJECT_QUOTE, 0)
+        stats["rejected_bill_target"] += rejected.get(REJECT_BILL_TARGET, 0)
+        reasons = ", ".join(f"{n} {reason}" for reason, n in rejected.items() if n) or "none"
         log(
             f"  -> {len(positions)} position(s) from {chunk_count} chunk(s) "
-            f"in {time.time() - t0:.1f}s ({rejected} rejected: quote not on page)"
+            f"in {time.time() - t0:.1f}s (rejected: {reasons})"
         )
 
         if dry_run:
             for item in positions:
-                log("     " + json.dumps({**item.position.model_dump(), "source_url": item.source_url}))
+                log("     " + json.dumps({
+                    **item.position.model_dump(),
+                    "official_direction": item.direction,
+                    "source_url": item.source_url,
+                }))
             stats["extracted"] += 1
             if not positions:
                 stats["no_positions"] += 1
@@ -608,8 +758,9 @@ def show_official(official_id: str, session_factory=None) -> int:
         )
         for s in stances:
             print(
-                f"\n  [{s.policy_area}] {s.issue_label}: {s.target_name} / {s.mechanism} / "
-                f"{s.direction} ({s.emphasis})\n    {s.summary}\n    \"{s.evidence_quote}\"\n    {s.source_url}"
+                f"\n  [{s.policy_area}] {s.issue_label}: wants {s.target_name} / {s.mechanism} / "
+                f"{s.direction} ({s.emphasis}; {s.stance} {s.policy_direction})"
+                f"\n    {s.summary}\n    \"{s.evidence_quote}\"\n    {s.source_url}"
             )
         if not stances:
             print("  No stated positions stored.")
@@ -627,6 +778,7 @@ def print_stats(stats: dict) -> None:
     print(f"  Stances saved:        {stats['stances_saved']}")
     print(f"  Chunks sent to model: {stats['chunks']}")
     print(f"  Rejected (bad quote): {stats['rejected_unverified']}")
+    print(f"  Rejected (bill name): {stats['rejected_bill_target']}")
     if stats["crawled_only"]:
         print(f"  Crawled only:         {stats['crawled_only']}")
     print(f"  Blocked:              {stats['blocked']}")
@@ -672,7 +824,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default=None, help=f"Ollama host (default {DEFAULT_HOST}).")
     parser.add_argument("--timeout", type=float, default=None, help=f"Ollama request timeout seconds (default {int(DEFAULT_TIMEOUT_SECONDS)}).")
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help=f"Ollama context window (default {DEFAULT_NUM_CTX}).")
-    parser.add_argument("--num-predict", type=int, default=DEFAULT_NUM_PREDICT, help=f"Max output tokens per call (default {DEFAULT_NUM_PREDICT}).")
+    parser.add_argument("--num-predict", type=int, default=DEFAULT_NUM_PREDICT, help=f"Max output tokens per call; retries double it (default {DEFAULT_NUM_PREDICT}).")
+    parser.add_argument("--think", action="store_true", help="Let reasoning models think before answering (slower; off by default).")
     args = parser.parse_args(argv)
 
     if args.show:
@@ -703,6 +856,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout=args.timeout,
                 num_ctx=args.num_ctx,
                 num_predict=args.num_predict,
+                think=args.think,
                 crawl_config=config,
             )
     except KeyboardInterrupt:

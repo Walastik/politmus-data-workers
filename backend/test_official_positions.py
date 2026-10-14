@@ -27,7 +27,11 @@ from services.official_positions import (
     combined_hash,
     extractor_version,
     make_link_selector,
+    REJECT_BILL_TARGET,
+    REJECT_QUOTE,
+    is_bill_name,
     merge_positions,
+    official_direction,
     parse_positions,
     clean_quote,
     quote_in_text,
@@ -53,7 +57,8 @@ CONGRESS_TEXT = (
     "create millions of jobs and move our national energy grid to renewable sources.\n\n"
     "## Health Care\n\n"
     "Representative Example believes health care is a human right. She supports "
-    "expanding Medicaid so every family in the district can see a doctor.\n\n"
+    "expanding Medicaid so every family in the district can see a doctor. "
+    "She will fight against cuts to Medicaid.\n\n"
     "- Expand Medicaid in every state\n"
     "- Protect coverage for pre-existing conditions"
 )
@@ -66,6 +71,7 @@ def position(**overrides) -> dict:
         "target_name": "Renewable Energy",
         "mechanism": "funding",
         "direction": "increase",
+        "stance": "supports",
         "emphasis": "high",
         "summary": "Supports moving the national grid to renewable energy.",
         "evidence_quote": (
@@ -141,7 +147,7 @@ class QuoteVerificationTests(unittest.TestCase):
             position(target_name="Fossil Fuels", mechanism="regulation", evidence_quote="We will ban fracking nationwide immediately."),
         ))
         kept, rejected = verify_positions(output, Chunk("https://x.gov/congress", "Climate", CONGRESS_TEXT, 7))
-        self.assertEqual(rejected, 1)
+        self.assertEqual(rejected, {REJECT_QUOTE: 1, REJECT_BILL_TARGET: 0})
         self.assertEqual([k.position.target_name for k in kept], ["Renewable Energy"])
         self.assertEqual(kept[0].source_url, "https://x.gov/congress")
         self.assertEqual(kept[0].page_id, 7)
@@ -193,18 +199,103 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(sent[0][0]["content"], "PICK LINKS")
 
 
+class BillNameTargetTests(unittest.TestCase):
+    def test_bill_and_act_names_are_detected(self):
+        for name in (
+            "National Defense Authorization Act",
+            "Medicare for All Act of 2021",
+            "One Big Beautiful Bill Act",
+            "Inflation Reduction Act",
+            "H.R. 1976",
+            "S. 22",
+        ):
+            self.assertTrue(is_bill_name(name), name)
+
+    def test_policy_nouns_and_standing_laws_are_kept(self):
+        for name in (
+            "Medicaid",
+            "Faircloth Amendment",
+            "Affordable Care Act",
+            "voting rights act",
+            "Clean Water Act Enforcement",
+            "Impact Aid",
+        ):
+            self.assertFalse(is_bill_name(name), name)
+
+    def test_verify_rejects_bill_name_targets_separately(self):
+        output = parse_positions(model_json(
+            position(),
+            position(
+                target_name="Clean Jobs Act",
+                mechanism="regulation",
+                evidence_quote="The Congresswoman’s first bill was the Clean Jobs Act.",
+            ),
+        ))
+        kept, rejected = verify_positions(output, Chunk("u", "Climate", CONGRESS_TEXT))
+        self.assertEqual([k.position.target_name for k in kept], ["Renewable Energy"])
+        self.assertEqual(rejected, {REJECT_QUOTE: 0, REJECT_BILL_TARGET: 1})
+
+
+class StanceTests(unittest.TestCase):
+    def test_official_direction_follows_stance(self):
+        cases = {
+            ("increase", "supports"): "increase",
+            ("decrease", "supports"): "decrease",
+            ("maintain", "supports"): "maintain",
+            ("increase", "opposes"): "decrease",
+            ("decrease", "opposes"): "increase",  # fights cuts -> wants more
+            ("maintain", "opposes"): "mixed",
+            ("mixed", "opposes"): "mixed",
+        }
+        for (direction, stance), wanted in cases.items():
+            p = StatedPosition(**position(direction=direction, stance=stance))
+            self.assertEqual(official_direction(p), wanted, (direction, stance))
+            self.assertEqual(VerifiedPosition(p, "u", None).direction, wanted)
+
+    def test_stance_is_required(self):
+        data = position()
+        del data["stance"]
+        with self.assertRaises(ValidationError):
+            parse_positions(model_json(data))
+
+
 class MergeTests(unittest.TestCase):
     def _verified(self, **overrides):
         return VerifiedPosition(StatedPosition(**position(**overrides)), "u", None)
 
-    def test_conflicting_directions_become_mixed(self):
+    def test_support_and_opposed_opposite_agree(self):
         merged = merge_positions([
-            self._verified(direction="increase", emphasis="medium"),
+            self._verified(target_name="Medicaid", direction="increase", stance="supports"),
+            self._verified(target_name="Medicaid", direction="decrease", stance="opposes"),
+        ])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].direction, "increase")
+
+    def test_weighted_majority_wins_over_a_weaker_conflict(self):
+        # AOC: "Voting Rights" came out "mixed" from one off-phrased chunk.
+        merged = merge_positions([
+            self._verified(direction="increase", emphasis="high", summary="strong"),
             self._verified(target_name="renewable energy", direction="decrease", emphasis="low"),
         ])
         self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].position.direction, "mixed")
-        self.assertEqual(merged[0].position.emphasis, "medium")
+        self.assertEqual(merged[0].direction, "increase")
+        self.assertEqual(merged[0].position.summary, "strong")
+
+    def test_two_weaker_statements_outvote_one_strong(self):
+        merged = merge_positions([
+            self._verified(direction="increase", emphasis="high"),
+            self._verified(direction="decrease", emphasis="medium", summary="a"),
+            self._verified(direction="decrease", emphasis="medium", summary="b"),
+        ])
+        self.assertEqual(merged[0].direction, "decrease")
+        self.assertEqual(merged[0].position.direction, "decrease")
+
+    def test_exact_tie_becomes_mixed(self):
+        merged = merge_positions([
+            self._verified(direction="increase", emphasis="medium"),
+            self._verified(direction="decrease", emphasis="medium"),
+        ])
+        self.assertEqual(merged[0].direction, "mixed")
 
     def test_highest_emphasis_supplies_statement_and_sorts_first(self):
         merged = merge_positions([
@@ -232,6 +323,15 @@ class VersionAndHashTests(unittest.TestCase):
         self.assertNotEqual(base, extractor_version(("positions", "links"), "m2"))
         self.assertNotEqual(base, extractor_version(("positions v2", "links"), "m1"))
         self.assertNotEqual(base, extractor_version(("positions", "links v2"), "m1"))
+
+
+class ProgressTests(unittest.TestCase):
+    def test_eta_after_first_official(self):
+        from official_positions import _progress
+
+        self.assertEqual(_progress(0, 10, 0), "")
+        self.assertEqual(_progress(2, 10, 600), "  (elapsed 10m, ~40m left)")
+        self.assertEqual(_progress(5, 200, 3 * 3600), "  (elapsed 3h00m, ~117h00m left)")
 
 
 class LocalPromptsTests(unittest.TestCase):
@@ -328,17 +428,119 @@ class ExtractPositionsTests(unittest.TestCase):
             OFFICIAL, sources, prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=2
         )
         self.assertEqual(chunks, 2)
-        self.assertEqual(rejected, 1)
+        self.assertEqual(rejected[REJECT_QUOTE], 1)
         self.assertEqual(sorted(m.position.target_name for m in merged), ["Medicaid", "Renewable Energy"])
 
     def test_any_chunk_failure_raises(self):
         def chat_fn(messages, schema):
             raise TimeoutError("Ollama timed out")
 
-        with self.assertRaises(TimeoutError):
+        with self.assertRaises(RuntimeError) as ctx:
             extract_positions(
-                OFFICIAL, [SourceText("u", CONGRESS_TEXT)], prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=2
+                OFFICIAL, [SourceText("https://x.gov/congress", CONGRESS_TEXT)],
+                prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=2,
             )
+        self.assertIn("chunk 1/1 https://x.gov/congress", str(ctx.exception))
+        self.assertIn("Ollama timed out", str(ctx.exception))
+
+
+class FakeOllamaClient:
+    """Returns queued responses and records each chat() call."""
+
+    def __init__(self, responses, reject_think=False):
+        self.responses = list(responses)
+        self.calls = []
+        self.reject_think = reject_think
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.reject_think and "think" in kwargs:
+            raise ValueError('"nemo" does not support thinking')
+        return self.responses.pop(0)
+
+
+def ollama_response(content="", thinking="", done_reason="stop", eval_count=10):
+    return SimpleNamespace(
+        message=SimpleNamespace(content=content, thinking=thinking),
+        done_reason=done_reason,
+        eval_count=eval_count,
+    )
+
+
+class ChatFnTests(unittest.TestCase):
+    def make(self, client, **kwargs):
+        from official_positions import make_chat_fn
+
+        return make_chat_fn("m", "h", 1, num_ctx=16384, num_predict=100, client=client, **kwargs)
+
+    def test_thinking_is_off_and_context_fixed(self):
+        client = FakeOllamaClient([ollama_response('{"positions": []}')])
+        self.assertEqual(self.make(client)([], {}), '{"positions": []}')
+        call = client.calls[0]
+        self.assertIs(call["think"], False)
+        self.assertEqual(call["options"]["num_ctx"], 16384)
+        self.assertEqual(call["options"]["num_predict"], 100)
+
+    def test_empty_answer_retries_with_double_budget(self):
+        client = FakeOllamaClient([
+            ollama_response("", thinking="x" * 500, done_reason="length", eval_count=100),
+            ollama_response('{"positions": []}'),
+        ])
+        self.assertEqual(self.make(client)([], {}), '{"positions": []}')
+        self.assertEqual([c["options"]["num_predict"] for c in client.calls], [100, 200])
+        self.assertEqual(client.calls[0]["options"]["num_ctx"], client.calls[1]["options"]["num_ctx"])
+
+    def test_timeout_names_the_setting_to_raise(self):
+        import httpx
+        from official_positions import make_chat_fn
+
+        class SlowClient:
+            def chat(self, **kwargs):
+                raise httpx.ReadTimeout("timed out")
+
+        chat_fn = make_chat_fn("m", "h", 900, num_ctx=16384, num_predict=100, client=SlowClient())
+        with self.assertRaises(TimeoutError) as ctx:
+            chat_fn([], {})
+        self.assertIn("within 900s", str(ctx.exception))
+        self.assertIn("--timeout", str(ctx.exception))
+
+    def test_retry_budget_stays_inside_the_context_window(self):
+        from official_positions import make_chat_fn
+
+        client = FakeOllamaClient([ollama_response(""), ollama_response('{"positions": []}')])
+        chat_fn = make_chat_fn("m", "h", 1, num_ctx=16384, num_predict=8192, client=client)
+        chat_fn([{"role": "user", "content": "x" * 15000}], {})  # ~5000 prompt tokens
+        budgets = [c["options"]["num_predict"] for c in client.calls]
+        self.assertEqual(budgets[0], 8192)
+        self.assertLessEqual(budgets[1], 16384 - 5000)
+        self.assertGreaterEqual(budgets[1], 8192)
+
+    def test_error_explains_why_the_answer_was_empty(self):
+        client = FakeOllamaClient([
+            ollama_response("", thinking="x" * 500, done_reason="length", eval_count=100),
+            ollama_response("  ", thinking="y" * 900, done_reason="length", eval_count=200),
+        ])
+        with self.assertRaises(ValueError) as ctx:
+            self.make(client)([], {})
+        message = str(ctx.exception)
+        self.assertIn("done_reason=length", message)
+        self.assertIn("thinking_chars=900", message)
+        self.assertIn("--num-predict", message)
+
+    def test_models_without_thinking_mode_drop_the_parameter(self):
+        client = FakeOllamaClient(
+            [ollama_response('{"positions": []}'), ollama_response('{"positions": []}')],
+            reject_think=True,
+        )
+        chat_fn = self.make(client)
+        chat_fn([], {})
+        chat_fn([], {})
+        self.assertEqual(["think" in c for c in client.calls], [True, False, False])
+
+    def test_think_flag_is_passed_through(self):
+        client = FakeOllamaClient([ollama_response('{"positions": []}')])
+        self.make(client, think=True)([], {})
+        self.assertIs(client.calls[0]["think"], True)
 
 
 def _test_database_available() -> bool:
@@ -394,6 +596,7 @@ class RunPositionsDatabaseTests(unittest.TestCase):
     def tearDown(self):
         from models import PolicyTarget
 
+        self._cleanup_extra()
         self._cleanup()
         session = self.SessionLocal()
         session.query(PolicyTarget).filter(~PolicyTarget.id.in_(self.existing_targets or {-1})).delete(
@@ -437,13 +640,16 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         self.calls.append(messages)
         return model_json(
             position(),
+            # Opposing a cut: stored as wanting Medicaid funding to increase.
             position(
                 issue_label="Health Care",
                 policy_area="Health",
                 target_name="Medicaid",
+                direction="decrease",
+                stance="opposes",
                 emphasis="medium",
-                summary="Supports expanding Medicaid.",
-                evidence_quote="She supports expanding Medicaid so every family in the district can see a doctor.",
+                summary="Opposes cuts to Medicaid.",
+                evidence_quote="She will fight against cuts to Medicaid.",
             ),
             position(target_name="Invented", evidence_quote="This sentence is nowhere on the page."),
         )
@@ -491,6 +697,17 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         ])
         sync = self._sync()
         self.assertEqual((sync.status, sync.stances_saved, sync.pages_found), ("ok", 2, 1))
+        from models import OfficialStance
+
+        session = self.SessionLocal()
+        medicaid = session.query(OfficialStance).filter_by(
+            official_id=self.OFFICIAL_ID, target_name="Medicaid"
+        ).one()
+        self.assertEqual(
+            (medicaid.direction, medicaid.stance, medicaid.policy_direction),
+            ("increase", "opposes", "decrease"),
+        )
+        session.close()
         calls_after_first = len(self.calls)
 
         self.clock[0] += timedelta(hours=1)
@@ -516,6 +733,172 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         self.assertEqual(stats["extracted"], 1)
         self.assertEqual(self._sync().status, "ok")
         self.assertEqual(self._sync().attempts, 0)
+
+    def test_background_crawls_never_touch_the_session(self):
+        """Regression: the prefetch thread read expired ORM attributes
+        (official.website_url / name) while the main thread used the session,
+        which Postgres sessions reject ("concurrent operations are not
+        permitted"). Several officials, slow crawls and model calls, and a
+        crawler that uses the link-selection fallback (describe_official)."""
+        import time as _time
+        from models import Official
+        from official_positions import run_positions
+        from services.site_crawler import CrawlResult, CrawledPage, content_hash
+
+        session = self.SessionLocal()
+        for n in (2, 3, 4):
+            session.add(Official(
+                id=f"ZZTEST000{n}", name=f"Rep {n}", state="Ohio", party="Independent",
+                office="Representative", district=n, current_member=True,
+                website_url=f"https://rep{n}.example.gov", level="zztest",
+            ))
+        session.query(Official).filter(Official.id == self.OFFICIAL_ID).update({"level": "zztest"})
+        session.commit()
+        session.close()
+
+        test = self
+
+        class SlowCrawler:
+            def crawl(self, website_url, select_links_fn=None):
+                _time.sleep(0.15)
+                if select_links_fn is not None:
+                    select_links_fn([SimpleNamespace(url=website_url + "/issues", text="Issues")])
+                return CrawlResult(status="ok", start_url=website_url, pages=[
+                    CrawledPage(website_url + "/issues", "issues_index", "Issues", CONGRESS_TEXT, content_hash(CONGRESS_TEXT), 200)
+                ])
+
+            def close(self):
+                pass
+
+        def chat(messages, schema):
+            _time.sleep(0.05)
+            if "link_numbers" in json.dumps(schema):
+                return json.dumps({"link_numbers": [1]})
+            return test._chat(messages, schema)
+
+        from sqlalchemy import event
+        from database import engine
+
+        sql_threads = set()
+
+        def record_thread(*_args):
+            sql_threads.add(threading.get_ident())
+
+        event.listen(engine, "before_cursor_execute", record_thread)
+        try:
+            stats = run_positions(
+                limit=0, level="zztest", chat_fn=chat, crawler=SlowCrawler(),
+                session_factory=self.SessionLocal, prompts=Prompts("P", "L"),
+                model="test-model", now_fn=lambda: self.clock[0], log=lambda _m: None,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", record_thread)
+        # Every query ran on the caller's thread, never on the crawl thread.
+        self.assertEqual(sql_threads, {threading.get_ident()})
+        self.assertEqual(stats["selected"], 4)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["extracted"], 4)
+
+    def test_crawler_exception_is_recorded_not_fatal(self):
+        from official_positions import run_positions
+
+        class Exploding:
+            def crawl(self, website_url, select_links_fn=None):
+                raise RuntimeError("socket exploded")
+
+            def close(self):
+                pass
+
+        stats = run_positions(
+            official_id=self.OFFICIAL_ID, chat_fn=self._chat, crawler=Exploding(),
+            session_factory=self.SessionLocal, prompts=Prompts("P", "L"),
+            model="test-model", now_fn=lambda: self.clock[0], log=lambda _m: None,
+        )
+        self.assertEqual(stats["failed"], 1)
+        sync = self._sync()
+        self.assertEqual(sync.status, "failed")
+        self.assertIn("socket exploded", sync.last_error)
+
+    def _cleanup_extra(self):
+        from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
+
+        session = self.SessionLocal()
+        ids = [f"ZZTEST000{n}" for n in (2, 3, 4)]
+        for model in (OfficialStance, OfficialSourcePage, OfficialPositionSync):
+            session.query(model).filter(model.official_id.in_(ids)).delete(synchronize_session=False)
+        session.query(Official).filter(Official.id.in_(ids)).delete(synchronize_session=False)
+        session.commit()
+        session.close()
+
+    def _held_connections_during_model_calls(self, **kwargs):
+        """Run the worker and record how many pooled DB connections are
+        checked out each time the model is called."""
+        from sqlalchemy import event
+        from database import engine
+
+        held = {"now": 0}
+        seen = []
+
+        def checkout(*_args):
+            held["now"] += 1
+
+        def checkin(*_args):
+            held["now"] -= 1
+
+        def chat(messages, schema):
+            seen.append(held["now"])
+            return self._chat(messages, schema)
+
+        event.listen(engine, "checkout", checkout)
+        event.listen(engine, "checkin", checkin)
+        try:
+            stats = self._run(chat_fn=chat, **kwargs)
+        finally:
+            event.remove(engine, "checkout", checkout)
+            event.remove(engine, "checkin", checkin)
+        return stats, seen
+
+    def test_no_db_connection_is_held_while_the_model_runs(self):
+        """Regression: model calls take many minutes, and Fly closed the
+        connection the session kept open in a transaction meanwhile
+        ("server closed the connection unexpectedly")."""
+        stats, seen = self._held_connections_during_model_calls()
+        self.assertEqual(stats["extracted"], 1)
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {0})
+
+        self.pages["https://example-rep.house.gov/congress"] = CONGRESS_TEXT + "\n\nNew paragraph."
+        stats, seen = self._held_connections_during_model_calls()
+        self.assertEqual(stats["extracted"], 1)
+        self.assertEqual(set(seen), {0})
+
+        stats, seen = self._held_connections_during_model_calls(dry_run=True, force=True)
+        self.assertEqual(set(seen), {0})
+
+    def test_saves_after_the_server_drops_connections_mid_run(self):
+        """The server closing every pooled connection while the model runs
+        (what Fly did after ~30 idle minutes) must not lose the save."""
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.pool import NullPool
+        from database import DATABASE_URL
+
+        killer = create_engine(DATABASE_URL, poolclass=NullPool)
+
+        def chat(messages, schema):
+            with killer.connect() as conn:
+                conn.execute(text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                ))
+            return self._chat(messages, schema)
+
+        try:
+            stats = self._run(chat_fn=chat)
+        finally:
+            killer.dispose()
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["stances_saved"], 2)
+        self.assertEqual(self._sync().status, "ok")
 
     def test_dry_run_writes_nothing(self):
         stats = self._run(dry_run=True)

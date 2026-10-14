@@ -75,6 +75,9 @@ class UrlHelperTests(unittest.TestCase):
             clean_link(SITE + "/", "/issues/issue/?IssueID=14895", host),
             SITE + "/issues/issue?IssueID=14895",
         )
+        # Pagination under an issue lists related news, not more positions.
+        self.assertIsNone(clean_link(SITE + "/", "/legislation/climate?page=2", host))
+        self.assertIsNone(clean_link(SITE + "/", "/issues/values?Page=1", host))
         self.assertIsNone(clean_link(SITE + "/", "/files/plan.pdf", host))
         self.assertIsNone(clean_link(SITE + "/", "mailto:a@b.gov", host))
 
@@ -86,6 +89,32 @@ class UrlHelperTests(unittest.TestCase):
         self.assertEqual(score_link(SITE + "/services/issues", "Issues"), 0)
         self.assertTrue(is_negative_path(SITE + "/newsroom"))
         self.assertFalse(is_negative_path(SITE + "/issues/financial-services"))
+
+    def test_rejects_noise_seen_on_real_member_sites(self):
+        noise = [
+            ("/congress/fy24-community-project-funds", "FY24 Community Project Funds"),
+            ("/congress/fy26-appropriations-request", "FY26 Appropriations Requests"),
+            ("/issues/project-requests", "Project Requests"),
+            ("/fy25-project-requests", "FY25 Project Requests"),
+            ("/congressional-app-challenge", "Congressional App Challenge"),
+            ("/constituent-services/arts-competition.htm", "Art Competition"),
+            ("/issues/military-academy-nomination-application-form", "Academy Nominations"),
+            ("/public/index.cfm/privacypolicy", "Privacy Policy"),
+            ("/public/index.cfm/news-releases", "News"),
+            ("/legislation/committees-and-caucuses", "Committees and Caucuses"),
+        ]
+        for path, text in noise:
+            self.assertEqual(score_link(SITE + path, text), 0, path)
+
+    def test_keeps_issue_pages_on_real_member_site_layouts(self):
+        keep = [
+            ("/legislation/climate", "Climate"),
+            ("/public/index.cfm/foreign-policy", "Foreign Policy"),
+            ("/issues/help", "HELP"),  # Senate committee, not a help desk
+            ("/legislative-work/healthcare", "Healthcare"),
+        ]
+        for path, text in keep:
+            self.assertGreater(score_link(SITE + path, text), 0, path)
 
 
 class CrawlTests(unittest.TestCase):
@@ -118,6 +147,45 @@ class CrawlTests(unittest.TestCase):
         # Every request after the first waits out the per-host delay.
         self.assertTrue(sleeps)
         self.assertTrue(all(s == 3.0 for s in sleeps))
+
+    @respx.mock
+    def test_duplicate_and_tiny_pages_are_dropped(self):
+        mount_site(respx)
+        congress = fixture("congress.html").replace(
+            "</main>",
+            '<a href="/issues/climate?page=0">Climate page 0</a>'
+            '<a href="/issues/apply">Apply</a></main>',
+        )
+        respx.get(f"{SITE}/congress").mock(return_value=html(congress))
+        respx.get(f"{SITE}/issues/climate?page=0").mock(return_value=html(fixture("climate.html")))
+        respx.get(f"{SITE}/issues/apply").mock(
+            return_value=html("<html><body><main><p>Apply here.</p></main></body></html>")
+        )
+        result = make_crawler().crawl(SITE)
+        urls = [p.url for p in result.pages]
+        self.assertIn(SITE + "/issues/climate", urls)
+        self.assertNotIn(SITE + "/issues/climate?page=0", urls)
+        self.assertNotIn(SITE + "/issues/apply", urls)
+
+    @respx.mock
+    def test_follows_remaining_nav_issue_links_as_issue_pages(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        topics = ["climate", "foreign-policy", "housing", "health-care", "immigration"]
+        nav = "".join(f'<a href="/legislation/{t}">{t.title()}</a>' for t in topics)
+        respx.get(f"{SITE}/").mock(return_value=html(
+            f"<html><body><nav><a href='/congress'>In Congress</a>{nav}</nav></body></html>"
+        ))
+        respx.get(f"{SITE}/congress").mock(return_value=html(
+            "<html><body><main><h1>In Congress</h1><p>" + "Work in Congress. " * 20 + "</p></main></body></html>"
+        ))
+        for t in topics:
+            respx.get(f"{SITE}/legislation/{t}").mock(return_value=html(
+                f"<html><body><main><h1>{t}</h1><p>" + f"Her position on {t}. " * 15 + "</p></main></body></html>"
+            ))
+        result = make_crawler().crawl(SITE)
+        urls = [p.url for p in result.pages]
+        for t in topics:
+            self.assertIn(f"{SITE}/legislation/{t}", urls)
 
     @respx.mock
     def test_respects_max_pages(self):

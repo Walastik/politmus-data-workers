@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 from urllib import robotparser
-from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urldefrag, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -31,7 +31,7 @@ DEFAULT_USER_AGENT = (
     "elected officials)"
 )
 DEFAULT_DELAY_SECONDS = 3.0
-DEFAULT_MAX_PAGES = 12
+DEFAULT_MAX_PAGES = 20
 DEFAULT_TIMEOUT_SECONDS = 20.0
 MAX_PAGE_BYTES = 2_000_000
 MAX_PAGE_TEXT_CHARS = 60_000
@@ -39,6 +39,8 @@ MAX_RETRIES = 3
 MAX_INDEX_PAGES = 3
 # Below this much text across all pages the site likely renders with JS.
 MIN_SITE_TEXT_CHARS = 300
+# Pages shorter than this (empty stubs, placeholder lists) are not sent to the model.
+MIN_PAGE_TEXT_CHARS = 120
 
 # Paths probed when the homepage nav has no issue-like link.
 COMMON_ISSUE_PATHS = (
@@ -76,6 +78,7 @@ NEGATIVE_SEGMENT_PREFIXES = (
     "calendar",
     "casework",
     "community-project",
+    "constituent",
     "contact",
     "district",
     "email",
@@ -104,6 +107,45 @@ NEGATIVE_SEGMENT_PREFIXES = (
     "subscribe",
     "tour",
     "video",
+)
+
+# Never position pages wherever they appear in a path, even under /issues/:
+# earmark / funding request lists, forms, contests, and site boilerplate.
+NEGATIVE_PATH_SUBSTRINGS = (
+    "community-project",
+    "project-request",
+    "appropriations-request",
+    "funding-request",
+    "earmark",
+    "nomination",
+    "application-form",
+    "app-challenge",
+    "competition",
+    "internship",
+    "privacy",
+    "accessibility",
+    "flag-request",
+    "tour-request",
+    "press-release",
+    "newsletter",
+    "casework",
+    "committee",
+    "caucus",
+)
+
+# Anchor text that marks a non-position link even if it also says "policy" etc.
+NEGATIVE_ANCHOR_TERMS = (
+    "privacy",
+    "accessibility",
+    "competition",
+    "app challenge",
+    "nomination",
+    "internship",
+    "flag request",
+    "tour request",
+    "newsletter",
+    "press release",
+    "contact",
 )
 
 SKIP_EXTENSIONS = (
@@ -220,6 +262,9 @@ def clean_link(base_url: str, href: str | None, allowed_host: str) -> str | None
         # Keep queries only there; elsewhere they are search/calendar traps.
         if score_link(urlunsplit((parts.scheme, parts.netloc, path, "", "")), "") <= 0:
             return None
+        # ?page=N is a listing of related news under an issue, not more of it.
+        if any(key.lower() == "page" for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
+            return None
         query = parts.query
     return urlunsplit((parts.scheme, parts.netloc.lower(), path, query, ""))
 
@@ -228,11 +273,31 @@ def path_segments(url: str) -> list[str]:
     return [s for s in urlsplit(url).path.lower().split("/") if s]
 
 
+def _is_issue_segment(segment: str) -> bool:
+    words = segment.replace("-", " ").replace("_", " ")
+    return any(
+        weight >= 5 and re.search(rf"\b{re.escape(term)}\b", words)
+        for term, weight in POSITIVE_TERMS.items()
+    )
+
+
 def is_negative_path(url: str) -> bool:
+    """News, services, forms, and boilerplate paths.
+
+    Prefix rules apply to every segment until an issue-like segment appears
+    (so /public/index.cfm/news-releases is out but /issues/help, a Senate
+    committee page, is kept). Substring rules apply everywhere.
+    """
     segments = path_segments(url)
-    if not segments:
-        return False
-    return segments[0].startswith(NEGATIVE_SEGMENT_PREFIXES)
+    for segment in segments:
+        if any(term in segment for term in NEGATIVE_PATH_SUBSTRINGS):
+            return True
+    for segment in segments:
+        if _is_issue_segment(segment):
+            break
+        if segment.startswith(NEGATIVE_SEGMENT_PREFIXES):
+            return True
+    return False
 
 
 def score_link(url: str, text: str) -> int:
@@ -240,6 +305,8 @@ def score_link(url: str, text: str) -> int:
     if is_negative_path(url):
         return 0
     anchor = _WS_RE.sub(" ", (text or "").lower()).strip()
+    if any(term in anchor for term in NEGATIVE_ANCHOR_TERMS):
+        return 0
     path = " ".join(path_segments(url)).replace("-", " ").replace("_", " ")
     score = 0
     for term, weight in POSITIVE_TERMS.items():
@@ -299,6 +366,12 @@ def html_to_text(html: str, url: str | None = None) -> str:
     if len(text) > MAX_PAGE_TEXT_CHARS:
         text = text[:MAX_PAGE_TEXT_CHARS]
     return text
+
+
+def _is_under(url: str, parent: str) -> bool:
+    """True when url's path sits below parent's path."""
+    child, base = path_segments(url), path_segments(parent)
+    return bool(base) and len(child) > len(base) and child[: len(base)] == base
 
 
 class SiteCrawler:
@@ -506,7 +579,11 @@ class SiteCrawler:
             ),
             key=lambda c: (-c.score, len(c.url)),
         )
-        index_urls = [c.url for c in candidates if c.score > 0][:MAX_INDEX_PAGES]
+        positive = [c for c in candidates if c.score > 0]
+        index_urls = [c.url for c in positive[:MAX_INDEX_PAGES]]
+        # Other issue-like nav links (e.g. a menu of /legislation/<topic>
+        # pages) are read as issue pages after the index pages' children.
+        nav_extras = positive[MAX_INDEX_PAGES:]
 
         if not index_urls:
             base = urlsplit(home.url)
@@ -541,14 +618,17 @@ class SiteCrawler:
                     self._log(f"  skip {url}: {result.error}")
                     continue
                 html, final_url = result.html, result.url
-            page = self._page(_Fetch(final_url, 200, html=html), "issues_index")
+            nested = any(_is_under(final_url, other) for other in index_urls if other != url)
+            page = self._page(_Fetch(final_url, 200, html=html), "issue_detail" if nested else "issues_index")
             if page.url == home.url:
                 continue
             fetched[page.url] = page
             detail_queue.extend(self._child_candidates(html, page.url, host))
 
         seen = set(fetched) | {home.url}
-        for candidate in sorted(detail_queue, key=lambda c: (-c.score, c.url)):
+        queue = sorted(detail_queue, key=lambda c: (-c.score, c.url))
+        queue += [c for c in nav_extras if c.url not in {q.url for q in queue}]
+        for candidate in queue:
             if len(fetched) >= max_pages:
                 break
             if candidate.url in seen:
@@ -562,7 +642,16 @@ class SiteCrawler:
             if page.url not in fetched and page.url != home.url:
                 fetched[page.url] = page
 
-        pages = sorted((p for p in fetched.values() if p.text), key=lambda p: p.url)
+        pages: list[CrawledPage] = []
+        hashes: set[str] = set()
+        # Index pages first, then by URL, so a clean URL wins over its
+        # ?page=0 / ?IssueID= duplicate with the same text.
+        for page in sorted(fetched.values(), key=lambda p: (p.page_kind != "issues_index", p.url)):
+            if len(page.text) < MIN_PAGE_TEXT_CHARS or page.content_hash in hashes:
+                continue
+            hashes.add(page.content_hash)
+            pages.append(page)
+        pages.sort(key=lambda p: p.url)
         total_text = sum(len(p.text) for p in pages)
         if total_text >= MIN_SITE_TEXT_CHARS:
             return CrawlResult(status="ok", start_url=start, pages=pages)
@@ -589,7 +678,7 @@ class SiteCrawler:
                 and len(segments) > len(index_segments)
                 and segments[: len(index_segments)] == index_segments
             )
-            issue_section = bool(segments) and score_link(f"/{segments[0]}", "") >= 6 and len(segments) > 1
+            issue_section = len(segments) > 1 and _is_issue_segment(segments[0])
             if under_index or issue_section:
                 out.append(LinkCandidate(url, text, 10 if under_index else 6))
         return out

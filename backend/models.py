@@ -223,7 +223,12 @@ class OfficialStance(Base):
     official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
     target_id = Column(Integer, ForeignKey("policy_targets.id"), nullable=False)
     mechanism = Column(String, nullable=False)
+    # What the official wants for the target (what accountability compares).
     direction = Column(String, nullable=False)
+    # supports | opposes, and the direction of the policy action they were
+    # talking about ("opposes" a Medicaid funding "decrease" -> direction increase).
+    stance = Column(String, nullable=True)
+    policy_direction = Column(String, nullable=True)
     # Noun as the model wrote it, plus its slug for classification_metadata joins.
     target_name = Column(String, nullable=True)
     target_slug = Column(String, nullable=True, index=True)

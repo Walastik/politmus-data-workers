@@ -149,6 +149,8 @@ def ensure_schema():
         for column_sql in (
             "target_name VARCHAR",
             "target_slug VARCHAR",
+            "stance VARCHAR",
+            "policy_direction VARCHAR",
             "emphasis VARCHAR",
             "policy_area VARCHAR",
             "issue_label VARCHAR",
