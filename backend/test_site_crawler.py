@@ -94,6 +94,8 @@ class UrlHelperTests(unittest.TestCase):
         noise = [
             ("/congress/fy24-community-project-funds", "FY24 Community Project Funds"),
             ("/congress/fy26-appropriations-request", "FY26 Appropriations Requests"),
+            ("/issues/project-requests", "Project Requests"),
+            ("/fy25-project-requests", "FY25 Project Requests"),
             ("/congressional-app-challenge", "Congressional App Challenge"),
             ("/constituent-services/arts-competition.htm", "Art Competition"),
             ("/issues/military-academy-nomination-application-form", "Academy Nominations"),

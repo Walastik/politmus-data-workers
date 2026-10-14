@@ -39,7 +39,7 @@ SOURCE_OFFICIAL_SITE = "official_site"
 
 DEFAULT_CHUNK_CHARS = 10_000
 MIN_QUOTE_CHARS = 12
-MAX_STANCES_PER_OFFICIAL = 40
+MAX_STANCES_PER_OFFICIAL = 60
 MAX_VOCABULARY_TARGETS = 150
 
 # Congress.gov / CRS policy areas, the same values stored on bills.policy_area

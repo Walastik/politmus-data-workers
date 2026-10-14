@@ -113,6 +113,7 @@ NEGATIVE_SEGMENT_PREFIXES = (
 # earmark / funding request lists, forms, contests, and site boilerplate.
 NEGATIVE_PATH_SUBSTRINGS = (
     "community-project",
+    "project-request",
     "appropriations-request",
     "funding-request",
     "earmark",
