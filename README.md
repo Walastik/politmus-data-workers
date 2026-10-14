@@ -178,7 +178,9 @@ Other options: `--force`, `--max-age-days`, `--concurrency`, `--chunk-chars`, `-
 
 **Choosing a model.** Changing `--model` (or `OFFICIAL_POSITIONS_MODEL`) changes the extractor version, so compare models with `--dry-run` on the same official before switching: `python official_positions.py --official-id O000172 --dry-run --model <tag>`. Count positions whose `official_direction`, mechanism, or target is wrong, and note the time per official.
 
-On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`. **Full backfill, back to back.** `--limit 0` processes everyone due in one run. Each official is saved as soon as it finishes, so you can stop with Ctrl+C at any time and re-run to pick up where it left off; the progress line shows elapsed time and an estimate of what is left. Keep the Mac awake and keep a log:
+On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`.
+
+**Full backfill, back to back.** `--limit 0` processes everyone due in one run. Each official is saved as soon as it finishes, so you can stop with Ctrl+C at any time and re-run to pick up where it left off; the progress line shows elapsed time and an estimate of what is left. Keep the Mac awake and keep a log:
 
 ```bash
 caffeinate -i ./scripts/run_positions.sh --limit 0 2>&1 | tee -a ~/official_positions.log
