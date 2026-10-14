@@ -15,6 +15,8 @@ import {
   partyBadgeClass,
   sanitizeCrsHtml,
   billStatusClass,
+  directionBadgeClass,
+  mechanismBadgeClass,
   type Bill,
   type BillRollCall,
   type ClassificationMetadata,
@@ -383,36 +385,6 @@ function CrsSummary({ text }: { text: string }) {
       dangerouslySetInnerHTML={{ __html: sanitizeCrsHtml(text) }}
     />
   )
-}
-
-function directionBadgeClass(direction?: string) {
-  switch (direction?.toLowerCase()) {
-    case 'increase':
-      return 'bg-emerald-950/80 text-emerald-300 border-emerald-800/70'
-    case 'decrease':
-      return 'bg-rose-950/80 text-rose-300 border-rose-800/70'
-    case 'maintain':
-      return 'bg-sky-950/80 text-sky-300 border-sky-800/70'
-    case 'mixed':
-      return 'bg-amber-950/80 text-amber-300 border-amber-800/70'
-    default:
-      return 'bg-slate-800 text-slate-300 border-slate-700'
-  }
-}
-
-function mechanismBadgeClass(mechanism?: string) {
-  switch (mechanism?.toLowerCase()) {
-    case 'funding':
-      return 'bg-indigo-950/80 text-indigo-300 border-indigo-800/70'
-    case 'regulation':
-      return 'bg-purple-950/80 text-purple-300 border-purple-800/70'
-    case 'oversight':
-      return 'bg-cyan-950/80 text-cyan-300 border-cyan-800/70'
-    case 'taxation':
-      return 'bg-orange-950/80 text-orange-300 border-orange-800/70'
-    default:
-      return 'bg-slate-800 text-slate-300 border-slate-700'
-  }
 }
 
 function AiClassificationSection({

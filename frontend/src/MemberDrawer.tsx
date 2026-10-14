@@ -1,8 +1,10 @@
+import { SignedIn } from '@clerk/clerk-react'
 import { Globe, MapPin, Phone, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
+import StatedPositionsSection from './components/StatedPositionsSection'
 import {
   officeLine,
   partyBadgeClass,
@@ -121,6 +123,15 @@ export default function MemberDrawer({
 
         <div className="flex-1 overflow-y-auto p-5">
           <ContactSection official={detail ?? official} />
+
+          {detail ? (
+            <SignedIn>
+              <StatedPositionsSection
+                positions={detail.stated_positions ?? []}
+                sync={detail.positions_sync ?? null}
+              />
+            </SignedIn>
+          ) : null}
 
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Recorded votes

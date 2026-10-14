@@ -11,6 +11,72 @@ export interface Official {
   website_url: string | null
   level?: string | null
   openstates_id?: string | null
+  positions_status?: PositionsStatus | null
+  positions_count?: number | null
+}
+
+export type PositionsStatus =
+  | 'ok'
+  | 'no_positions'
+  | 'no_issue_pages'
+  | 'blocked'
+  | 'needs_js'
+  | 'no_website'
+  | 'failed'
+
+export interface OfficialStance {
+  issue_label: string | null
+  policy_area: string | null
+  target_name: string | null
+  mechanism: 'funding' | 'regulation' | 'oversight' | 'taxation' | string
+  direction: 'increase' | 'decrease' | 'maintain' | 'mixed' | string
+  stance: 'supports' | 'opposes' | string | null
+  policy_direction: string | null
+  emphasis: 'low' | 'medium' | 'high' | string | null
+  summary: string | null
+  evidence_quote: string | null
+  source_url: string | null
+  source_type: string
+  extracted_at: string | null
+  extractor_version?: string | null
+  model?: string | null
+}
+
+export interface PositionsSync {
+  status: PositionsStatus | string
+  last_attempt_at: string | null
+  last_success_at: string | null
+  attempts: number
+  pages_found: number | null
+  stances_saved: number | null
+  last_error: string | null
+  extractor_version: string | null
+}
+
+export interface PositionsProgressItem {
+  official_id: string
+  name: string | null
+  state: string | null
+  party: string | null
+  office: string | null
+  district: number | null
+  status: PositionsStatus | string
+  stances_saved: number | null
+  pages_found: number | null
+  last_attempt_at: string | null
+  last_error: string | null
+}
+
+export interface PositionsProgress {
+  population: number
+  attempted: number
+  by_status: Partial<Record<PositionsStatus, number>> & Record<string, number>
+  not_attempted: number
+  stances_total: number
+  last_success_at: string | null
+  current_versions: { extractor_version: string | null; count: number }[]
+  recent: PositionsProgressItem[]
+  problems: PositionsProgressItem[]
 }
 
 export interface OfficialVote {
@@ -28,6 +94,8 @@ export interface OfficialVote {
 
 export interface OfficialDetail extends Official {
   votes: OfficialVote[]
+  stated_positions: OfficialStance[]
+  positions_sync: PositionsSync | null
 }
 
 export interface ChamberVoteSummary {
@@ -1139,3 +1207,90 @@ export function getVoterResources(stateCode?: string | null): StateVoterResource
   )
 }
 
+
+export function directionBadgeClass(direction?: string | null) {
+  switch (direction?.toLowerCase()) {
+    case 'increase':
+      return 'bg-emerald-950/80 text-emerald-300 border-emerald-800/70'
+    case 'decrease':
+      return 'bg-rose-950/80 text-rose-300 border-rose-800/70'
+    case 'maintain':
+      return 'bg-sky-950/80 text-sky-300 border-sky-800/70'
+    case 'mixed':
+      return 'bg-amber-950/80 text-amber-300 border-amber-800/70'
+    default:
+      return 'bg-slate-800 text-slate-300 border-slate-700'
+  }
+}
+
+export function mechanismBadgeClass(mechanism?: string | null) {
+  switch (mechanism?.toLowerCase()) {
+    case 'funding':
+      return 'bg-indigo-950/80 text-indigo-300 border-indigo-800/70'
+    case 'regulation':
+      return 'bg-purple-950/80 text-purple-300 border-purple-800/70'
+    case 'oversight':
+      return 'bg-cyan-950/80 text-cyan-300 border-cyan-800/70'
+    case 'taxation':
+      return 'bg-orange-950/80 text-orange-300 border-orange-800/70'
+    default:
+      return 'bg-slate-800 text-slate-300 border-slate-700'
+  }
+}
+
+// The API sends naive UTC timestamps (no offset); read them as UTC.
+export function parseApiTimestamp(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null
+  }
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(value)
+  const parsed = new Date(hasZone ? value : `${value}Z`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+export function formatRelativeTime(
+  value: string | null | undefined,
+  now: Date = new Date(),
+): string | null {
+  const parsed = parseApiTimestamp(value)
+  if (!parsed) {
+    return null
+  }
+  const seconds = Math.round((parsed.getTime() - now.getTime()) / 1000)
+  const abs = Math.abs(seconds)
+  const rtf = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' })
+  if (abs < 45) {
+    return 'just now'
+  }
+  if (abs < 45 * 60) {
+    return rtf.format(Math.round(seconds / 60), 'minute')
+  }
+  if (abs < 22 * 3600) {
+    return rtf.format(Math.round(seconds / 3600), 'hour')
+  }
+  if (abs < 26 * 86400) {
+    return rtf.format(Math.round(seconds / 86400), 'day')
+  }
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+export const POSITIONS_STATUS_LABELS: Record<PositionsStatus, string> = {
+  ok: 'Processed',
+  no_positions: 'No positions',
+  no_issue_pages: 'No issue pages',
+  blocked: 'Blocked',
+  needs_js: 'Needs JS',
+  no_website: 'No website',
+  failed: 'Failed',
+}
+
+export function positionsStatusLabel(status: string | null | undefined) {
+  if (!status) {
+    return null
+  }
+  return POSITIONS_STATUS_LABELS[status as PositionsStatus] ?? status
+}

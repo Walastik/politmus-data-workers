@@ -1,8 +1,9 @@
-import { Landmark, MapPin, ScrollText, Search, Users } from 'lucide-react'
+import { Landmark, MapPin, ScrollText, Search, Sparkles, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { SignInButton, UserButton, SignedIn, SignedOut } from '@clerk/clerk-react'
+import { SignInButton, UserButton, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 
 import LocationSettings from '../components/LocationSettings'
+import PositionsProgressPanel from '../components/PositionsProgressPanel'
 
 import AddressLookup from '../AddressLookup'
 import { apiUrl } from '../api'
@@ -15,6 +16,7 @@ import {
   officeLine,
   partyBadgeClass,
   partyShort,
+  positionsStatusLabel,
   rosterStatusLabel,
   type Official,
   type RosterStatusFilter,
@@ -33,6 +35,12 @@ export default function Explorer() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
+  const [hasPositionsOnly, setHasPositionsOnly] = useState(false)
+  const { isSignedIn } = useAuth()
+  const visibleOfficials =
+    isSignedIn && hasPositionsOnly
+      ? officials.filter((official) => official.positions_status === 'ok')
+      : officials
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -209,6 +217,21 @@ export default function Explorer() {
                 </button>
               ))}
               </div>
+              <SignedIn>
+                <button
+                  type="button"
+                  onClick={() => setHasPositionsOnly(!hasPositionsOnly)}
+                  aria-pressed={hasPositionsOnly}
+                  className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition sm:ml-2 ${
+                    hasPositionsOnly
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-slate-800 text-purple-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  Has AI positions
+                </button>
+              </SignedIn>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <label className="relative block min-w-0 flex-1">
@@ -250,47 +273,57 @@ export default function Explorer() {
           <AddressLookup />
         ) : tab === 'bills' ? (
           <BillsFeed />
-        ) : loading ? (
-          <p className="text-slate-400">Loading congressional roster...</p>
-        ) : error ? (
-          <p className="text-red-400">
-            {error}. Check that the API is reachable and refresh.
-          </p>
-        ) : officials.length === 0 ? (
-          <p className="text-slate-400">No officials match this filter.</p>
         ) : (
           <>
-            <p className="mb-4 text-sm text-slate-400">
-              Showing {officials.length} member{officials.length === 1 ? '' : 's'}
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              {officials.map((official) => (
-                <button
-                  key={official.id}
-                  type="button"
-                  onClick={() => setSelectedOfficial(official)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-left shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
-                >
-                  <div className="flex items-start justify-between">
-                    <span
-                      className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(official.party)}`}
+            <SignedIn>
+              <PositionsProgressPanel onSelectOfficial={setSelectedOfficial} />
+            </SignedIn>
+            {loading ? (
+              <p className="text-slate-400">Loading congressional roster...</p>
+            ) : error ? (
+              <p className="text-red-400">
+                {error}. Check that the API is reachable and refresh.
+              </p>
+            ) : visibleOfficials.length === 0 ? (
+              <p className="text-slate-400">No officials match this filter.</p>
+            ) : (
+              <>
+                <p className="mb-4 text-sm text-slate-400">
+                  Showing {visibleOfficials.length} member{visibleOfficials.length === 1 ? '' : 's'}
+                </p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                  {visibleOfficials.map((official) => (
+                    <button
+                      key={official.id}
+                      type="button"
+                      onClick={() => setSelectedOfficial(official)}
+                      className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-left shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
                     >
-                      {partyShort(official.party)}
-                    </span>
-                    <span className="text-xs text-slate-400">{official.state}</span>
-                  </div>
-                  <h3 className="mt-2 text-base font-semibold">{official.name}</h3>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {officeLine(official)}
-                  </p>
-                  {filterStatus !== 'active' ? (
-                    <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                      {rosterStatusLabel(official)}
-                    </p>
-                  ) : null}
-                </button>
-              ))}
-            </div>
+                      <div className="flex items-start justify-between">
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(official.party)}`}
+                        >
+                          {partyShort(official.party)}
+                        </span>
+                        <span className="text-xs text-slate-400">{official.state}</span>
+                      </div>
+                      <h3 className="mt-2 text-base font-semibold">{official.name}</h3>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {officeLine(official)}
+                      </p>
+                      {filterStatus !== 'active' ? (
+                        <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                          {rosterStatusLabel(official)}
+                        </p>
+                      ) : null}
+                      <SignedIn>
+                        <PositionsCardBadge official={official} />
+                      </SignedIn>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </main>
@@ -303,6 +336,21 @@ export default function Explorer() {
       ) : null}
     </div>
   )
+}
+
+function PositionsCardBadge({ official }: { official: Official }) {
+  if (official.positions_status === 'ok') {
+    return (
+      <span className="mt-2 inline-flex items-center gap-1 rounded border border-purple-500/40 bg-purple-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-purple-200">
+        <Sparkles className="h-3 w-3" aria-hidden="true" />
+        AI positions ({official.positions_count ?? 0})
+      </span>
+    )
+  }
+  const label = positionsStatusLabel(official.positions_status)
+  return label ? (
+    <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+  ) : null
 }
 
 function TabButton({
