@@ -485,6 +485,10 @@ def run_positions(
             crawler = SiteCrawler(crawl_config, log=log)
             owns_crawler = True
         vocabulary = [] if crawl_only else target_vocabulary(session)
+        # Nothing to write yet: end the read transaction so no connection
+        # sits open (and gets closed by the server) while crawls and model
+        # calls run. Later queries check out a fresh, pre-pinged connection.
+        session.rollback()
 
         # Snapshot before any commit expires the ORM objects.
         rows = [(OfficialSnapshot.of(official), sync) for official, sync in rows]
@@ -551,7 +555,10 @@ def run_positions(
     finally:
         if owns_crawler:
             crawler.close()
-        session.close()
+        try:
+            session.close()
+        except Exception as exc:  # a dropped idle connection must not mask the results
+            log(f"(ignored error closing the DB session: {type(exc).__name__})")
 
 
 def _process_official(
@@ -629,6 +636,9 @@ def _process_official(
                 session.commit()
             return
 
+        # Model calls can take many minutes; hold no DB connection meanwhile.
+        # Only reads happened above, so there is nothing to lose here.
+        session.rollback()
         t0 = time.time()
         positions, chunk_count, rejected = extract_positions(
             official,

@@ -830,6 +830,76 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         session.commit()
         session.close()
 
+    def _held_connections_during_model_calls(self, **kwargs):
+        """Run the worker and record how many pooled DB connections are
+        checked out each time the model is called."""
+        from sqlalchemy import event
+        from database import engine
+
+        held = {"now": 0}
+        seen = []
+
+        def checkout(*_args):
+            held["now"] += 1
+
+        def checkin(*_args):
+            held["now"] -= 1
+
+        def chat(messages, schema):
+            seen.append(held["now"])
+            return self._chat(messages, schema)
+
+        event.listen(engine, "checkout", checkout)
+        event.listen(engine, "checkin", checkin)
+        try:
+            stats = self._run(chat_fn=chat, **kwargs)
+        finally:
+            event.remove(engine, "checkout", checkout)
+            event.remove(engine, "checkin", checkin)
+        return stats, seen
+
+    def test_no_db_connection_is_held_while_the_model_runs(self):
+        """Regression: model calls take many minutes, and Fly closed the
+        connection the session kept open in a transaction meanwhile
+        ("server closed the connection unexpectedly")."""
+        stats, seen = self._held_connections_during_model_calls()
+        self.assertEqual(stats["extracted"], 1)
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {0})
+
+        self.pages["https://example-rep.house.gov/congress"] = CONGRESS_TEXT + "\n\nNew paragraph."
+        stats, seen = self._held_connections_during_model_calls()
+        self.assertEqual(stats["extracted"], 1)
+        self.assertEqual(set(seen), {0})
+
+        stats, seen = self._held_connections_during_model_calls(dry_run=True, force=True)
+        self.assertEqual(set(seen), {0})
+
+    def test_saves_after_the_server_drops_connections_mid_run(self):
+        """The server closing every pooled connection while the model runs
+        (what Fly did after ~30 idle minutes) must not lose the save."""
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.pool import NullPool
+        from database import DATABASE_URL
+
+        killer = create_engine(DATABASE_URL, poolclass=NullPool)
+
+        def chat(messages, schema):
+            with killer.connect() as conn:
+                conn.execute(text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                ))
+            return self._chat(messages, schema)
+
+        try:
+            stats = self._run(chat_fn=chat)
+        finally:
+            killer.dispose()
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["stances_saved"], 2)
+        self.assertEqual(self._sync().status, "ok")
+
     def test_dry_run_writes_nothing(self):
         stats = self._run(dry_run=True)
         self.assertEqual(stats["extracted"], 1)
