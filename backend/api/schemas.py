@@ -21,6 +21,9 @@ class OfficialOut(BaseModel):
     website_url: Optional[str] = None
     level: str = "federal"
     openstates_id: Optional[str] = None
+    # Stated-positions worker status and saved count; None when not attempted.
+    positions_status: Optional[str] = None
+    positions_count: Optional[int] = None
 
 
 class OfficialVoteOut(BaseModel):
@@ -54,11 +57,60 @@ class OfficialStanceOut(BaseModel):
     source_url: Optional[str] = None
     source_type: str = "official_site"
     extracted_at: Optional[datetime] = None
+    extractor_version: Optional[str] = None
+    model: Optional[str] = None
+
+
+class PositionsSyncOut(BaseModel):
+    """The stated-positions worker's last attempt for one official."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    status: str
+    last_attempt_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    attempts: int = 0
+    pages_found: Optional[int] = None
+    stances_saved: Optional[int] = None
+    last_error: Optional[str] = None
+    extractor_version: Optional[str] = None
 
 
 class OfficialDetailOut(OfficialOut):
     votes: list[OfficialVoteOut] = Field(default_factory=list)
     stated_positions: list[OfficialStanceOut] = Field(default_factory=list)
+    positions_sync: Optional[PositionsSyncOut] = None
+
+
+class PositionsProgressItemOut(BaseModel):
+    official_id: str
+    name: Optional[str] = None
+    state: Optional[str] = None
+    party: Optional[str] = None
+    office: Optional[str] = None
+    district: Optional[int] = None
+    status: str
+    stances_saved: Optional[int] = None
+    pages_found: Optional[int] = None
+    last_attempt_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class ExtractorVersionCountOut(BaseModel):
+    extractor_version: Optional[str] = None
+    count: int
+
+
+class PositionsProgressOut(BaseModel):
+    population: int
+    attempted: int
+    by_status: dict[str, int] = Field(default_factory=dict)
+    not_attempted: int
+    stances_total: int
+    last_success_at: Optional[datetime] = None
+    current_versions: list[ExtractorVersionCountOut] = Field(default_factory=list)
+    recent: list[PositionsProgressItemOut] = Field(default_factory=list)
+    problems: list[PositionsProgressItemOut] = Field(default_factory=list)
 
 
 class BillOut(BaseModel):
