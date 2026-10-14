@@ -1,4 +1,8 @@
-"""Extract policy effects from bill summaries with a local Ollama model."""
+"""Extract policy effects from bill summaries with a local Ollama model.
+
+Superseded: the bill classifier (bill_classifier.py, scripts/classify_bills.py)
+now writes bill_effects from the same run as the drawer's intents.
+"""
 
 from __future__ import annotations
 

@@ -42,7 +42,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
      - Optional: Set `CIVIC_ELECTION_ID_OVERRIDE` to target a specific election ID (such as `2000` for VIP test election).
      - `CLIENT_IP_HEADER` names the header the voter-info rate limiter trusts for the client IP. Leave it empty locally (the socket peer is used). In production it is set in `backend/fly.toml` to `X-Politmus-Client-IP`, which `frontend/nginx.conf` overwrites from Fly's `Fly-Client-IP` on every request. This is only safe because the API has no public IP (Flycast only); `X-Forwarded-For` is never trusted.
    - Representative address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table and does not require Google API credentials.
-   - `OLLAMA_*` is only required for the local bill classifier.
+   - `OLLAMA_*`, `BILL_CLASSIFIER_*` and `OFFICIAL_POSITIONS_*` are only needed on the machine that runs the local Ollama workers.
    - **Privacy Policy Notice**: Addresses entered for voting location lookups are proxied to the Google Civic Information API. Ensure the public privacy policy explicitly discloses that user addresses are sent upstream for polling place resolution.
 
 4. Create (or update) tables:
@@ -122,7 +122,7 @@ python congress_client.py senate-votes --congress 119 --session 1
 python congress_client.py enrich
 ```
 
-**Extract bill effects** — sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores normalized policy facts: a growing `policy_targets` catalog (the nouns, e.g. ICE, Voting Eligibility) and one `bill_effects` row per fact (`mechanism`, `direction`, `magnitude`, `rationale`). Only bills with a summary and no effects yet are processed, unless you pass `--force`. Extraction rules live in `extraction_guidelines` so you can update the prompt in Postgres without changing worker code.
+**Extract bill effects (superseded)** — the bill classifier (`scripts/classify_bills.py`, below) now writes `bill_effects` from the same run as the drawer's intents; stop this worker's cron once the classifier has run. It sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores normalized policy facts: a growing `policy_targets` catalog (the nouns, e.g. ICE, Voting Eligibility) and one `bill_effects` row per fact (`mechanism`, `direction`, `magnitude`, `rationale`). Only bills with a summary and no effects yet are processed, unless you pass `--force`. Extraction rules live in `extraction_guidelines` so you can update the prompt in Postgres without changing worker code.
 
 Requires a running Ollama instance (default `http://localhost:11434`) and a pulled model such as `qwen2.5-coder:32b`. The worker is meant to run on the Mac Mini that hosts Ollama, pointed at the same `DATABASE_URL` as the rest of the pipeline.
 
@@ -154,6 +154,43 @@ On a Mac Mini, an hourly cron is enough:
 
 All Congress.gov requests pause briefly between calls and retry with exponential backoff on HTTP 429 and 5xx responses. Re-running these commands is idempotent: existing bills are updated in place, and votes are upserted per official per bill.
 
+### `bill_classifier.py` (run as `scripts/classify_bills.py`)
+
+Writes the TLDR, ELI5 and policy intents shown in the bill drawer (`bills.classification_metadata`) and the matching `bill_effects` rows used for vote scoring, from each bill's CRS summary, with a local Ollama model. Runs on the Mac Mini against the same `DATABASE_URL` (the Fly database). Launch it with `./scripts/run_classifier.sh [args]` from the repo root (activates the venv) or `python scripts/classify_bills.py [args]` from `backend/`.
+
+1. **Input.** The CRS summary HTML is turned into text with `## ` headings (bold-only paragraphs such as `TITLE I--…` / `Subtitle A--…`), and is never truncated. Summaries up to `--chunk-chars` (default 10,000) go to the model in one call that returns `tldr`, `eli5` and `intents`. Longer ones are split at headings into chunks of about that size; each chunk gets its own intents-only call (`--concurrency 2` in parallel), and one final call writes `tldr` and `eli5` from the opening of the summary plus the merged intent list.
+2. **Schema.** The output schema is in the repo (`services/bill_classification.py`): `tldr` and `eli5` are required and must be at least 20 characters, and each intent is `citation` (first), `target`, `mechanism`, `direction`, `magnitude`, `rationale`, with the same enums as `bill_effects`. If a full answer comes back without a TLDR/ELI5, one TLDR/ELI5-only call fills them in; if they are still missing the bill is saved as `incomplete` (never `ok`) and retried later.
+3. **Verification.** An intent is dropped when its `citation` is not in the text the model saw (ignoring whitespace, curly quotes, markdown and case; no ellipses) or its target is a bill name or number. Long-standing laws used as programs (Affordable Care Act, Clean Water Act, …) are allowed. Duplicates by (target, mechanism) are merged: the higher magnitude is kept and directions vote, weighted by magnitude; only an exact tie becomes `mixed`. At most 60 intents are kept, strongest first.
+4. **Saving.** Each bill is saved in its own transaction: `classification_metadata` (the frontend keys plus `model`, `version`, `classified_at`, `chunks`, `rejected`), and its `bill_effects` rows are replaced with the verified intents (citation appended to the rationale), so the drawer and vote scoring come from the same run. No database connection is held while the model runs. A failure or incomplete answer records the status and error and keeps the previous metadata and effects.
+
+**State and re-runs.** Each bill records `classification_status` (`ok`, `incomplete`, `failed`, `no_summary`), `classification_version` (schema version + hash of the local prompts + model), `classification_input_hash` (title, policy area and summary; status and latest action are left out so a bill moving through Congress is not re-classified at every step), `classification_attempts`, `classification_error`, `classification_attempted_at` and `classified_at`. A bill is due when it has never been classified, its stored metadata lacks a TLDR/ELI5/intents list (older runs saved those), the version changed (new prompt, model or schema), its summary/title/policy area changed, or a failed/incomplete attempt is past its backoff (6 hours × attempts; after 5 attempts only every `--max-age-days`, default 30). Otherwise it is skipped without calling the model. Order: never-classified bills first, then re-runs, then retries; within each, voted bills (newest vote first), then newest introduced. Bills without a CRS summary are marked `no_summary` without a model call; they become due when `congress_client.py enrich` fills in a summary. A lock file stops overlapping runs.
+
+Switching the model (or editing a prompt) changes the version, so every classified bill is redone over the following runs; existing metadata stays visible until each bill is redone.
+
+```bash
+python scripts/classify_bills.py --report                              # counts by status, bills without a summary, what is due
+python scripts/classify_bills.py --bill-id 119-hr-1 --dry-run          # call the model, print the JSON, write nothing
+python scripts/classify_bills.py --limit 5                             # classify a few
+python scripts/classify_bills.py --show 119-hr-1                       # print one bill's stored classification
+python scripts/classify_bills.py --only-incomplete                     # just the bills missing a TLDR/ELI5
+```
+
+Other options: `--limit` (default 0 = all due), `--force`, `--existing-only`, `--model` (default `BILL_CLASSIFIER_MODEL`, then `OLLAMA_MODEL`, then `qwen3.6:27b`), `--host`, `--timeout` (default `BILL_CLASSIFIER_TIMEOUT_SECONDS`, 900), `--num-ctx` (16384, fixed for every call so the model is not reloaded), `--num-predict` (4096; an empty answer is retried once with double), `--think` (off by default), `--concurrency`, `--chunk-chars`, `--max-age-days`, `--delay`.
+
+**Full backfill.** Each bill is saved as soon as it finishes, so Ctrl+C is safe and a re-run picks up where it stopped. Keep the Mac awake and keep a log:
+
+```bash
+caffeinate -i ./scripts/run_classifier.sh --limit 0 2>&1 | tee -a ~/bill_classifier.log
+```
+
+On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`, and check `ollama list` shows the model tag.
+
+**Prompts are local, not in the repo.** The worker reads `SYSTEM_PROMPT` (and optionally `SUMMARY_PROMPT`, for the TLDR/ELI5 call) from `backend/scripts/llm_config.py`, which is gitignored. A `ClassificationMetadata` class left in that file is ignored; the schema is in the repo. To start from scratch:
+
+```bash
+cp backend/scripts/llm_config.example.py backend/scripts/llm_config.py   # then write the prompts
+```
+
 ### `official_positions.py`
 
 Builds a citable record of what each official **says** they stand for, so it can later be compared with how they vote. For each current federal member with a `website_url` it:
@@ -174,7 +211,7 @@ python official_positions.py --extract-only --force         # re-run the model o
 python official_positions.py --limit 0                      # everything due
 ```
 
-Other options: `--force`, `--max-age-days`, `--concurrency`, `--chunk-chars`, `--crawl-delay`, `--max-pages`, `--model` (default `OFFICIAL_POSITIONS_MODEL`, then `OLLAMA_MODEL`), `--host`, `--timeout` (default `OFFICIAL_POSITIONS_TIMEOUT_SECONDS`, 900; separate from the bill classifier's `OLLAMA_TIMEOUT_SECONDS`), `--num-ctx`, `--num-predict`, `--think`, `--level`.
+Other options: `--force`, `--max-age-days`, `--concurrency`, `--chunk-chars`, `--crawl-delay`, `--max-pages`, `--model` (default `OFFICIAL_POSITIONS_MODEL`, then `OLLAMA_MODEL`), `--host`, `--timeout` (default `OFFICIAL_POSITIONS_TIMEOUT_SECONDS`, 900; separate from the bill classifier's `BILL_CLASSIFIER_TIMEOUT_SECONDS`), `--num-ctx`, `--num-predict`, `--think`, `--level`.
 
 **Choosing a model.** Changing `--model` (or `OFFICIAL_POSITIONS_MODEL`) changes the extractor version, so compare models with `--dry-run` on the same official before switching: `python official_positions.py --official-id O000172 --dry-run --model <tag>`. Count positions whose `official_direction`, mechanism, or target is wrong, and note the time per official.
 
