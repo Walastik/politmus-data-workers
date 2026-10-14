@@ -16,5 +16,8 @@ else
     echo "Warning: No virtual environment found in backend/venv or venv. Using system python."
 fi
 
+# Print output as it happens, even when piped to tee or a log file.
+export PYTHONUNBUFFERED=1
+
 # Run the official stated-positions worker with all passed arguments
 exec python "$REPO_ROOT/backend/official_positions.py" "$@"
