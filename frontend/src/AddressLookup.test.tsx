@@ -265,3 +265,180 @@ describe('AddressLookup Integration & Race Handling', () => {
     })
   })
 })
+
+describe('AddressLookup: use my location', () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+  const austinLookup = {
+    normalized_input: { line1: null, city: null, state: 'TX', zip: null },
+    divisions: [],
+    representatives: [
+      {
+        id: 1,
+        name: 'Jane Doe',
+        office: 'Representative',
+        division_id: 'ocd-division/country:us/state:tx/cd:10',
+        division_name: 'Congressional District 10',
+        levels: ['country'],
+        roles: ['legislatorLowerBody'],
+        party: 'Independent',
+        phones: [],
+        urls: [],
+        addresses: [],
+      },
+    ],
+  }
+
+  const photonFeature = {
+    geometry: { coordinates: [-97.74312, 30.26721] },
+    properties: {
+      countrycode: 'US',
+      housenumber: '1100',
+      street: 'Congress Avenue',
+      city: 'Austin',
+      state: 'Texas',
+      postcode: '78701',
+    },
+  }
+
+  function mockGeolocation(
+    impl: (success: PositionCallback, failure: PositionErrorCallback) => void,
+  ) {
+    const getCurrentPosition = vi.fn(impl)
+    Object.defineProperty(navigator, 'geolocation', {
+      value: { getCurrentPosition },
+      configurable: true,
+    })
+    return getCurrentPosition
+  }
+
+  function succeedWith(lat: number, lon: number) {
+    return mockGeolocation((success) =>
+      success({ coords: { latitude: lat, longitude: lon } } as GeolocationPosition),
+    )
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    // jsdom has no geolocation; remove the stub so other tests see the default.
+    delete (navigator as { geolocation?: unknown }).geolocation
+  })
+
+  it('hides the button when the browser has no geolocation', () => {
+    render(<AddressLookup />)
+    expect(screen.queryByRole('button', { name: /Use my location/i })).toBeNull()
+  })
+
+  it('looks up representatives by rounded coordinates and fills in the nearby address', async () => {
+    succeedWith(30.267213456, -97.743124567)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('photon.komoot.io/reverse')) return jsonResponse({ features: [photonFeature] })
+      if (url.includes('/api/lookup')) return jsonResponse(austinLookup)
+      return new Promise(() => {})
+    })
+
+    render(<AddressLookup />)
+    fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
+
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument()
+    const lookupCall = fetchSpy.mock.calls.find(([u]) => String(u).includes('/api/lookup'))
+    expect(String(lookupCall?.[0])).toContain('/api/lookup?lat=30.26721&lon=-97.74312')
+    expect(screen.getByLabelText(/Street address/i)).toHaveValue(
+      '1100 Congress Avenue, Austin, Texas, 78701',
+    )
+    expect(
+      screen.getByText(/your current location \(near 1100 Congress Avenue/),
+    ).toBeInTheDocument()
+
+    // The reverse-geocoded address feeds the Voting Locations tab.
+    fireEvent.click(screen.getByRole('tab', { name: /Voting Locations/i }))
+    const voterCall = fetchSpy.mock.calls.find(([u]) => String(u).includes('/api/voter-info'))
+    expect(JSON.parse(String(voterCall?.[1]?.body))).toEqual({
+      address: '1100 Congress Avenue, Austin, Texas, 78701',
+      state: 'TX',
+    })
+  })
+
+  it('shows a message and makes no lookup when permission is denied', async () => {
+    mockGeolocation((_success, failure) =>
+      failure({ code: 1, message: 'denied' } as GeolocationPositionError),
+    )
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+    render(<AddressLookup />)
+    fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
+
+    expect(await screen.findByText(/Location access was blocked/i)).toBeInTheDocument()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Use my location/i })).not.toBeDisabled()
+  })
+
+  it('still shows representatives when reverse geocoding fails, without fetching voter info', async () => {
+    succeedWith(30.2672, -97.7431)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('photon.komoot.io/reverse')) return Promise.reject(new Error('offline'))
+      if (url.includes('/api/lookup')) return jsonResponse(austinLookup)
+      return new Promise(() => {})
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    render(<AddressLookup />)
+    fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
+
+    expect(await screen.findByText('Jane Doe')).toBeInTheDocument()
+    expect(screen.getByText('your current location')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /Voting Locations/i }))
+    expect(screen.getByText(/couldn't find a street address for your location/i)).toBeInTheDocument()
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/voter-info'))).toBe(false)
+  })
+
+  it('lets a typed address submitted while locating win over the location lookup', async () => {
+    let resolvePosition: (position: GeolocationPosition) => void = () => {}
+    mockGeolocation((success) => {
+      resolvePosition = success
+    })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('photon.komoot.io/reverse')) return jsonResponse({ features: [photonFeature] })
+      if (url.includes('/api/lookup')) {
+        return jsonResponse({
+          normalized_input: { line1: '500 Main St', city: 'Dallas', state: 'TX', zip: '75201' },
+          divisions: [],
+          representatives: [],
+        })
+      }
+      return Promise.reject(new Error('Unknown url'))
+    })
+
+    render(<AddressLookup />)
+    fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
+
+    // Submit the form directly; the buttons are disabled while locating.
+    const input = screen.getByLabelText(/Street address/i)
+    fireEvent.change(input, { target: { value: '500 Main St, Dallas, TX' } })
+    fireEvent.submit(screen.getByRole('search'))
+    expect(await screen.findByText(/500 Main St, Dallas TX 75201/)).toBeInTheDocument()
+
+    resolvePosition({ coords: { latitude: 30.2672, longitude: -97.7431 } } as GeolocationPosition)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Use my location/i })).not.toBeDisabled(),
+    )
+
+    const urls = fetchSpy.mock.calls.map(([u]) => String(u))
+    expect(urls.some((u) => u.includes('/api/lookup?lat='))).toBe(false)
+    expect(urls.some((u) => u.includes('photon.komoot.io/reverse'))).toBe(false)
+    expect(input).toHaveValue('500 Main St, Dallas, TX')
+  })
+})

@@ -16,12 +16,16 @@ import {
 export default function LookupResults({
   lookup,
   onSelectOfficial,
+  locationLabel,
 }: {
   lookup: CivicLookup
   onSelectOfficial: (official: Official) => void
+  // For a location lookup: the nearby address (or a generic label), since a
+  // point lookup has no matched street address.
+  locationLabel?: string | null
 }) {
   const grouped = groupCivicRepresentatives(lookup.representatives)
-  const matchedAddress = formatCivicAddress(lookup.normalized_input)
+  const matchedAddress = locationLabel || formatCivicAddress(lookup.normalized_input)
   const fallbackState = stateNameFromAbbr(lookup.normalized_input?.state)
 
   return (

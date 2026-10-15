@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from api.census import CensusUnavailable, geocode_address
+from api.census import CensusMatch, CensusUnavailable, geocode_address, geocode_coordinates
 from api.schemas import CivicAddressOut, CivicDivisionOut, CivicLookupOut, CivicRepresentativeOut
 from database import get_db
 from models import Official
@@ -100,26 +100,36 @@ def _current_state_governors(db: Session, state_name: str):
 
 @router.get("", response_model=CivicLookupOut)
 def lookup_civic_info(
-    address: str = Query(
-        ...,
-        min_length=1,
+    address: Optional[str] = Query(
+        None,
         max_length=300,
         description="Street address whose elected officials should be returned.",
     ),
+    lat: Optional[float] = Query(
+        None, ge=-90, le=90, description="Latitude, used with lon instead of address."
+    ),
+    lon: Optional[float] = Query(
+        None, ge=-180, le=180, description="Longitude, used with lat instead of address."
+    ),
     db: Session = Depends(get_db),
 ):
-    """Resolve an address to districts, then load federal and state officials.
+    """Resolve an address or a point to districts, then load federal and state officials.
 
-    Census geocodes the address, including congressional and state legislative
-    districts. FastAPI then returns current senators, the House member, the
-    governor, and the matching state legislators from Postgres.
+    Census geocodes the address (or the lat/lon point), including congressional
+    and state legislative districts. FastAPI then returns current senators, the
+    House member, the governor, and the matching state legislators from Postgres.
     """
-    address = address.strip()
-    if not address:
+    address = (address or "").strip()
+    has_point = lat is not None or lon is not None
+    if address and has_point:
+        raise HTTPException(status_code=400, detail="Send either address or lat/lon, not both")
+    if has_point and (lat is None or lon is None):
+        raise HTTPException(status_code=400, detail="lat and lon are both required")
+    if not address and not has_point:
         raise HTTPException(status_code=400, detail="address is required")
 
     try:
-        match = geocode_address(address)
+        match = geocode_coordinates(lat, lon) if has_point else geocode_address(address)
     except CensusUnavailable:
         raise HTTPException(
             status_code=502,
@@ -129,9 +139,18 @@ def lookup_civic_info(
     if match is None:
         raise HTTPException(
             status_code=404,
-            detail="No civic information found for that address",
+            detail=(
+                "No civic information found for that location. "
+                "Lookups only cover U.S. states and DC."
+                if has_point
+                else "No civic information found for that address"
+            ),
         )
 
+    return _lookup_for_match(db, match)
+
+
+def _lookup_for_match(db: Session, match: CensusMatch) -> CivicLookupOut:
     state_ocd = f"ocd-division/country:us/state:{match.state_abbr.lower()}"
     district_ocd = f"{state_ocd}/cd:{match.district}"
     divisions = [

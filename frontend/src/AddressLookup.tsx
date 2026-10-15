@@ -1,4 +1,4 @@
-import { Search, Users, Vote } from 'lucide-react'
+import { LocateFixed, Search, Users, Vote } from 'lucide-react'
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import { useUser } from '@clerk/clerk-react'
 
@@ -26,6 +26,72 @@ interface PhotonResult {
   coordinates: [number, number]
 }
 
+interface Point {
+  lat: number
+  lon: number
+}
+
+const CURRENT_LOCATION_LABEL = 'your current location'
+const REVERSE_GEOCODE_TIMEOUT_MS = 5000
+
+function formatPhotonFeature(feature: any): PhotonResult {
+  const props = feature.properties
+  const addressLine1 = [props.housenumber, props.street].filter(Boolean).join(' ')
+  const parts = [addressLine1, props.city, props.state, props.postcode].filter(Boolean)
+  return {
+    formattedAddress: parts.join(', '),
+    coordinates: feature.geometry.coordinates,
+  }
+}
+
+// ~1 m precision is plenty for district lookup and avoids sending more than needed.
+function roundCoordinate(value: number) {
+  return Math.round(value * 1e5) / 1e5
+}
+
+function getCurrentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) =>
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000,
+    }),
+  )
+}
+
+function geolocationErrorMessage(err: unknown) {
+  if (err && typeof err === 'object' && 'code' in err) {
+    if (err.code === 1) {
+      return 'Location access was blocked. Enter your address instead.'
+    }
+    if (err.code === 3) {
+      return 'Finding your location took too long. Try again or enter your address.'
+    }
+  }
+  return "Couldn't determine your location. Enter your address instead."
+}
+
+// Best effort: the street address only fills the search box and feeds the
+// Voting Locations tab. Representatives come from the coordinates themselves.
+async function reverseGeocode(point: Point): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://photon.komoot.io/reverse?lat=${point.lat}&lon=${point.lon}&limit=1`,
+      { signal: AbortSignal.timeout(REVERSE_GEOCODE_TIMEOUT_MS) },
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    const feature = data.features?.[0]
+    if (!feature || feature.properties?.countrycode !== 'US') return null
+    const { formattedAddress } = formatPhotonFeature(feature)
+    // A house number is what lets Google Civic find a polling place.
+    return feature.properties.housenumber && formattedAddress ? formattedAddress : null
+  } catch (err) {
+    console.error('Photon reverse lookup failed', err)
+    return null
+  }
+}
+
 export default function AddressLookup() {
   const [address, setAddress] = useState('')
   const debouncedAddress = useDebounce(address, 300)
@@ -38,9 +104,14 @@ export default function AddressLookup() {
   const [error, setError] = useState<string | null>(null)
   const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
+  const [locating, setLocating] = useState(false)
+  const canUseLocation = typeof navigator !== 'undefined' && 'geolocation' in navigator
 
   // Address of the most recent lookup, kept even when the representative lookup fails
   const [lookedUpAddress, setLookedUpAddress] = useState<string | null>(null)
+  // Set when the last lookup was by location: whether a street address was found for it.
+  const [locationLookup, setLocationLookup] = useState<{ hasAddress: boolean } | null>(null)
+  const voterInfoAvailable = !locationLookup || locationLookup.hasAddress
 
   // Voter info state (independent from representative lookup). Fetched lazily: the
   // address is only sent to Google Civic once the Voting Locations tab is opened.
@@ -146,6 +217,7 @@ export default function AddressLookup() {
     if (
       tab === 'voting' &&
       lookedUpAddress &&
+      voterInfoAvailable &&
       voterInfoAddressRef.current !== lookedUpAddress
     ) {
       startVoterInfoFetch(lookedUpAddress, lookup?.normalized_input?.state)
@@ -166,13 +238,16 @@ export default function AddressLookup() {
     tabRefs.current[next]?.focus()
   }
 
-  // Extract fetch logic into a standalone function
-  async function performLookup(targetAddress: string) {
+  // Looks up representatives for an address, or for a point when `point` is given.
+  // With a point, `targetAddress` is the reverse-geocoded address ('' if none was
+  // found) and is only used for display and the Voting Locations tab.
+  async function performLookup(targetAddress: string, point?: Point) {
     const trimmed = targetAddress.trim()
-    if (!trimmed) {
+    if (!trimmed && !point) {
       setError('Enter a U.S. street address.')
       setLookup(null)
       setLookedUpAddress(null)
+      setLocationLookup(null)
       resetVoterInfo()
       return
     }
@@ -180,23 +255,26 @@ export default function AddressLookup() {
     setLoading(true)
     setError(null)
     setSelectedOfficial(null)
-    setLookedUpAddress(trimmed)
+    setLookedUpAddress(trimmed || CURRENT_LOCATION_LABEL)
+    setLocationLookup(point ? { hasAddress: Boolean(trimmed) } : null)
 
     // Drop voter info for the previous address. If the user is already viewing the
     // Voting Locations tab, fetch for the new address once the representative
     // lookup settles (it supplies the state hint); otherwise wait for the tab.
     const lookupSeq = ++lookupSeqRef.current
-    const votingTabOpen = activeTab === 'voting'
+    const votingTabOpen = activeTab === 'voting' && Boolean(trimmed)
     resetVoterInfo()
     if (votingTabOpen) {
       setVoterInfoLoading(true)
     }
     let lookupState: string | null | undefined
 
+    const query = point
+      ? `lat=${roundCoordinate(point.lat)}&lon=${roundCoordinate(point.lon)}`
+      : `address=${encodeURIComponent(trimmed)}`
+
     try {
-      const response = await fetch(
-        apiUrl(`/api/lookup?address=${encodeURIComponent(trimmed)}`),
-      )
+      const response = await fetch(apiUrl(`/api/lookup?${query}`))
       const body = await readJson(response)
       if (!response.ok) {
         throw new Error(apiDetail(body, `Lookup failed (${response.status})`))
@@ -217,6 +295,39 @@ export default function AddressLookup() {
 
     if (votingTabOpen && lookupSeq === lookupSeqRef.current) {
       startVoterInfoFetch(trimmed, lookupState)
+    }
+  }
+
+  async function lookupMyLocation() {
+    setShowSuggestions(false)
+    setLocating(true)
+    setError(null)
+    // Claim a sequence number so a typed lookup made while we wait for the
+    // browser or the reverse geocoder wins over this one.
+    const seq = ++lookupSeqRef.current
+    try {
+      let position: GeolocationPosition
+      try {
+        position = await getCurrentPosition()
+      } catch (err) {
+        if (seq === lookupSeqRef.current) {
+          setError(geolocationErrorMessage(err))
+          setLookup(null)
+          setLookedUpAddress(null)
+          setLocationLookup(null)
+          resetVoterInfo()
+        }
+        return
+      }
+      if (seq !== lookupSeqRef.current) return
+      const point = { lat: position.coords.latitude, lon: position.coords.longitude }
+      const resolvedAddress = await reverseGeocode(point)
+      if (seq !== lookupSeqRef.current) return
+      setAddress(resolvedAddress ?? '')
+      setCoordinates([point.lon, point.lat])
+      await performLookup(resolvedAddress ?? '', point)
+    } finally {
+      setLocating(false)
     }
   }
 
@@ -247,22 +358,7 @@ export default function AddressLookup() {
       try {
         const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(debouncedAddress)}&countrycode=US&limit=5`)
         const data = await res.json()
-        const parsed = (data.features || []).map((feature: any) => {
-          const props = feature.properties
-          const addressLine1 = [props.housenumber, props.street].filter(Boolean).join(' ')
-          const parts = [
-            addressLine1,
-            props.city,
-            props.state,
-            props.postcode
-          ].filter(Boolean)
-          
-          return {
-            formattedAddress: parts.join(', '),
-            coordinates: feature.geometry.coordinates
-          }
-        })
-        setSuggestions(parsed)
+        setSuggestions((data.features || []).map(formatPhotonFeature))
       } catch (err) {
         console.error('Photon lookup failed', err)
       }
@@ -316,19 +412,40 @@ export default function AddressLookup() {
             </ul>
           )}
         </label>
+        {canUseLocation ? (
+          <button
+            type="button"
+            onClick={lookupMyLocation}
+            disabled={loading || locating}
+            className="inline-flex items-center justify-center gap-2 rounded border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <LocateFixed className="h-4 w-4" aria-hidden="true" />
+            <span>{locating ? 'Locating…' : 'Use my location'}</span>
+          </button>
+        ) : null}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || locating}
           className="rounded bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? 'Looking up…' : 'Find representatives'}
         </button>
       </form>
+      {canUseLocation ? (
+        <p className="mt-2 text-xs text-slate-500">
+          Your location is only used for this search to find your districts. It isn't saved.
+        </p>
+      ) : null}
 
       <div className="mt-8" aria-live="polite">
         {error && !lookedUpAddress ? <p className="text-red-400">{error}</p> : null}
+        {locating && !loading ? (
+          <p className="text-slate-400">Finding your location…</p>
+        ) : null}
         {loading && !lookup ? (
-          <p className="text-slate-400">Looking up that address…</p>
+          <p className="text-slate-400">
+            {locationLookup ? 'Looking up your location…' : 'Looking up that address…'}
+          </p>
         ) : null}
         {lookedUpAddress && (lookup || !loading) ? (
           <div>
@@ -397,6 +514,13 @@ export default function AddressLookup() {
                   <LookupResults
                     lookup={lookup}
                     onSelectOfficial={setSelectedOfficial}
+                    locationLabel={
+                      locationLookup
+                        ? locationLookup.hasAddress
+                          ? `${CURRENT_LOCATION_LABEL} (near ${lookedUpAddress})`
+                          : CURRENT_LOCATION_LABEL
+                        : null
+                    }
                   />
                 ) : error ? (
                   <p className="text-red-400">{error}</p>
@@ -409,7 +533,13 @@ export default function AddressLookup() {
               aria-labelledby="tab-voting"
               hidden={activeTab !== 'voting'}
             >
-              {activeTab === 'voting' && (
+              {activeTab === 'voting' && !voterInfoAvailable && (
+                <p className="py-8 text-center text-slate-400">
+                  We couldn't find a street address for your location. Enter your
+                  address above to see polling places.
+                </p>
+              )}
+              {activeTab === 'voting' && voterInfoAvailable && (
                 <VotingLocations
                   voterInfo={voterInfo}
                   loading={voterInfoLoading}
