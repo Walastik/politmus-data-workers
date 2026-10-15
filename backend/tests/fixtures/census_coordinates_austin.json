@@ -1,0 +1,114 @@
+{
+  "result": {
+    "geographies": {
+      "States": [
+        {
+          "STATENS": "01779801",
+          "GEOID": "48",
+          "CENTLAT": "+31.4276892",
+          "AREAWATER": 19009359594,
+          "STATE": "48",
+          "BASENAME": "Texas",
+          "STUSAB": "TX",
+          "OID": "2749098452115",
+          "LSADC": "00",
+          "FUNCSTAT": "A",
+          "INTPTLAT": "+31.4347032",
+          "DIVISION": "7",
+          "NAME": "Texas",
+          "REGION": "3",
+          "OBJECTID": 49,
+          "CENTLON": "-099.2890539",
+          "AREALAND": 676658961621,
+          "INTPTLON": "-099.2818238",
+          "MTFCC": "G4000"
+        }
+      ],
+      "2026 State Legislative Districts - Upper": [
+        {
+          "GEOID": "48014",
+          "CENTLAT": "+30.3276171",
+          "AREAWATER": 13661972,
+          "STATE": "48",
+          "BASENAME": "14",
+          "OID": "2129042579652186",
+          "SLDU": "014",
+          "LSADC": "LU",
+          "FUNCSTAT": "N",
+          "INTPTLAT": "+30.3276222",
+          "NAME": "State Senate District 14",
+          "OBJECTID": 841,
+          "CENTLON": "-097.6765074",
+          "LSY": "2026",
+          "AREALAND": 1333781950,
+          "INTPTLON": "-097.6766210",
+          "MTFCC": "G5210",
+          "LDTYP": "O"
+        }
+      ],
+      "120th Congressional Districts": [
+        {
+          "STGEOMETRY_Area": 31652204758.17124,
+          "CD120": "10",
+          "GEOID": "4810",
+          "CENTLAT": "+30.8368739",
+          "CDSESSN": "120",
+          "AREAWATER": 599864221,
+          "STATE": "48",
+          "BASENAME": "10",
+          "OID": "2119042393348413",
+          "LSADC": "C2",
+          "FUNCSTAT": "N",
+          "INTPTLAT": "+30.8460626",
+          "NAME": "Congressional District 10",
+          "OBJECTID": 348,
+          "CENTLON": "-095.8456381",
+          "STGEOMETRY_Length": 1655201.6152337315,
+          "AREALAND": 22660297989,
+          "INTPTLON": "-095.8392688",
+          "MTFCC": "G5200"
+        }
+      ],
+      "2026 State Legislative Districts - Lower": [
+        {
+          "GEOID": "48049",
+          "CENTLAT": "+30.2953482",
+          "SLDL": "049",
+          "AREAWATER": 252516,
+          "STATE": "48",
+          "BASENAME": "49",
+          "OID": "2139042579652474",
+          "LSADC": "LL",
+          "FUNCSTAT": "N",
+          "INTPTLAT": "+30.2943871",
+          "NAME": "State House District 49",
+          "OBJECTID": 3998,
+          "CENTLON": "-097.7557976",
+          "LSY": "2026",
+          "AREALAND": 92144751,
+          "INTPTLON": "-097.7562946",
+          "MTFCC": "G5220",
+          "LDTYP": "O"
+        }
+      ]
+    },
+    "input": {
+      "vintage": {
+        "isDefault": true,
+        "id": "4",
+        "vintageName": "Current_Current",
+        "vintageDescription": "Current Vintage - Current Benchmark"
+      },
+      "location": {
+        "x": -97.7431,
+        "y": 30.2672
+      },
+      "benchmark": {
+        "isDefault": true,
+        "benchmarkDescription": "Public Address Ranges - Current Benchmark",
+        "id": "4",
+        "benchmarkName": "Public_AR_Current"
+      }
+    }
+  }
+}

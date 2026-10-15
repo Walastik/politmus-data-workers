@@ -8,6 +8,9 @@ from api.filters import STATE_ABBR_BY_NAME, STATE_NAME_BY_ABBR
 CENSUS_GEOCODER_URL = (
     "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
 )
+CENSUS_COORDINATES_URL = (
+    "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
+)
 REQUEST_TIMEOUT_SECONDS = 20.0
 USER_AGENT = "politmus-api civic-lookup"
 
@@ -192,7 +195,31 @@ def _match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
     geographies = first.get("geographies")
     if not isinstance(geographies, dict):
         geographies = {}
+    return _match_from_geographies(
+        geographies,
+        components,
+        matched_address=_text_or_none(first.get("matchedAddress")),
+    )
 
+
+def _coordinates_match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None
+    geographies = result.get("geographies")
+    if not isinstance(geographies, dict) or not geographies:
+        return None
+    # A point lookup has no address components; the state comes from the
+    # States layer and the street fields stay empty.
+    return _match_from_geographies(geographies, {})
+
+
+def _match_from_geographies(
+    geographies: dict[str, Any],
+    components: dict[str, Any],
+    *,
+    matched_address: Optional[str] = None,
+) -> Optional[CensusMatch]:
     state_abbr, state_name = _state_from_match(components, geographies)
     if not state_abbr or not state_name:
         return None
@@ -200,7 +227,7 @@ def _match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
     if district is None:
         return None
 
-    line1 = _street_line(components) or _text_or_none(first.get("matchedAddress"))
+    line1 = _street_line(components) or matched_address
     if not district_label:
         if district == 0:
             district_label = f"{state_name} At-Large Congressional District"
@@ -229,17 +256,16 @@ def _match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
     )
 
 
-def geocode_address(address: str) -> Optional[CensusMatch]:
-    """Resolve a US address to state + congressional district via Census."""
+def _census_get(url: str, params: dict[str, Any]) -> dict[str, Any]:
     try:
         with httpx.Client(
             timeout=REQUEST_TIMEOUT_SECONDS,
             headers={"User-Agent": USER_AGENT},
         ) as client:
             response = client.get(
-                CENSUS_GEOCODER_URL,
+                url,
                 params={
-                    "address": address,
+                    **params,
                     "benchmark": "Public_AR_Current",
                     "vintage": "Current_Current",
                     "format": "json",
@@ -251,7 +277,7 @@ def geocode_address(address: str) -> Optional[CensusMatch]:
     if response.status_code >= 500:
         raise CensusUnavailable("Census geocoder is unavailable")
     if response.status_code >= 400:
-        raise CensusUnavailable("Census geocoder rejected the address lookup")
+        raise CensusUnavailable("Census geocoder rejected the lookup")
 
     try:
         payload = response.json()
@@ -259,4 +285,18 @@ def geocode_address(address: str) -> Optional[CensusMatch]:
         raise CensusUnavailable("Invalid response from the Census geocoder") from exc
     if not isinstance(payload, dict):
         raise CensusUnavailable("Invalid response from the Census geocoder")
-    return _match_from_payload(payload)
+    return payload
+
+
+def geocode_address(address: str) -> Optional[CensusMatch]:
+    """Resolve a US address to state + congressional district via Census."""
+    return _match_from_payload(_census_get(CENSUS_GEOCODER_URL, {"address": address}))
+
+
+def geocode_coordinates(lat: float, lon: float) -> Optional[CensusMatch]:
+    """Resolve a point to state + congressional district via Census.
+
+    Returns None for points outside any U.S. state or congressional district.
+    """
+    payload = _census_get(CENSUS_COORDINATES_URL, {"x": lon, "y": lat})
+    return _coordinates_match_from_payload(payload)
