@@ -21,6 +21,10 @@ export interface Official {
   openstates_id?: string | null
   positions_status?: PositionsStatus | null
   positions_count?: number | null
+  // Accountability score; null/absent when the official is not scored.
+  score_points?: number | null
+  score_pct?: number | null
+  score_matches?: number | null
 }
 
 export type PositionsStatus =
@@ -102,10 +106,51 @@ export interface OfficialVote {
   date?: string | null
 }
 
+export interface AreaScore {
+  points: number
+  aligned: number
+  conflicting: number
+}
+
+export interface AccountabilityScore {
+  points: number
+  aligned: number
+  conflicting: number
+  bills_scored: number
+  stances_matched: number
+  alignment_pct: number | null
+  by_policy_area: Record<string, AreaScore> | null
+  engine_version: string
+  computed_at: string
+}
+
+export interface VoteAlignment {
+  bill_id: string
+  bill_title: string | null
+  roll_call_id: number
+  chamber: string | null
+  vote_date: string | null
+  vote_position: string
+  target_name: string | null
+  mechanism: string
+  effect_direction: string
+  effect_magnitude: string | null
+  effect_rationale: string | null
+  stance_direction: string
+  stance_emphasis: string | null
+  stance_summary: string | null
+  stance_evidence_quote: string | null
+  stance_source_url: string | null
+  policy_area: string | null
+  points: number
+}
+
 export interface OfficialDetail extends Official {
   votes: OfficialVote[]
   stated_positions: OfficialStance[]
   positions_sync: PositionsSync | null
+  accountability?: AccountabilityScore | null
+  alignments?: VoteAlignment[]
 }
 
 export interface ChamberVoteSummary {

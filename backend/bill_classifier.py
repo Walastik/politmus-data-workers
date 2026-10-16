@@ -48,6 +48,7 @@ from services.bill_classification import (
     classify_bill,
     summary_text,
 )
+from services.accountability import try_rescore
 from services.bill_effects import persist_bill_effects
 from services.llm_runtime import load_local_module, required_strings
 
@@ -510,6 +511,7 @@ def _process_bill(
         return True
     stats["ok"] += 1
     stats["intents_saved"] += len(result.intents)
+    try_rescore(session, bill_ids=[bill_id], log=log)
     return True
 
 

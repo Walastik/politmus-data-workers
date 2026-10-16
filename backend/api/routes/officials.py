@@ -7,14 +7,25 @@ from sqlalchemy.orm import Session
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.schemas import (
+    AccountabilityScoreOut,
     OfficialDetailOut,
     OfficialOut,
     OfficialStanceOut,
     OfficialVoteOut,
     PositionsSyncOut,
+    VoteAlignmentOut,
 )
 from database import get_db
-from models import Bill, Official, OfficialPositionSync, OfficialStance, RollCall, Vote
+from models import (
+    Bill,
+    Official,
+    OfficialPositionSync,
+    OfficialScore,
+    OfficialStance,
+    RollCall,
+    Vote,
+    VoteAlignment,
+)
 
 router = APIRouter()
 
@@ -52,11 +63,19 @@ def list_officials(
     ),
     db: Session = Depends(get_db),
 ):
-    # One LEFT JOIN for the positions worker status; stances_saved stands in
-    # for the stance count so the list never aggregates official_stances.
-    query = db.query(
-        Official, OfficialPositionSync.status, OfficialPositionSync.stances_saved
-    ).outerjoin(OfficialPositionSync, OfficialPositionSync.official_id == Official.id)
+    # LEFT JOINs for the positions worker status and the accountability
+    # score; stances_saved stands in for the stance count so the list never
+    # aggregates official_stances.
+    query = (
+        db.query(
+            Official,
+            OfficialPositionSync.status,
+            OfficialPositionSync.stances_saved,
+            OfficialScore,
+        )
+        .outerjoin(OfficialPositionSync, OfficialPositionSync.official_id == Official.id)
+        .outerjoin(OfficialScore, OfficialScore.official_id == Official.id)
+    )
     party_value = normalize_party(party)
     state_value = normalize_state(state)
     name_pattern = name_search_pattern(q)
@@ -83,10 +102,20 @@ def list_officials(
     rows = query.order_by(Official.name).limit(limit).all()
     return [
         OfficialOut.model_validate(official).model_copy(
-            update={"positions_status": status, "positions_count": count}
+            update={"positions_status": status, "positions_count": count, **_score_fields(score)}
         )
-        for official, status, count in rows
+        for official, status, count, score in rows
     ]
+
+
+def _score_fields(score: Optional[OfficialScore]) -> dict:
+    if score is None:
+        return {}
+    return {
+        "score_points": score.points,
+        "score_pct": score.alignment_pct,
+        "score_matches": score.aligned + score.conflicting,
+    }
 
 
 @router.get("/{official_id:path}", response_model=OfficialDetailOut)
@@ -116,6 +145,18 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         .all()
     )
     sync = db.get(OfficialPositionSync, official_id)
+    score = db.get(OfficialScore, official_id)
+    alignment_rows = (
+        db.query(VoteAlignment, Bill.title)
+        .join(Bill, Bill.id == VoteAlignment.bill_id)
+        .filter(VoteAlignment.official_id == official_id)
+        .order_by(
+            nulls_last(desc(VoteAlignment.vote_date)),
+            VoteAlignment.bill_id,
+            VoteAlignment.target_name,
+        )
+        .all()
+    )
 
     return OfficialDetailOut(
         id=official.id,
@@ -154,4 +195,10 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         ],
         stated_positions=[OfficialStanceOut.model_validate(s) for s in stances],
         positions_sync=PositionsSyncOut.model_validate(sync) if sync else None,
+        **_score_fields(score),
+        accountability=AccountabilityScoreOut.model_validate(score) if score else None,
+        alignments=[
+            VoteAlignmentOut.model_validate(alignment).model_copy(update={"bill_title": title})
+            for alignment, title in alignment_rows
+        ],
     )

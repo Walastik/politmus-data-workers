@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
+import AccountabilitySection from './components/AccountabilitySection'
 import CopyLinkButton from './components/CopyLinkButton'
+import ScoreHeadline from './components/ScoreHeadline'
 import StatedPositionsSection from './components/StatedPositionsSection'
 import {
   billStub,
@@ -20,6 +22,7 @@ import {
   type Official,
   type OfficialDetail,
   type OfficialVote,
+  type VoteAlignment,
 } from './types'
 import { useScrolledPast } from './useScrolledPast'
 
@@ -164,9 +167,29 @@ export default function MemberDrawer({
                 {[stateNameFromAbbr(view.state), officeLine(view)].filter(Boolean).join(' · ')}
               </p>
             ) : null}
+            <SignedIn>
+              <ScoreHeadline
+                points={view.score_points}
+                pct={view.score_pct}
+                matches={view.score_matches}
+                size="drawer"
+              />
+            </SignedIn>
           </div>
 
           <ContactSection official={view} />
+
+          {detail?.accountability ? (
+            <SignedIn>
+              <AccountabilitySection
+                score={detail.accountability}
+                alignments={detail.alignments ?? []}
+                onSelectBill={(alignment) =>
+                  setSelectedBill(billFromAlignment(alignment, detail.votes))
+                }
+              />
+            </SignedIn>
+          ) : null}
 
           {detail ? (
             <SignedIn>
@@ -417,6 +440,20 @@ function voteMatchesSearch(vote: OfficialVote, rawQuery: string) {
     fuzzyTextMatch(vote.question ?? null, query) ||
     fuzzyTextMatch(vote.result ?? null, query)
   )
+}
+
+function billFromAlignment(alignment: VoteAlignment, votes: OfficialVote[]): Bill {
+  const vote = votes.find((v) => v.roll_call_id === alignment.roll_call_id)
+  if (vote) {
+    return billFromVote(vote)
+  }
+  return billFromVote({
+    bill_id: alignment.bill_id,
+    bill_title: alignment.bill_title,
+    bill_summary: null,
+    position: alignment.vote_position,
+    sponsor_name: null,
+  })
 }
 
 function billFromVote(vote: OfficialVote): Bill {

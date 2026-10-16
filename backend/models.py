@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, String, Integer, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, String, Integer, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -337,6 +337,70 @@ class OfficialPositionSync(Base):
     pages_found = Column(Integer, nullable=True)
     stances_saved = Column(Integer, nullable=True)
     last_error = Column(Text, nullable=True)
+
+
+class VoteAlignment(Base):
+    """One scored match: an official's passage vote on a bill intent they
+    have a stated position on (services/accountability.py).
+
+    Rows are snapshots, not FKs to bill_effects / official_stances: both are
+    deleted and re-inserted when re-extracted, so the engine rewrites an
+    official's rows whenever their inputs change.
+    """
+    __tablename__ = "vote_alignments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    official_id = Column(
+        String, ForeignKey("officials.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    bill_id = Column(String, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True)
+    roll_call_id = Column(Integer, ForeignKey("roll_calls.id", ondelete="CASCADE"), nullable=False)
+    chamber = Column(String, nullable=True)
+    vote_date = Column(Date, nullable=True)
+    # Yes | No
+    vote_position = Column(String, nullable=False)
+    target_id = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), nullable=False)
+    target_name = Column(String, nullable=True)
+    mechanism = Column(String, nullable=False)
+    # What the bill does to the target, and what the official says they want.
+    effect_direction = Column(String, nullable=False)
+    effect_magnitude = Column(String, nullable=True)
+    effect_rationale = Column(Text, nullable=True)
+    stance_direction = Column(String, nullable=False)
+    stance_emphasis = Column(String, nullable=True)
+    stance_summary = Column(Text, nullable=True)
+    stance_evidence_quote = Column(Text, nullable=True)
+    stance_source_url = Column(String, nullable=True)
+    policy_area = Column(String, nullable=True)
+    # +1 voted for what they say they want, -1 against it.
+    points = Column(Integer, nullable=False)
+    computed_at = Column(DateTime, nullable=False)
+
+
+class OfficialScore(Base):
+    """Accountability totals for one official with stated positions.
+
+    inputs_hash covers every alignment row plus the engine version, so
+    incremental runs skip officials whose score cannot have changed.
+    """
+    __tablename__ = "official_scores"
+
+    official_id = Column(String, ForeignKey("officials.id", ondelete="CASCADE"), primary_key=True)
+    # Raw points: aligned - conflicting.
+    points = Column(Integer, nullable=False, default=0, server_default="0")
+    aligned = Column(Integer, nullable=False, default=0, server_default="0")
+    conflicting = Column(Integer, nullable=False, default=0, server_default="0")
+    # Distinct bills / roll calls with at least one scored match.
+    bills_scored = Column(Integer, nullable=False, default=0, server_default="0")
+    # Distinct stances (target + mechanism) matched by at least one vote.
+    stances_matched = Column(Integer, nullable=False, default=0, server_default="0")
+    # aligned / (aligned + conflicting) * 100; NULL with no matches.
+    alignment_pct = Column(Float, nullable=True)
+    # {"Health": {"points": 3, "aligned": 4, "conflicting": 1}, ...}
+    by_policy_area = Column(JSONB, nullable=True)
+    engine_version = Column(String, nullable=False)
+    inputs_hash = Column(String, nullable=False)
+    computed_at = Column(DateTime, nullable=False)
 
 
 class StateSyncLog(Base):
