@@ -98,6 +98,7 @@ export default function VotingLocations({
               />
             )}
           </div>
+          <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} inline />
         </div>
       )}
 
@@ -108,8 +109,6 @@ export default function VotingLocations({
       {uiState === 'live' && (
         <LiveStateView voterInfo={voterInfo} />
       )}
-
-      {uiState === 'live' && <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} />}
 
       {/* Live data can arrive without any election-office links (e.g. DC); the
           other states already include the state fallback links. */}
@@ -336,9 +335,12 @@ function NoLocationsYetStateView({
 function EarlyVotingDates({
   voterInfo,
   stateCode,
+  inline = false,
 }: {
   voterInfo: VoterInfo
   stateCode?: string | null
+  /** When true, renders as a compact sub-section (e.g. inside the Election card) instead of its own bordered card. */
+  inline?: boolean
 }) {
   const dates = getEarlyVotingWindow(stateCode, voterInfo.election?.date)
   if (!dates || voterInfo.earlyVoteSites.length > 0) return null
@@ -356,8 +358,12 @@ function EarlyVotingDates({
         ? 'Starts tomorrow'
         : `Starts in ${phase.daysUntil} days`
 
+  const wrapperClass = inline
+    ? 'mt-4 border-t border-slate-700 pt-4'
+    : 'rounded-lg border border-slate-700 bg-slate-800/80 p-4'
+
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/80 p-4">
+    <section className={wrapperClass}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-400">
