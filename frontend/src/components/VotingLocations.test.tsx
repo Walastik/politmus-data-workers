@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import VotingLocations from './VotingLocations'
 import type { AdminBody, VoterInfo, VoterLocation } from '../types'
 
@@ -265,8 +265,103 @@ describe('VotingLocations Component', () => {
 
     render(<VotingLocations voterInfo={voterInfo} loading={false} stateCode="TX" />)
 
-    expect(screen.getByText(/Polling locations have not yet been assigned/i)).toBeInTheDocument()
-    expect(screen.getByText(/official polling place assignments have not yet been published/i)).toBeInTheDocument()
+    expect(screen.getByText(/Voting locations for this address aren't in our data yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/Voting Information Project/i)).toBeInTheDocument()
+  })
+
+  it('"no_locations_yet" links to the official finder, preferring the Civic API URL', () => {
+    const { rerender } = render(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({ uiState: 'no_locations_yet' })}
+        loading={false}
+        stateCode="UT"
+      />,
+    )
+    expect(
+      screen.getByRole('link', { name: /Find your voting location on Utah's official site/ }),
+    ).toHaveAttribute('href', 'https://votesearch.utah.gov/voter-search/search/search-by-address/how-and-where-can-i-vote')
+
+    rerender(
+      <VotingLocations
+        voterInfo={createMockVoterInfo({
+          uiState: 'no_locations_yet',
+          adminBodies: {
+            state: createMockAdminBody({ votingLocationFinderUrl: 'https://teamrv-mvp.sos.texas.gov/MVP/mvp.do' }),
+            local: null,
+          },
+        })}
+        loading={false}
+        stateCode="TX"
+      />,
+    )
+    expect(
+      screen.getByRole('link', { name: /Find your voting location on Texas's official site/ }),
+    ).toHaveAttribute('href', 'https://teamrv-mvp.sos.texas.gov/MVP/mvp.do')
+  })
+
+  describe('statewide early voting dates', () => {
+    const general = { id: '12000', name: '2026 General Midterm Election', date: '2026-11-03' }
+
+    function renderAt(day: Date, overrides: Partial<VoterInfo>, stateCode = 'TX') {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(day)
+      return render(
+        <VotingLocations
+          voterInfo={createMockVoterInfo({ uiState: 'no_locations_yet', election: general, ...overrides })}
+          loading={false}
+          stateCode={stateCode}
+        />,
+      )
+    }
+
+    afterEach(() => vi.useRealTimers())
+
+    it('shows the window and a countdown before early voting opens', () => {
+      renderAt(new Date(2026, 9, 15, 12, 0), {})
+      expect(screen.getByText('Early Voting in Texas')).toBeInTheDocument()
+      expect(screen.getByText('Mon, Oct 19 – Fri, Oct 30')).toBeInTheDocument()
+      expect(screen.getByText('Starts in 4 days')).toBeInTheDocument()
+    })
+
+    it('says open now while early voting runs, naming Election Day as the end when it is', () => {
+      renderAt(new Date(2026, 9, 21, 9, 0), {}, 'CO')
+      expect(screen.getByText('Mon, Oct 19 – Election Day')).toBeInTheDocument()
+      expect(screen.getByText('Open now through Election Day')).toBeInTheDocument()
+    })
+
+    it('shows the state note for mail-voting states', () => {
+      renderAt(new Date(2026, 9, 15, 12, 0), { uiState: 'mail_only' }, 'UT')
+      expect(screen.getByText(/Each county sets its own early voting days/)).toBeInTheDocument()
+    })
+
+    it('is hidden once early voting has ended', () => {
+      renderAt(new Date(2026, 9, 31, 12, 0), {})
+      expect(screen.queryByText('Early Voting in Texas')).not.toBeInTheDocument()
+    })
+
+    it('is hidden when the Civic API lists early voting sites', () => {
+      renderAt(new Date(2026, 9, 15, 12, 0), {
+        uiState: 'live',
+        earlyVoteSites: [createMockLocation({ locationName: 'Courthouse' })],
+      })
+      expect(screen.getByText('Courthouse')).toBeInTheDocument()
+      expect(screen.queryByText('Early Voting in Texas')).not.toBeInTheDocument()
+    })
+
+    it('shows alongside live Election Day polling places', () => {
+      renderAt(new Date(2026, 9, 15, 12, 0), {
+        uiState: 'live',
+        pollingLocations: [createMockLocation({ locationName: 'Precinct 12' })],
+      })
+      expect(screen.getByText('Early Voting in Texas')).toBeInTheDocument()
+    })
+
+    it('is hidden for elections with no calendar', () => {
+      renderAt(new Date(2026, 9, 15, 12, 0), {
+        election: { id: '9', name: 'Special Election', date: '2026-12-08' },
+      })
+      expect(screen.queryByText('Early Voting in Texas')).not.toBeInTheDocument()
+    })
   })
 
   it('renders "no_data_yet" state distinctly', () => {
