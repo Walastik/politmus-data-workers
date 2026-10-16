@@ -29,6 +29,7 @@ from database import SessionLocal
 from init_db import ensure_schema
 from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 from services import llm_runtime
+from services.accountability import try_rescore
 from services.llm_runtime import load_local_module, required_strings
 from services.official_positions import (
     DEFAULT_CHUNK_CHARS,
@@ -602,6 +603,7 @@ def _process_official(
         session.commit()
         stats["extracted"] += 1
         stats["stances_saved"] += len(saved)
+        try_rescore(session, official_ids=[official.id], log=log)
     except Exception as exc:
         session.rollback()
         stats["failed"] += 1

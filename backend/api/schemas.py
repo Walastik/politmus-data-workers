@@ -24,6 +24,10 @@ class OfficialOut(BaseModel):
     # Stated-positions worker status and saved count; None when not attempted.
     positions_status: Optional[str] = None
     positions_count: Optional[int] = None
+    # Accountability score (services/accountability.py); None when unscored.
+    score_points: Optional[int] = None
+    score_pct: Optional[float] = None
+    score_matches: Optional[int] = None
 
 
 class OfficialVoteOut(BaseModel):
@@ -76,10 +80,53 @@ class PositionsSyncOut(BaseModel):
     extractor_version: Optional[str] = None
 
 
+class AccountabilityScoreOut(BaseModel):
+    """Totals from official_scores."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    points: int = 0
+    aligned: int = 0
+    conflicting: int = 0
+    bills_scored: int = 0
+    stances_matched: int = 0
+    alignment_pct: Optional[float] = None
+    by_policy_area: Optional[dict[str, dict[str, int]]] = None
+    engine_version: str
+    computed_at: datetime
+
+
+class VoteAlignmentOut(BaseModel):
+    """One scored match: the vote, what the bill does, what the official says."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    bill_id: str
+    bill_title: Optional[str] = None
+    roll_call_id: int
+    chamber: Optional[str] = None
+    vote_date: Optional[Date] = None
+    vote_position: str
+    target_name: Optional[str] = None
+    mechanism: str
+    effect_direction: str
+    effect_magnitude: Optional[str] = None
+    effect_rationale: Optional[str] = None
+    stance_direction: str
+    stance_emphasis: Optional[str] = None
+    stance_summary: Optional[str] = None
+    stance_evidence_quote: Optional[str] = None
+    stance_source_url: Optional[str] = None
+    policy_area: Optional[str] = None
+    points: int
+
+
 class OfficialDetailOut(OfficialOut):
     votes: list[OfficialVoteOut] = Field(default_factory=list)
     stated_positions: list[OfficialStanceOut] = Field(default_factory=list)
     positions_sync: Optional[PositionsSyncOut] = None
+    accountability: Optional[AccountabilityScoreOut] = None
+    alignments: list[VoteAlignmentOut] = Field(default_factory=list)
 
 
 class PositionsProgressItemOut(BaseModel):

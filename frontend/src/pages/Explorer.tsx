@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { SignInButton, UserButton, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 
 import LocationSettings from '../components/LocationSettings'
+import ScoreHeadline from '../components/ScoreHeadline'
 import PositionsProgressPanel from '../components/PositionsProgressPanel'
 
 import AddressLookup from '../AddressLookup'
@@ -317,6 +318,11 @@ export default function Explorer() {
                         </p>
                       ) : null}
                       <SignedIn>
+                        <ScoreHeadline
+                          points={official.score_points}
+                          pct={official.score_pct}
+                          matches={official.score_matches}
+                        />
                         <PositionsCardBadge official={official} />
                       </SignedIn>
                     </button>

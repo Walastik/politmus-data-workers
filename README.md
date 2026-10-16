@@ -237,6 +237,31 @@ cp backend/scripts/positions_llm_config.example.py backend/scripts/positions_llm
 
 Without it, every mode except `--crawl-only` stops with an error saying the file is missing. Editing either prompt changes the extractor version (a hash of both prompts plus the model), so each official is re-extracted on their next run, or right away from stored pages with `--extract-only`.
 
+### `score_officials.py` (accountability / litmus score)
+
+Scores whether officials vote for what they say they want. Each classified bill intent (`bill_effects`) that matches one of the official's stated positions (`official_stances`, same `target_id` and `mechanism`) is scored against their passage vote on that bill:
+
+| Stance vs. bill intent | Yes | No |
+|---|---|---|
+| Same direction (wants increase, bill increases) | +1 | −1 |
+| Opposite direction (wants increase, bill cuts) | −1 | +1 |
+| Either side `maintain` / `mixed` | 0 | 0 |
+
+A bill with several matching intents moves the score by several points. Not Voting and Present never score. Only passage-type votes count (On Passage, Suspend the Rules and Pass/Agree, Agreeing to the Resolution, conference reports, concurring in the other chamber's amendment, veto overrides); procedural motions (recommit, previous question, cloture, table, …) and amendment votes do not. When a bill has several passage votes in one chamber, only the official's latest Yes/No counts. Bills must have `classification_status = ok`.
+
+Results go in `vote_alignments` (one row per scored match, with the bill's effect and the official's quote, so every point has a receipt) and `official_scores` (raw `points`, `aligned`, `conflicting`, `alignment_pct` = aligned ÷ scored, a per-policy-area breakdown). Officials with positions but no scored votes get a zero row; officials without positions get none. The API returns `score_points` / `score_pct` / `score_matches` on `GET /api/officials` and the full `accountability` + `alignments` on `GET /api/officials/{id}`; the UI hides the percentage below 5 scored votes.
+
+No model calls, so a full run takes seconds. It is idempotent: each official's computed rows are hashed (with `ENGINE_VERSION` in `services/accountability.py`) and only changed officials are rewritten. It runs on its own when inputs change: the bill classifier rescores everyone who voted on each bill it classifies, the positions worker rescores each official it saves, and the ingest workflows run it after new votes. Bump `ENGINE_VERSION` when the rules change.
+
+```bash
+./scripts/run_scoring.sh                       # incremental: only officials whose inputs changed
+./scripts/run_scoring.sh --all                 # rewrite everyone
+./scripts/run_scoring.sh --official-id O000172 # one official (repeatable)
+./scripts/run_scoring.sh --bill-id 119-hr-105  # everyone who voted on a bill (repeatable)
+./scripts/run_scoring.sh --dry-run             # compute and report, write nothing
+./scripts/run_scoring.sh --show O000172        # print one official's score and matches
+```
+
 ### `openstates_client.py`
 
 Talks to the [OpenStates API](https://docs.openstates.org/api-v3/) and upserts active state legislators and the current governor into `officials` with `level='state'` and an `openstates_id`. Governors are stored with `office='Governor'` and no district. Re-running is idempotent.

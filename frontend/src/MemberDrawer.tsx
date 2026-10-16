@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
+import AccountabilitySection from './components/AccountabilitySection'
+import ScoreHeadline from './components/ScoreHeadline'
 import StatedPositionsSection from './components/StatedPositionsSection'
 import {
   officeLine,
@@ -15,6 +17,7 @@ import {
   type Official,
   type OfficialDetail,
   type OfficialVote,
+  type VoteAlignment,
 } from './types'
 
 export default function MemberDrawer({
@@ -92,7 +95,7 @@ export default function MemberDrawer({
         className="relative z-50 flex h-full w-full max-w-md flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
       >
         <header className="flex items-start justify-between gap-3 border-b border-slate-800 p-5">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span
                 className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(official.party)}`}
@@ -110,6 +113,14 @@ export default function MemberDrawer({
             <p className="mt-1 text-sm text-slate-400">
               {officeLine(official)}
             </p>
+            <SignedIn>
+              <ScoreHeadline
+                points={(detail ?? official).score_points}
+                pct={(detail ?? official).score_pct}
+                matches={(detail ?? official).score_matches}
+                size="drawer"
+              />
+            </SignedIn>
           </div>
           <button
             type="button"
@@ -123,6 +134,18 @@ export default function MemberDrawer({
 
         <div className="flex-1 overflow-y-auto p-5">
           <ContactSection official={detail ?? official} />
+
+          {detail?.accountability ? (
+            <SignedIn>
+              <AccountabilitySection
+                score={detail.accountability}
+                alignments={detail.alignments ?? []}
+                onSelectBill={(alignment) =>
+                  setSelectedBill(billFromAlignment(alignment, detail.votes))
+                }
+              />
+            </SignedIn>
+          ) : null}
 
           {detail ? (
             <SignedIn>
@@ -373,6 +396,20 @@ function voteMatchesSearch(vote: OfficialVote, rawQuery: string) {
     fuzzyTextMatch(vote.question ?? null, query) ||
     fuzzyTextMatch(vote.result ?? null, query)
   )
+}
+
+function billFromAlignment(alignment: VoteAlignment, votes: OfficialVote[]): Bill {
+  const vote = votes.find((v) => v.roll_call_id === alignment.roll_call_id)
+  if (vote) {
+    return billFromVote(vote)
+  }
+  return billFromVote({
+    bill_id: alignment.bill_id,
+    bill_title: alignment.bill_title,
+    bill_summary: null,
+    position: alignment.vote_position,
+    sponsor_name: null,
+  })
 }
 
 function billFromVote(vote: OfficialVote): Bill {
