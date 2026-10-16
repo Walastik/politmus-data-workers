@@ -10,6 +10,7 @@ from api.schemas import BillDetailOut, BillPageOut, BillVoterOut, BillVotersOut,
 from api.auth import get_current_user
 from database import get_db
 from models import Bill, Official, RollCall, Vote
+from services.bill_classification import model_from_version
 from clerk_backend_api.security.types import RequestState
 
 router = APIRouter()
@@ -244,6 +245,7 @@ def _bill_detail(
         status=bill.status,
         level=bill.level or "federal",
         classification_metadata=bill.classification_metadata,
+        classification_model=model_from_version(bill.classification_version),
         votes_summary=votes_summary or _empty_chamber_summaries(),
         votes_by_party=votes_by_party or _empty_party_summaries(),
         roll_calls=[_roll_call_out(row) for row in (roll_calls or [])],

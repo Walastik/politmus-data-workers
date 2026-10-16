@@ -187,6 +187,7 @@ export interface Bill {
   status?: BillStatus | null
   level?: string | null
   classification_metadata?: ClassificationMetadata | null
+  classification_model?: string | null
   votes_summary: BillVoteSummary
   votes_by_party?: BillVotePartySummary
   roll_calls?: BillRollCall[]

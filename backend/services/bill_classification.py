@@ -225,6 +225,14 @@ def classifier_version(prompts: tuple[str, ...], model: str) -> str:
     return f"{SCHEMA_VERSION}|p{digest}|{model}"
 
 
+def model_from_version(version: str | None) -> str | None:
+    """The model part of a classifier_version string, or None if it has none."""
+    parts = (version or "").split("|", 2)
+    if len(parts) < 3 or not parts[2].strip():
+        return None
+    return parts[2].strip()
+
+
 def metadata_is_complete(metadata) -> bool:
     """Legacy rows were saved without checks; these lack a TLDR/ELI5/intents."""
     if not isinstance(metadata, dict):

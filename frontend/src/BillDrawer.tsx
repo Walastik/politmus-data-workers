@@ -151,7 +151,10 @@ export default function BillDrawer({
             </div>
             <RollCallList rollCalls={view.roll_calls} />
             <SignedIn>
-              <AiClassificationSection metadata={view.classification_metadata} />
+              <AiClassificationSection
+                metadata={view.classification_metadata}
+                model={view.classification_model}
+              />
             </SignedIn>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               CRS summary
@@ -389,8 +392,10 @@ function CrsSummary({ text }: { text: string }) {
 
 function AiClassificationSection({
   metadata,
+  model,
 }: {
   metadata?: ClassificationMetadata | null
+  model?: string | null
 }) {
   const [showRaw, setShowRaw] = useState(false)
   const intents = metadata?.intents ?? []
@@ -404,9 +409,11 @@ function AiClassificationSection({
             AI Policy Classification
           </h3>
         </div>
-        <span className="rounded bg-purple-900/50 px-1.5 py-0.5 text-[10px] font-mono font-medium text-purple-300">
-          Nemotron 30B
-        </span>
+        {model ? (
+          <span className="rounded bg-purple-900/50 px-1.5 py-0.5 text-[10px] font-mono font-medium text-purple-300">
+            {model}
+          </span>
+        ) : null}
       </div>
 
       {metadata?.tldr ? (

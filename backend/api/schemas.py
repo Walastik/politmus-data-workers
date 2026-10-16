@@ -135,6 +135,8 @@ class BillOut(BaseModel):
     status: Optional[str] = None
     level: str = "federal"
     classification_metadata: Optional[dict] = None
+    # Model that produced classification_metadata (from classification_version).
+    classification_model: Optional[str] = None
 
 
 class RollCallOut(BaseModel):

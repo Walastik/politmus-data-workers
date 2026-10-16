@@ -34,6 +34,7 @@ from services.bill_classification import (
     ClassificationResult,
     IncompleteSummaries,
     classifier_version,
+    model_from_version,
     classify_bill,
     input_hash,
     merge_intents,
@@ -420,6 +421,13 @@ class VersionTests(unittest.TestCase):
         self.assertNotEqual(base, classifier_version(("system",), "other:7b"))
         self.assertEqual(Prompts("s").for_version(), ("s",))
         self.assertEqual(Prompts("s", "t").for_version(), ("s", "t"))
+
+    def test_model_from_version(self):
+        self.assertEqual(model_from_version(classifier_version(("s",), "qwen3.6:27b")), "qwen3.6:27b")
+        self.assertIsNone(model_from_version(None))
+        self.assertIsNone(model_from_version(""))
+        self.assertIsNone(model_from_version("x"))
+        self.assertIsNone(model_from_version("bills-v1|pabc|"))
 
     def test_input_hash_tracks_title_area_and_summary(self):
         h = input_hash("t", "a", "s")

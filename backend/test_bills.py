@@ -80,6 +80,12 @@ class VotePartySummaryTests(unittest.TestCase):
         )
         self.assertEqual(detail.votes_summary["house"]["Yes"], 10)
         self.assertEqual(detail.votes_by_party["house"]["Democratic"]["Yes"], 10)
+        self.assertIsNone(detail.classification_model)
+
+    def test_bill_detail_reports_classification_model(self):
+        bill = Bill(id="119-hr-1", title="Test", classification_version="bills-v1|pabc123|qwen3.6:27b")
+        detail = _bill_detail(bill, {"house": {}, "senate": {}})
+        self.assertEqual(detail.classification_model, "qwen3.6:27b")
 
 
 class BillVoterSortTests(unittest.TestCase):
