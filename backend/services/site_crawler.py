@@ -286,18 +286,35 @@ def is_negative_path(url: str) -> bool:
 
     Prefix rules apply to every segment until an issue-like segment appears
     (so /public/index.cfm/news-releases is out but /issues/help, a Senate
-    committee page, is kept). Substring rules apply everywhere.
+    committee page, is kept). /about directly above an issue-like segment is
+    a container, not a bio page (Senate sites use /about/issues). Substring
+    rules apply everywhere.
     """
     segments = path_segments(url)
     for segment in segments:
         if any(term in segment for term in NEGATIVE_PATH_SUBSTRINGS):
             return True
-    for segment in segments:
+    for index, segment in enumerate(segments):
         if _is_issue_segment(segment):
             break
+        following = segments[index + 1] if index + 1 < len(segments) else ""
+        if segment == "about" and _is_issue_segment(following):
+            continue
         if segment.startswith(NEGATIVE_SEGMENT_PREFIXES):
             return True
     return False
+
+
+_NOT_FOUND_SEGMENTS = {"404", "404.html", "not-found", "notfound", "page-not-found", "error"}
+
+
+def is_not_found_url(url: str) -> bool:
+    """Error pages some sites redirect missing paths to with a 200, e.g.
+    /404?notfound=/issues on Senate sites."""
+    parts = urlsplit(url)
+    if any(segment in _NOT_FOUND_SEGMENTS for segment in path_segments(url)):
+        return True
+    return any(key.lower() == "notfound" for key, _ in parse_qsl(parts.query, keep_blank_values=True))
 
 
 def score_link(url: str, text: str) -> int:
@@ -473,6 +490,8 @@ class SiteCrawler:
                 target_host = host_key(urlsplit(target).netloc)
                 if allowed_host is not None and target_host != allowed_host:
                     return _Fetch(current, result.status_code, error=f"off-site redirect to {target}")
+                if is_not_found_url(target):
+                    return _Fetch(current, 404, error=f"redirected to error page {target}")
                 current = target
                 continue
             content_type = result.headers.get("Content-Type", "")
@@ -489,7 +508,10 @@ class SiteCrawler:
         """Parsed robots.txt for a host, or None when it could not be read.
 
         Like major crawlers: 4xx means no rules, 401/403 means stay out, and
-        a 5xx or network error means stay out for this run.
+        a 5xx or network error means stay out for this run. A robots.txt that
+        redirects to an error or HTML page (e.g. /404?notfound=/robots.txt
+        answering 403) has no rules: the 401/403 there is the error page's,
+        not the robots file's.
         """
         key = f"{scheme}://{netloc}"
         if key in self._robots:
@@ -497,14 +519,21 @@ class SiteCrawler:
         parser: robotparser.RobotFileParser | None = robotparser.RobotFileParser()
         url = f"{key}/robots.txt"
         result: _Response | Exception = Exception("not fetched")
+        redirected = False
         for _ in range(4):
             result = self._raw_get(url)
             if isinstance(result, _Response) and result.is_redirect and result.headers.get("Location"):
                 url = urljoin(url, result.headers["Location"])
+                redirected = True
                 continue
             break
         if isinstance(result, Exception) or result.status_code >= 500 or result.is_redirect:
             parser = None
+        elif redirected and (
+            result.status_code >= 400
+            or "html" in result.headers.get("Content-Type", "").lower()
+        ):
+            parser.allow_all = True
         elif result.status_code in (401, 403):
             parser.disallow_all = True
         elif result.status_code >= 400:
