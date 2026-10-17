@@ -35,8 +35,10 @@ from services.official_positions import (
     parse_positions,
     clean_quote,
     quote_in_text,
+    split_chunk,
     verify_positions,
 )
+from services.llm_runtime import TruncatedOutputError
 from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, load_local_prompts
 
 OFFICIAL = SimpleNamespace(
@@ -110,6 +112,22 @@ class ChunkingTests(unittest.TestCase):
             self.assertTrue(chunk.text.startswith("## Water"))
             self.assertLessEqual(len(chunk.text), 1000)
             self.assertEqual(chunk.heading, "Water")
+
+    def test_split_chunk_halves_and_keeps_heading(self):
+        paragraphs = [f"Paragraph {i} about energy policy. " * 12 for i in range(8)]
+        chunk = Chunk("https://x.gov/issues", "Energy", "## Energy\n\n" + "\n\n".join(paragraphs))
+        parts = split_chunk(chunk)
+        self.assertEqual(len(parts), 2)
+        for part in parts:
+            self.assertTrue(part.text.startswith("## Energy\n\n"))
+            self.assertEqual((part.url, part.heading), (chunk.url, chunk.heading))
+            self.assertLess(len(part.text), len(chunk.text))
+        body = "\n\n".join(part.text.removeprefix("## Energy\n\n") for part in parts)
+        self.assertEqual(body.split(), "\n\n".join(paragraphs).split())
+
+    def test_small_chunk_is_not_split(self):
+        chunk = Chunk("https://x.gov/issues", None, "Short text. " * 20)
+        self.assertEqual(split_chunk(chunk), [chunk])
 
     def test_heading_only_sections_are_skipped(self):
         chunks = chunk_source(SourceText("u", "# Title\n\n## Empty\n\n## Real\n\nSome real text here."), max_chars=25)
@@ -444,6 +462,51 @@ class ExtractPositionsTests(unittest.TestCase):
         self.assertIn("Ollama timed out", str(ctx.exception))
 
 
+    def test_truncated_chunk_is_split_and_merged(self):
+        filler = "Other remarks about the district and its people. " * 25
+        text = (
+            "## Priorities\n\n" + filler + "\n\nWe must expand Medicaid in every state.\n\n"
+            + filler + "\n\nThe Clean Jobs Act would create millions of jobs and move our "
+            "national energy grid to renewable sources."
+        )
+        calls = []
+
+        def chat_fn(messages, schema):
+            page = messages[1]["content"]
+            calls.append(len(page))
+            if "Medicaid" in page and "Clean Jobs" in page:
+                raise TruncatedOutputError("cut off")
+            if "Medicaid" in page:
+                return model_json(position(
+                    target_name="Medicaid", policy_area="Health",
+                    evidence_quote="We must expand Medicaid in every state.",
+                ))
+            return model_json(position())
+
+        logs = []
+        merged, chunks, _ = extract_positions(
+            OFFICIAL, [SourceText("https://x.gov/priorities", text)],
+            prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=1, log=logs.append,
+        )
+        self.assertEqual(chunks, 1)
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertTrue(all(size < calls[0] for size in calls[1:]))
+        self.assertEqual(sorted(m.position.target_name for m in merged), ["Medicaid", "Renewable Energy"])
+        self.assertTrue(any("output cut off; retrying as" in line for line in logs))
+
+    def test_truncated_small_chunk_still_fails_the_official(self):
+        def chat_fn(messages, schema):
+            raise TruncatedOutputError("cut off")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            extract_positions(
+                OFFICIAL, [SourceText("https://x.gov/congress", CONGRESS_TEXT)],
+                prompt="P", chat_fn=chat_fn, vocabulary=[], concurrency=1,
+            )
+        self.assertIn("chunk 1/1", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, TruncatedOutputError)
+
+
 class FakeOllamaClient:
     """Returns queued responses and records each chat() call."""
 
@@ -489,6 +552,30 @@ class ChatFnTests(unittest.TestCase):
         self.assertEqual(self.make(client)([], {}), '{"positions": []}')
         self.assertEqual([c["options"]["num_predict"] for c in client.calls], [100, 200])
         self.assertEqual(client.calls[0]["options"]["num_ctx"], client.calls[1]["options"]["num_ctx"])
+
+    def test_truncated_answer_retries_with_double_budget(self):
+        client = FakeOllamaClient([
+            ollama_response('{"positions": [{"issue_label": "Bud', done_reason="length", eval_count=100),
+            ollama_response('{"positions": []}'),
+        ])
+        self.assertEqual(self.make(client)([], {}), '{"positions": []}')
+        self.assertEqual([c["options"]["num_predict"] for c in client.calls], [100, 200])
+
+    def test_still_truncated_after_retry_raises_truncated_error(self):
+        client = FakeOllamaClient([
+            ollama_response('{"positions": [', done_reason="length", eval_count=100),
+            ollama_response('{"positions": [{"stance":', done_reason="length", eval_count=200),
+        ])
+        with self.assertRaises(TruncatedOutputError) as ctx:
+            self.make(client)([], {})
+        self.assertIn("output_tokens=200", str(ctx.exception))
+
+    def test_complete_json_padded_to_the_limit_is_accepted(self):
+        client = FakeOllamaClient([
+            ollama_response('{"positions": []}' + "\n" * 50, done_reason="length", eval_count=100),
+        ])
+        self.assertEqual(self.make(client)([], {}).strip(), '{"positions": []}')
+        self.assertEqual(len(client.calls), 1)
 
     def test_timeout_names_the_setting_to_raise(self):
         import httpx
