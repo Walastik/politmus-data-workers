@@ -98,7 +98,7 @@ export default function VotingLocations({
               />
             )}
           </div>
-          <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} inline />
+          <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} />
         </div>
       )}
 
@@ -125,11 +125,11 @@ export default function VotingLocations({
       )}
 
       {uiState === 'no_data_yet' && (
-        <NoDataYetStateView voterInfo={voterInfo} stateCode={stateCode} />
+        <NoDataYetStateView stateCode={stateCode} />
       )}
 
       {uiState === 'nearby_only' && (
-        <NearbyOnlyStateView voterInfo={voterInfo} stateCode={stateCode} />
+        <NearbyOnlyStateView stateCode={stateCode} />
       )}
 
       {uiState === 'election_over' && (
@@ -272,7 +272,6 @@ function MailOnlyStateView({
         />
       )}
 
-      <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} />
       <StaticFallback stateCode={stateCode} />
     </div>
   )
@@ -324,23 +323,20 @@ function NoLocationsYetStateView({
           </div>
         </div>
       </div>
-      <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} />
       <StaticFallback stateCode={stateCode} />
     </div>
   )
 }
 
-// Statewide dates only; counties pick the sites and daily hours. Hidden when
-// the Civic API already lists early-voting sites, which carry their own dates.
+// Rendered inside the Election card. Statewide dates only; counties pick the
+// sites and daily hours. Hidden when the Civic API already lists early-voting
+// sites, which carry their own dates.
 function EarlyVotingDates({
   voterInfo,
   stateCode,
-  inline = false,
 }: {
   voterInfo: VoterInfo
   stateCode?: string | null
-  /** When true, renders as a compact sub-section (e.g. inside the Election card) instead of its own bordered card. */
-  inline?: boolean
 }) {
   const dates = getEarlyVotingWindow(stateCode, voterInfo.election?.date)
   if (!dates || voterInfo.earlyVoteSites.length > 0) return null
@@ -358,12 +354,8 @@ function EarlyVotingDates({
         ? 'Starts tomorrow'
         : `Starts in ${phase.daysUntil} days`
 
-  const wrapperClass = inline
-    ? 'mt-4 border-t border-slate-700 pt-4'
-    : 'rounded-lg border border-slate-700 bg-slate-800/80 p-4'
-
   return (
-    <section className={wrapperClass}>
+    <section className="mt-4 border-t border-slate-700 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-400">
@@ -399,13 +391,7 @@ function EarlyVotingDates({
   )
 }
 
-function NoDataYetStateView({
-  voterInfo,
-  stateCode,
-}: {
-  voterInfo: VoterInfo
-  stateCode?: string | null
-}) {
+function NoDataYetStateView({ stateCode }: { stateCode?: string | null }) {
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-slate-700 bg-slate-800/80 p-4 text-slate-200">
@@ -423,19 +409,12 @@ function NoDataYetStateView({
           </div>
         </div>
       </div>
-      <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} />
       <StaticFallback stateCode={stateCode} />
     </div>
   )
 }
 
-function NearbyOnlyStateView({
-  voterInfo,
-  stateCode,
-}: {
-  voterInfo: VoterInfo
-  stateCode?: string | null
-}) {
+function NearbyOnlyStateView({ stateCode }: { stateCode?: string | null }) {
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 text-amber-200">
@@ -453,7 +432,6 @@ function NearbyOnlyStateView({
           </div>
         </div>
       </div>
-      <EarlyVotingDates voterInfo={voterInfo} stateCode={stateCode} />
       <StaticFallback stateCode={stateCode} />
     </div>
   )
