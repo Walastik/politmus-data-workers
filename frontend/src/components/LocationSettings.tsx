@@ -1,27 +1,22 @@
-import { useUser } from '@clerk/clerk-react'
 import { useState } from 'react'
 
+import { useSavedAddress } from '../useSavedAddress'
+
 export default function LocationSettings() {
-  const { user, isLoaded } = useUser()
-  const initialAddress = (user?.unsafeMetadata?.savedAddress as string) || ''
-  const [address, setAddress] = useState(initialAddress)
+  const { isLoaded, canSave, savedAddress, saveAddress } = useSavedAddress()
+  const [address, setAddress] = useState(savedAddress ?? '')
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!isLoaded || !user) return
+    if (!isLoaded || !canSave) return
 
     setIsSaving(true)
     setSaveSuccess(false)
 
     try {
-      await user.update({
-        unsafeMetadata: {
-          ...user.unsafeMetadata,
-          savedAddress: address
-        }
-      })
+      await saveAddress(address)
       setSaveSuccess(true)
     } catch (err) {
       console.error('Failed to save address:', err)

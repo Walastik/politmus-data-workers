@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { billStub, type Official } from '../types'
 import Explorer from './Explorer'
 
-const clerk = vi.hoisted(() => ({ signedIn: true }))
+const clerk = vi.hoisted(() => ({ signedIn: true, savedAddress: null as string | null }))
 
 vi.mock('@clerk/clerk-react', () => {
   const UserButton = () => null
@@ -17,7 +17,13 @@ vi.mock('@clerk/clerk-react', () => {
     SignInButton: ({ children }: { children: ReactNode }) => <>{children}</>,
     UserButton,
     useAuth: () => ({ isSignedIn: clerk.signedIn }),
-    useUser: () => ({ user: null, isLoaded: true }),
+    useUser: () => ({
+      user:
+        clerk.signedIn && clerk.savedAddress
+          ? { unsafeMetadata: { savedAddress: clerk.savedAddress } }
+          : null,
+      isLoaded: true,
+    }),
   }
 })
 
@@ -196,5 +202,57 @@ describe('Explorer deep links', () => {
     renderExplorer('?tab=bills&bill=nope')
 
     expect(await screen.findByText('Failed to load bill (404)')).toBeInTheDocument()
+  })
+})
+
+describe('Explorer My Representatives', () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/lookup')) {
+        return jsonResponse({ normalized_input: { line1: '1 Main St', state: 'UT' }, representatives: [] })
+      }
+      return jsonResponse(url.includes('/api/positions/progress') ? progress : roster)
+    })
+  })
+
+  afterEach(() => {
+    clerk.signedIn = true
+    clerk.savedAddress = null
+    vi.restoreAllMocks()
+  })
+
+  it('shows the saved address results from another tab', async () => {
+    clerk.savedAddress = '1 Main St, Provo, UT'
+    renderExplorer('?tab=roster')
+
+    fireEvent.click(screen.getByRole('button', { name: 'My Representatives' }))
+    expect(currentSearch).toBe('?tab=lookup')
+    expect(await screen.findByLabelText(/Street address/i)).toHaveValue('1 Main St, Provo, UT')
+    expect(await screen.findByRole('tab', { name: /Representatives/i })).toBeInTheDocument()
+  })
+
+  it('has no button without a saved address or when signed out', () => {
+    const { unmount } = renderExplorer('?tab=roster')
+    expect(screen.queryByRole('button', { name: 'My Representatives' })).not.toBeInTheDocument()
+    unmount()
+
+    clerk.signedIn = false
+    clerk.savedAddress = '1 Main St, Provo, UT'
+    renderExplorer('?tab=roster')
+    expect(screen.queryByRole('button', { name: 'My Representatives' })).not.toBeInTheDocument()
+  })
+
+  it('keeps lookup results when switching tabs', async () => {
+    clerk.savedAddress = '1 Main St, Provo, UT'
+    renderExplorer('?tab=lookup')
+    await screen.findByRole('tab', { name: /Representatives/i })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Roster' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Lookup' }))
+    const lookups = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([input]) => String(input).includes('/api/lookup'))
+    expect(lookups).toHaveLength(1)
   })
 })

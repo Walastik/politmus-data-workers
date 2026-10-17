@@ -1,4 +1,4 @@
-import { Landmark, MapPin, ScrollText, Search, Sparkles, Users } from 'lucide-react'
+import { Landmark, MapPin, MapPinHouse, ScrollText, Search, Sparkles, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { SignInButton, UserButton, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 
@@ -11,6 +11,7 @@ import BillDrawer from '../BillDrawer'
 import BillsFeed from '../BillsFeed'
 import MemberDrawer from '../MemberDrawer'
 import { useExplorerLinks } from '../useExplorerLinks'
+import { useSavedAddress } from '../useSavedAddress'
 import {
   PARTY_FILTERS,
   ROSTER_STATUS_FILTERS,
@@ -45,6 +46,14 @@ export default function Explorer() {
   const [error, setError] = useState<string | null>(null)
   const [hasPositionsOnly, setHasPositionsOnly] = useState(false)
   const { isSignedIn } = useAuth()
+  const { savedAddress } = useSavedAddress()
+  const [savedAddressRequest, setSavedAddressRequest] = useState(0)
+  // Lookup stays mounted after its first visit, so switching tabs keeps its
+  // results instead of re-running the lookup.
+  const [lookupVisited, setLookupVisited] = useState(tab === 'lookup')
+  if (tab === 'lookup' && !lookupVisited) {
+    setLookupVisited(true)
+  }
   const visibleOfficials =
     isSignedIn && hasPositionsOnly
       ? officials.filter((official) => official.positions_status === 'ok')
@@ -127,7 +136,21 @@ export default function Explorer() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <nav className="flex gap-2" aria-label="Primary">
+            <nav className="flex flex-wrap gap-2" aria-label="Primary">
+              {savedAddress ? (
+                <TabButton
+                  active={false}
+                  icon={<MapPinHouse className="h-3.5 w-3.5" />}
+                  label="My Representatives"
+                  title={savedAddress}
+                  onClick={() => {
+                    if (tab !== 'lookup') {
+                      setTab('lookup')
+                    }
+                    setSavedAddressRequest((request) => request + 1)
+                  }}
+                />
+              ) : null}
               <TabButton
                 active={tab === 'lookup'}
                 icon={<MapPin className="h-3.5 w-3.5" />}
@@ -271,9 +294,15 @@ export default function Explorer() {
       </header>
 
       <main className="mx-auto max-w-6xl">
-        {tab === 'lookup' ? (
-          <AddressLookup onSelectOfficial={openOfficial} />
-        ) : tab === 'bills' ? (
+        {lookupVisited ? (
+          <div hidden={tab !== 'lookup'}>
+            <AddressLookup
+              onSelectOfficial={openOfficial}
+              savedAddressRequest={savedAddressRequest}
+            />
+          </div>
+        ) : null}
+        {tab === 'lookup' ? null : tab === 'bills' ? (
           <BillsFeed onSelectBill={openBill} />
         ) : (
           <>
@@ -364,16 +393,19 @@ function TabButton({
   active,
   icon,
   label,
+  title,
   onClick,
 }: {
   active: boolean
   icon: ReactNode
   label: string
+  title?: string
   onClick: () => void
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition ${
         active

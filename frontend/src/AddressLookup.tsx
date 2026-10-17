@@ -1,11 +1,11 @@
-import { LocateFixed, Search, Users, Vote } from 'lucide-react'
+import { Check, LocateFixed, MapPinHouse, Search, Users, Vote } from 'lucide-react'
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
-import { useUser } from '@clerk/clerk-react'
 
 import { apiUrl } from './api'
 import LookupResults from './LookupResults'
 import VotingLocations from './components/VotingLocations'
 import type { CivicLookup, Official, VoterInfo } from './types'
+import { sameAddress, useSavedAddress } from './useSavedAddress'
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
@@ -93,8 +93,11 @@ async function reverseGeocode(point: Point): Promise<string | null> {
 
 export default function AddressLookup({
   onSelectOfficial,
+  savedAddressRequest = 0,
 }: {
   onSelectOfficial: (official: Official) => void
+  // Bumped by "My Representatives" to show the saved address's results.
+  savedAddressRequest?: number
 }) {
   const [address, setAddress] = useState('')
   const debouncedAddress = useDebounce(address, 300)
@@ -105,7 +108,6 @@ export default function AddressLookup({
   const [lookup, setLookup] = useState<CivicLookup | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
   const [locating, setLocating] = useState(false)
   const canUseLocation = typeof navigator !== 'undefined' && 'geolocation' in navigator
 
@@ -128,8 +130,10 @@ export default function AddressLookup({
     voting: null,
   })
 
-  const { user, isLoaded: userLoaded } = useUser()
-  const savedAddress = user?.unsafeMetadata?.savedAddress as string | undefined
+  const { isLoaded: userLoaded, canSave, savedAddress, saveAddress } = useSavedAddress()
+  const handledSavedRequestRef = useRef<number | null>(null)
+  const [savingAddress, setSavingAddress] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
 
   async function fetchVoterInfo(
     targetAddress: string,
@@ -256,6 +260,7 @@ export default function AddressLookup({
 
     setLoading(true)
     setError(null)
+    setJustSaved(false)
     setLookedUpAddress(trimmed || CURRENT_LOCATION_LABEL)
     setLocationLookup(point ? { hasAddress: Boolean(trimmed) } : null)
 
@@ -339,16 +344,39 @@ export default function AddressLookup({
     await performLookup(address)
   }
 
-  // Auto-load saved address when component mounts and user loads
+  // Shows the saved address's results: once when Clerk has loaded (request 0),
+  // then each time "My Representatives" bumps the request. Skipped when those
+  // results are already showing, and on first load if the user got a lookup in
+  // before Clerk finished loading.
   useEffect(() => {
-    if (userLoaded && savedAddress && !hasAutoLoaded && !lookup && !loading) {
-      setHasAutoLoaded(true)
-      performLookup(savedAddress)
-    }
-    // Runs once (guarded by hasAutoLoaded) on the initial Representatives tab, so the
-    // performLookup closure is never stale here; voter info is not fetched on auto-load.
+    if (!userLoaded || !savedAddress) return
+    if (handledSavedRequestRef.current === savedAddressRequest) return
+    handledSavedRequestRef.current = savedAddressRequest
+
+    const isFirstLoad = savedAddressRequest === 0
+    if (isFirstLoad && (lookedUpAddress || loading || locating)) return
+    if (!isFirstLoad) setActiveTab('representatives')
+    setAddress(savedAddress)
+    setShowSuggestions(false)
+    if (lookup && !locationLookup && sameAddress(lookedUpAddress, savedAddress)) return
+
+    performLookup(savedAddress)
+    // Keyed on the request, so performLookup's closure is current when it runs.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [userLoaded, savedAddress, hasAutoLoaded, lookup, loading])
+  }, [userLoaded, savedAddress, savedAddressRequest])
+
+  async function saveLookedUpAddress() {
+    if (!lookedUpAddress) return
+    setSavingAddress(true)
+    try {
+      await saveAddress(lookedUpAddress)
+      setJustSaved(true)
+    } catch (err) {
+      console.error('Failed to save address:', err)
+    } finally {
+      setSavingAddress(false)
+    }
+  }
 
   useEffect(() => {
     async function fetchSuggestions() {
@@ -450,6 +478,23 @@ export default function AddressLookup({
         ) : null}
         {lookedUpAddress && (lookup || !loading) ? (
           <div>
+            {justSaved ? (
+              <p className="mb-4 inline-flex items-center gap-1.5 text-xs text-green-400">
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                Saved as your address
+              </p>
+            ) : canSave && lookup && !loading && !locationLookup &&
+              !sameAddress(lookedUpAddress, savedAddress) ? (
+              <button
+                type="button"
+                onClick={saveLookedUpAddress}
+                disabled={savingAddress}
+                className="mb-4 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-700 disabled:opacity-60"
+              >
+                <MapPinHouse className="h-3.5 w-3.5" aria-hidden="true" />
+                {savingAddress ? 'Saving…' : 'Save as my address'}
+              </button>
+            ) : null}
             <div
               className="mb-6 flex border-b border-slate-700"
               role="tablist"

@@ -2,8 +2,15 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import AddressLookup from './AddressLookup'
 
+type MockUser = {
+  unsafeMetadata: Record<string, unknown>
+  update: (params: { unsafeMetadata: Record<string, unknown> }) => Promise<void>
+}
+
+const clerk = vi.hoisted(() => ({ user: null as MockUser | null }))
+
 vi.mock('@clerk/clerk-react', () => ({
-  useUser: () => ({ user: null, isLoaded: true }),
+  useUser: () => ({ user: clerk.user, isLoaded: true }),
 }))
 
 describe('AddressLookup Integration & Race Handling', () => {
@@ -440,5 +447,104 @@ describe('AddressLookup: use my location', () => {
     expect(urls.some((u) => u.includes('/api/lookup?lat='))).toBe(false)
     expect(urls.some((u) => u.includes('photon.komoot.io/reverse'))).toBe(false)
     expect(input).toHaveValue('500 Main St, Dallas, TX')
+  })
+})
+
+describe('AddressLookup saved address', () => {
+  let lookupAddresses: string[]
+
+  function signIn(savedAddress?: string) {
+    const user: MockUser = {
+      unsafeMetadata: savedAddress ? { savedAddress } : {},
+      update: vi.fn(async ({ unsafeMetadata }) => {
+        user.unsafeMetadata = unsafeMetadata
+      }),
+    }
+    clerk.user = user
+    return user
+  }
+
+  beforeEach(() => {
+    lookupAddresses = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      lookupAddresses.push(url.searchParams.get('address') ?? '')
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            normalized_input: { line1: url.searchParams.get('address'), state: 'UT' },
+            representatives: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    })
+  })
+
+  afterEach(() => {
+    clerk.user = null
+    vi.restoreAllMocks()
+  })
+
+  async function lookUp(address: string) {
+    fireEvent.change(screen.getByLabelText(/Street address/i), { target: { value: address } })
+    fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
+    await screen.findByRole('tab', { name: /Representatives/i })
+  }
+
+  it('offers to save a looked-up address when signed in without one', async () => {
+    const user = signIn()
+    render(<AddressLookup onSelectOfficial={() => {}} />)
+    await lookUp('1 Main St, Provo, UT')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save as my address' }))
+    expect(await screen.findByText('Saved as your address')).toBeInTheDocument()
+    expect(user.update).toHaveBeenCalledWith({
+      unsafeMetadata: { savedAddress: '1 Main St, Provo, UT' },
+    })
+  })
+
+  it('does not offer to save the address that is already saved', async () => {
+    signIn('1 Main St, Provo, UT')
+    render(<AddressLookup onSelectOfficial={() => {}} />)
+    await screen.findByRole('tab', { name: /Representatives/i })
+
+    expect(screen.queryByRole('button', { name: 'Save as my address' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer to save when signed out', async () => {
+    render(<AddressLookup onSelectOfficial={() => {}} />)
+    await lookUp('1 Main St, Provo, UT')
+
+    expect(screen.queryByRole('button', { name: 'Save as my address' })).not.toBeInTheDocument()
+  })
+
+  it('looks up the saved address on load and fills in the address box', async () => {
+    signIn('1 Main St, Provo, UT')
+    render(<AddressLookup onSelectOfficial={() => {}} />)
+
+    await screen.findByRole('tab', { name: /Representatives/i })
+    expect(screen.getByLabelText(/Street address/i)).toHaveValue('1 Main St, Provo, UT')
+    expect(lookupAddresses).toEqual(['1 Main St, Provo, UT'])
+  })
+
+  it('shows the saved address again on request, without repeating a showing lookup', async () => {
+    signIn('1 Main St, Provo, UT')
+    const { rerender } = render(<AddressLookup onSelectOfficial={() => {}} />)
+    await screen.findByRole('tab', { name: /Representatives/i })
+
+    rerender(<AddressLookup onSelectOfficial={() => {}} savedAddressRequest={1} />)
+    expect(lookupAddresses).toEqual(['1 Main St, Provo, UT'])
+
+    await lookUp('9 Elm St, Ogden, UT')
+    rerender(<AddressLookup onSelectOfficial={() => {}} savedAddressRequest={2} />)
+    await waitFor(() =>
+      expect(lookupAddresses).toEqual([
+        '1 Main St, Provo, UT',
+        '9 Elm St, Ogden, UT',
+        '1 Main St, Provo, UT',
+      ]),
+    )
+    expect(screen.getByLabelText(/Street address/i)).toHaveValue('1 Main St, Provo, UT')
   })
 })
