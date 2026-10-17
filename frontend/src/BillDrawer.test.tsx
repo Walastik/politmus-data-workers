@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -55,5 +55,31 @@ describe('BillDrawer AI classification model badge', () => {
     expect(await screen.findByText('AI Policy Classification')).toBeInTheDocument()
     expect(screen.queryByText('Nemotron 30B')).not.toBeInTheDocument()
     expect(screen.queryByText('qwen3.6:27b')).not.toBeInTheDocument()
+  })
+})
+
+describe('BillDrawer top bar', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('shows the title next to the id once it scrolls out of view', async () => {
+    mockDetail(bill)
+    const { container } = render(<BillDrawer bill={bill} onClose={() => {}} />)
+    await screen.findByText('AI Policy Classification')
+    const header = container.querySelector('header') as HTMLElement
+    const title = screen.getByRole('heading', { name: 'Secure America Act' })
+    const scroller = title.closest('.overflow-y-auto') as HTMLElement
+    expect(within(header).getByText('119-s-2')).toBeInTheDocument()
+    expect(within(header).queryByText('Secure America Act')).not.toBeInTheDocument()
+
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 50 } as DOMRect)
+    vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ bottom: 20 } as DOMRect)
+    fireEvent.scroll(scroller)
+    expect(within(header).getByText('Secure America Act')).toBeInTheDocument()
+
+    vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ bottom: 120 } as DOMRect)
+    fireEvent.scroll(scroller)
+    expect(within(header).queryByText('Secure America Act')).not.toBeInTheDocument()
   })
 })

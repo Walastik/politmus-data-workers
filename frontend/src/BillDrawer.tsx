@@ -23,6 +23,7 @@ import {
   type ClassificationMetadata,
   type VoteChamber,
 } from './types'
+import { useScrolledPast } from './useScrolledPast'
 
 export default function BillDrawer({
   bill,
@@ -34,6 +35,12 @@ export default function BillDrawer({
   const [detail, setDetail] = useState<Bill | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Once the title scrolls out of view, the top bar shows it next to the id.
+  const {
+    targetRef: titleRef,
+    scrolledPast: titleHidden,
+    onScroll,
+  } = useScrolledPast<HTMLHeadingElement>()
   const [voterList, setVoterList] = useState<{
     chamber: VoteChamber
     party: string
@@ -112,7 +119,14 @@ export default function BillDrawer({
         className="relative z-[70] flex h-dvh w-full max-w-lg flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
-          <p className="truncate font-mono text-xs text-slate-400">{view.id}</p>
+          <p className="flex min-w-0 items-baseline gap-2">
+            <span className="shrink-0 font-mono text-xs text-slate-400">{view.id}</span>
+            {titleHidden && view.title ? (
+              <span className="min-w-0 truncate text-sm font-semibold text-slate-100">
+                {view.title}
+              </span>
+            ) : null}
+          </p>
           <div className="flex shrink-0 items-center gap-1">
             <CopyLinkButton />
             <button
@@ -127,9 +141,10 @@ export default function BillDrawer({
         </header>
 
         <div className="relative min-h-0 flex-1">
-          <div className="h-full overflow-y-auto p-5">
+          <div className="h-full overflow-y-auto p-5" onScroll={onScroll}>
             <div className="mb-5 border-b border-slate-800 pb-5">
               <h2
+                ref={titleRef}
                 id="bill-drawer-title"
                 className="text-xl font-semibold leading-snug"
               >

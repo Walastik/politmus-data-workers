@@ -18,6 +18,7 @@ import {
   type OfficialDetail,
   type OfficialVote,
 } from './types'
+import { useScrolledPast } from './useScrolledPast'
 
 export default function MemberDrawer({
   official,
@@ -36,6 +37,12 @@ export default function MemberDrawer({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [voteQuery, setVoteQuery] = useState('')
+  // Once the name scrolls out of view, the top bar shows it instead.
+  const {
+    targetRef: titleRef,
+    scrolledPast: titleHidden,
+    onScroll,
+  } = useScrolledPast<HTMLHeadingElement>()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -103,14 +110,27 @@ export default function MemberDrawer({
           {view.party ? (
             <div className="flex min-w-0 items-center gap-2">
               <span
-                className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
+                className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
               >
                 {partyShort(view.party)}
               </span>
-              <span className="text-xs text-slate-400">{view.state}</span>
-              <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                {rosterStatusLabel(view)}
-              </span>
+              {titleHidden ? (
+                <>
+                  <span className="min-w-0 truncate text-sm font-semibold text-slate-100">
+                    {view.name}
+                  </span>
+                  <span className="min-w-0 shrink-[3] truncate text-xs text-slate-400">
+                    {view.state} · {officeLine(view)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-400">{view.state}</span>
+                  <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    {rosterStatusLabel(view)}
+                  </span>
+                </>
+              )}
             </div>
           ) : (
             <span />
@@ -128,9 +148,9 @@ export default function MemberDrawer({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5" onScroll={onScroll}>
           <div className="mb-5 border-b border-slate-800 pb-5">
-            <h2 id="member-drawer-title" className="text-xl font-semibold">
+            <h2 ref={titleRef} id="member-drawer-title" className="text-xl font-semibold">
               {view.name || (loading ? 'Loading…' : official.id)}
             </h2>
             {view.party ? (
