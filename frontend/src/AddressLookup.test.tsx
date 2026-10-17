@@ -70,7 +70,7 @@ describe('AddressLookup Integration & Race Handling', () => {
       return Promise.reject(new Error('Unknown url'))
     })
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
 
     const input = screen.getByLabelText(/Street address/i)
     fireEvent.change(input, { target: { value: '123 Main St, Austin, TX 78701' } })
@@ -122,7 +122,7 @@ describe('AddressLookup Integration & Race Handling', () => {
     })
     const voterInfoCalls = () => fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/voter-info'))
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.change(screen.getByLabelText(/Street address/i), { target: { value: '1 Test St, Austin, TX' } })
     fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
 
@@ -171,7 +171,7 @@ describe('AddressLookup Integration & Race Handling', () => {
       return Promise.reject(new Error('Unknown url'))
     })
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.change(screen.getByLabelText(/Street address/i), { target: { value: '1 Test St, Austin, TX' } })
     fireEvent.click(screen.getByRole('button', { name: /Find representatives/i }))
 
@@ -211,7 +211,7 @@ describe('AddressLookup Integration & Race Handling', () => {
       },
     )
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
 
     const input = screen.getByLabelText(/Street address/i)
 
@@ -251,7 +251,7 @@ describe('AddressLookup Integration & Race Handling', () => {
       return new Promise(() => {})
     })
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.change(screen.getByLabelText(/Street address/i), {
       target: { value: '1100 Congress Ave, Austin, TX 78701' },
     })
@@ -334,7 +334,7 @@ describe('AddressLookup: use my location', () => {
   })
 
   it('hides the button when the browser has no geolocation', () => {
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     expect(screen.queryByRole('button', { name: /Use my location/i })).toBeNull()
   })
 
@@ -347,7 +347,7 @@ describe('AddressLookup: use my location', () => {
       return new Promise(() => {})
     })
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
 
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument()
@@ -375,7 +375,7 @@ describe('AddressLookup: use my location', () => {
     )
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
 
     expect(await screen.findByText(/Location access was blocked/i)).toBeInTheDocument()
@@ -393,7 +393,7 @@ describe('AddressLookup: use my location', () => {
     })
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
 
     expect(await screen.findByText('Jane Doe')).toBeInTheDocument()
@@ -422,7 +422,7 @@ describe('AddressLookup: use my location', () => {
       return Promise.reject(new Error('Unknown url'))
     })
 
-    render(<AddressLookup />)
+    render(<AddressLookup onSelectOfficial={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /Use my location/i }))
 
     // Submit the form directly; the buttons are disabled while locating.

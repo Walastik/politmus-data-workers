@@ -7,8 +7,10 @@ import PositionsProgressPanel from '../components/PositionsProgressPanel'
 
 import AddressLookup from '../AddressLookup'
 import { apiUrl } from '../api'
+import BillDrawer from '../BillDrawer'
 import BillsFeed from '../BillsFeed'
 import MemberDrawer from '../MemberDrawer'
+import { useExplorerLinks } from '../useExplorerLinks'
 import {
   PARTY_FILTERS,
   ROSTER_STATUS_FILTERS,
@@ -22,10 +24,17 @@ import {
   type RosterStatusFilter,
 } from '../types'
 
-type Tab = 'lookup' | 'roster' | 'bills'
-
 export default function Explorer() {
-  const [tab, setTab] = useState<Tab>('lookup')
+  const {
+    tab,
+    setTab,
+    official: selectedOfficial,
+    openOfficial,
+    closeOfficial,
+    bill: selectedBill,
+    openBill,
+    closeBill,
+  } = useExplorerLinks()
   const [officials, setOfficials] = useState<Official[]>([])
   const [filterParty, setFilterParty] = useState('')
   const [filterStatus, setFilterStatus] = useState<RosterStatusFilter>('active')
@@ -34,7 +43,6 @@ export default function Explorer() {
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
   const [hasPositionsOnly, setHasPositionsOnly] = useState(false)
   const { isSignedIn } = useAuth()
   const visibleOfficials =
@@ -124,10 +132,7 @@ export default function Explorer() {
                 active={tab === 'lookup'}
                 icon={<MapPin className="h-3.5 w-3.5" />}
                 label="Lookup"
-                onClick={() => {
-                  setSelectedOfficial(null)
-                  setTab('lookup')
-                }}
+                onClick={() => setTab('lookup')}
               />
               <TabButton
                 active={tab === 'roster'}
@@ -139,10 +144,7 @@ export default function Explorer() {
                 active={tab === 'bills'}
                 icon={<ScrollText className="h-3.5 w-3.5" />}
                 label="Bills"
-                onClick={() => {
-                  setSelectedOfficial(null)
-                  setTab('bills')
-                }}
+                onClick={() => setTab('bills')}
               />
             </nav>
             <SignedIn>
@@ -270,13 +272,13 @@ export default function Explorer() {
 
       <main className="mx-auto max-w-6xl">
         {tab === 'lookup' ? (
-          <AddressLookup />
+          <AddressLookup onSelectOfficial={openOfficial} />
         ) : tab === 'bills' ? (
-          <BillsFeed />
+          <BillsFeed onSelectBill={openBill} />
         ) : (
           <>
             <SignedIn>
-              <PositionsProgressPanel onSelectOfficial={setSelectedOfficial} />
+              <PositionsProgressPanel onSelectOfficial={openOfficial} />
             </SignedIn>
             {loading ? (
               <p className="text-slate-400">Loading congressional roster...</p>
@@ -296,7 +298,7 @@ export default function Explorer() {
                     <button
                       key={official.id}
                       type="button"
-                      onClick={() => setSelectedOfficial(official)}
+                      onClick={() => openOfficial(official)}
                       className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-left shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
                     >
                       <div className="flex items-start justify-between">
@@ -331,8 +333,13 @@ export default function Explorer() {
       {selectedOfficial ? (
         <MemberDrawer
           official={selectedOfficial}
-          onClose={() => setSelectedOfficial(null)}
+          onClose={closeOfficial}
+          selectedBill={selectedBill}
+          onSelectBill={openBill}
+          onCloseBill={closeBill}
         />
+      ) : selectedBill ? (
+        <BillDrawer bill={selectedBill} onClose={closeBill} />
       ) : null}
     </div>
   )
