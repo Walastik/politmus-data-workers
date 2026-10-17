@@ -3,6 +3,7 @@ import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
+import CopyLinkButton from './components/CopyLinkButton'
 import VotePartyList from './VotePartyList'
 import VoteTallyBar from './VoteTallyBar'
 import {
@@ -112,14 +113,17 @@ export default function BillDrawer({
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
           <p className="truncate font-mono text-xs text-slate-400">{view.id}</p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <CopyLinkButton />
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </header>
 
         <div className="relative min-h-0 flex-1">
@@ -129,7 +133,7 @@ export default function BillDrawer({
                 id="bill-drawer-title"
                 className="text-xl font-semibold leading-snug"
               >
-                {view.title || 'Untitled bill'}
+                {view.title || (loading ? 'Loading…' : 'Untitled bill')}
               </h2>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <StatusTag status={view.status} />

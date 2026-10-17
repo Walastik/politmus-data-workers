@@ -177,14 +177,30 @@ describe('MemberDrawer stated positions', () => {
   })
 
   it('renders the section for signed-in users', async () => {
-    render(<MemberDrawer official={official} onClose={() => {}} />)
+    render(
+      <MemberDrawer
+        official={official}
+        onClose={() => {}}
+        selectedBill={null}
+        onSelectBill={() => {}}
+        onCloseBill={() => {}}
+      />,
+    )
     expect(await screen.findByText('Stated Positions (AI)')).toBeInTheDocument()
     expect(screen.getByText('Medicaid')).toBeInTheDocument()
   })
 
   it('shows nothing new to signed-out users and still loads votes', async () => {
     clerk.signedIn = false
-    render(<MemberDrawer official={official} onClose={() => {}} />)
+    render(
+      <MemberDrawer
+        official={official}
+        onClose={() => {}}
+        selectedBill={null}
+        onSelectBill={() => {}}
+        onCloseBill={() => {}}
+      />,
+    )
     expect(await screen.findByText('No recorded votes in the ingested bills.')).toBeInTheDocument()
     expect(screen.queryByText('Stated Positions (AI)')).not.toBeInTheDocument()
     expect(screen.queryByText('Medicaid')).not.toBeInTheDocument()

@@ -3,17 +3,20 @@ import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
 import { apiUrl } from './api'
-import BillDrawer, { BillDates, BipartisanTag, PolicyAreaTag, StatusTag } from './BillDrawer'
+import { BillDates, BipartisanTag, PolicyAreaTag, StatusTag } from './BillDrawer'
 import VoteTallyBar from './VoteTallyBar'
 import type { Bill } from './types'
 
 
 
-export default function BillsFeed() {
+export default function BillsFeed({
+  onSelectBill,
+}: {
+  onSelectBill: (bill: Bill) => void
+}) {
   const [bills, setBills] = useState<Bill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
 
   const [voteStatus, setVoteStatus] = useState<string>('all')
   const [pace, setPace] = useState<string>('all')
@@ -155,7 +158,7 @@ export default function BillsFeed() {
           >
             <button
               type="button"
-              onClick={() => setSelectedBill(bill)}
+              onClick={() => onSelectBill(bill)}
               className="w-full text-left"
               aria-label={`Open details for ${bill.title || bill.id}`}
             >
@@ -212,13 +215,6 @@ export default function BillsFeed() {
           Next
         </button>
       </div>
-
-      {selectedBill ? (
-        <BillDrawer
-          bill={selectedBill}
-          onClose={() => setSelectedBill(null)}
-        />
-      ) : null}
         </>
       )}
     </div>

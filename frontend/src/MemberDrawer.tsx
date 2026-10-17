@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
+import CopyLinkButton from './components/CopyLinkButton'
 import StatedPositionsSection from './components/StatedPositionsSection'
 import {
+  billStub,
   officeLine,
   partyBadgeClass,
   partyShort,
@@ -20,14 +22,19 @@ import {
 export default function MemberDrawer({
   official,
   onClose,
+  selectedBill,
+  onSelectBill,
+  onCloseBill,
 }: {
   official: Official
   onClose: () => void
+  selectedBill: Bill | null
+  onSelectBill: (bill: Bill) => void
+  onCloseBill: () => void
 }) {
   const [detail, setDetail] = useState<OfficialDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
   const [voteQuery, setVoteQuery] = useState('')
 
   useEffect(() => {
@@ -35,7 +42,6 @@ export default function MemberDrawer({
     setLoading(true)
     setError(null)
     setDetail(null)
-    setSelectedBill(null)
     setVoteQuery('')
 
     fetch(apiUrl(`/api/officials/${encodeURIComponent(official.id)}`), { signal: controller.signal })
@@ -71,6 +77,8 @@ export default function MemberDrawer({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, selectedBill])
 
+  // Opened from a URL, `official` is only a stub until the detail fetch lands.
+  const view = detail ?? official
   const votes = detail?.votes ?? []
   const filteredVotes = useMemo(
     () => votes.filter((vote) => voteMatchesSearch(vote, voteQuery)),
@@ -92,38 +100,47 @@ export default function MemberDrawer({
         className="relative z-50 flex h-dvh w-full max-w-md flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(official.party)}`}
+          {view.party ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
+              >
+                {partyShort(view.party)}
+              </span>
+              <span className="text-xs text-slate-400">{view.state}</span>
+              <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                {rosterStatusLabel(view)}
+              </span>
+            </div>
+          ) : (
+            <span />
+          )}
+          <div className="flex shrink-0 items-center gap-1">
+            <CopyLinkButton />
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+              aria-label="Close"
             >
-              {partyShort(official.party)}
-            </span>
-            <span className="text-xs text-slate-400">{official.state}</span>
-            <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              {rosterStatusLabel(official)}
-            </span>
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-5 border-b border-slate-800 pb-5">
             <h2 id="member-drawer-title" className="text-xl font-semibold">
-              {official.name}
+              {view.name || (loading ? 'Loading…' : official.id)}
             </h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {officeLine(official)}
-            </p>
+            {view.party ? (
+              <p className="mt-1 text-sm text-slate-400">
+                {officeLine(view)}
+              </p>
+            ) : null}
           </div>
 
-          <ContactSection official={detail ?? official} />
+          <ContactSection official={view} />
 
           {detail ? (
             <SignedIn>
@@ -179,7 +196,7 @@ export default function MemberDrawer({
                     <li key={vote.roll_call_id ?? `${vote.bill_id}-${vote.position}`}>
                       <button
                         type="button"
-                        onClick={() => setSelectedBill(billFromVote(vote))}
+                        onClick={() => onSelectBill(billFromVote(vote))}
                         className="w-full rounded-lg border border-slate-800 bg-slate-800/60 p-3 text-left transition hover:border-slate-500 hover:bg-slate-800"
                         aria-label={`Open details for ${vote.bill_title || vote.bill_id}`}
                       >
@@ -218,7 +235,7 @@ export default function MemberDrawer({
       {selectedBill ? (
         <BillDrawer
           bill={selectedBill}
-          onClose={() => setSelectedBill(null)}
+          onClose={onCloseBill}
         />
       ) : null}
     </div>
@@ -378,26 +395,9 @@ function voteMatchesSearch(vote: OfficialVote, rawQuery: string) {
 
 function billFromVote(vote: OfficialVote): Bill {
   return {
-    id: vote.bill_id,
+    ...billStub(vote.bill_id),
     title: vote.bill_title,
-    sponsor_id: null,
-    sponsor_bioguide_id: null,
     sponsor_name: vote.sponsor_name,
-    sponsor_party: null,
-    cosponsor_party_breakdown: null,
-    bipartisan_type: null,
-    policy_area: null,
     summary: vote.bill_summary,
-    introduced_date: null,
-    voted_date: null,
-    days_to_vote: null,
-    velocity_bucket: null,
-    latest_action_date: null,
-    latest_action_text: null,
-    status: null,
-    level: 'federal',
-    votes_summary: { house: {}, senate: {} },
-    votes_by_party: { house: {}, senate: {} },
-    roll_calls: [],
   }
 }

@@ -415,6 +415,49 @@ export function formatCosponsorBreakdown(
   return parts.length ? parts.join(' · ') : 'No cosponsors'
 }
 
+// Placeholder records for drawers opened from a URL id alone; the drawer's own
+// detail fetch fills in the rest.
+export function officialStub(id: string): Official {
+  return {
+    id,
+    name: '',
+    state: '',
+    party: '',
+    office: null,
+    district: null,
+    current_member: true,
+    phone: null,
+    office_address: null,
+    website_url: null,
+  }
+}
+
+export function billStub(id: string): Bill {
+  return {
+    id,
+    title: null,
+    sponsor_id: null,
+    sponsor_bioguide_id: null,
+    sponsor_name: null,
+    sponsor_party: null,
+    cosponsor_party_breakdown: null,
+    bipartisan_type: null,
+    policy_area: null,
+    summary: null,
+    introduced_date: null,
+    voted_date: null,
+    days_to_vote: null,
+    velocity_bucket: null,
+    latest_action_date: null,
+    latest_action_text: null,
+    status: null,
+    level: 'federal',
+    votes_summary: { house: {}, senate: {} },
+    votes_by_party: { house: {}, senate: {} },
+    roll_calls: [],
+  }
+}
+
 export function rosterStatusLabel(official: Official) {
   return official.current_member ? 'Active' : 'Former'
 }

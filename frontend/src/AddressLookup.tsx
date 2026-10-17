@@ -4,7 +4,6 @@ import { useUser } from '@clerk/clerk-react'
 
 import { apiUrl } from './api'
 import LookupResults from './LookupResults'
-import MemberDrawer from './MemberDrawer'
 import VotingLocations from './components/VotingLocations'
 import type { CivicLookup, Official, VoterInfo } from './types'
 
@@ -92,7 +91,11 @@ async function reverseGeocode(point: Point): Promise<string | null> {
   }
 }
 
-export default function AddressLookup() {
+export default function AddressLookup({
+  onSelectOfficial,
+}: {
+  onSelectOfficial: (official: Official) => void
+}) {
   const [address, setAddress] = useState('')
   const debouncedAddress = useDebounce(address, 300)
   const [suggestions, setSuggestions] = useState<PhotonResult[]>([])
@@ -102,7 +105,6 @@ export default function AddressLookup() {
   const [lookup, setLookup] = useState<CivicLookup | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedOfficial, setSelectedOfficial] = useState<Official | null>(null)
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false)
   const [locating, setLocating] = useState(false)
   const canUseLocation = typeof navigator !== 'undefined' && 'geolocation' in navigator
@@ -254,7 +256,6 @@ export default function AddressLookup() {
 
     setLoading(true)
     setError(null)
-    setSelectedOfficial(null)
     setLookedUpAddress(trimmed || CURRENT_LOCATION_LABEL)
     setLocationLookup(point ? { hasAddress: Boolean(trimmed) } : null)
 
@@ -513,7 +514,7 @@ export default function AddressLookup() {
                 (lookup ? (
                   <LookupResults
                     lookup={lookup}
-                    onSelectOfficial={setSelectedOfficial}
+                    onSelectOfficial={onSelectOfficial}
                     locationLabel={
                       locationLookup
                         ? locationLookup.hasAddress
@@ -550,14 +551,6 @@ export default function AddressLookup() {
           </div>
         ) : null}
       </div>
-
-
-      {selectedOfficial ? (
-        <MemberDrawer
-          official={selectedOfficial}
-          onClose={() => setSelectedOfficial(null)}
-        />
-      ) : null}
     </div>
   )
 }
