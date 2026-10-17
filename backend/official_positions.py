@@ -300,6 +300,7 @@ def _empty_stats(model, dry_run):
         "crawled_only": 0,
         "blocked": 0,
         "needs_js": 0,
+        "thin_site": 0,
         "no_website": 0,
         "failed": 0,
         "dry_run": dry_run,
@@ -499,7 +500,7 @@ def _process_official(
             crawl_status = crawl_result.status
             for page in crawl_result.pages:
                 log(f"  {page.page_kind:<13} {len(page.text):>6} chars  {page.url}")
-            if crawl_status in ("no_website", "blocked", "needs_js", "failed"):
+            if crawl_status in ("no_website", "blocked", "needs_js", "thin_site", "failed"):
                 bucket = "failed" if crawl_status == "failed" else crawl_status
                 stats[bucket] += 1
                 log(f"  -> {crawl_status}: {crawl_result.error or ''}".rstrip())
@@ -671,6 +672,7 @@ def print_stats(stats: dict) -> None:
         print(f"  Crawled only:         {stats['crawled_only']}")
     print(f"  Blocked:              {stats['blocked']}")
     print(f"  Needs JavaScript:     {stats['needs_js']}")
+    print(f"  Thin site:            {stats['thin_site']}")
     print(f"  No website:           {stats['no_website']}")
     print(f"  Failed:               {stats['failed']}")
     print(f"  Model:                {stats['model']}")

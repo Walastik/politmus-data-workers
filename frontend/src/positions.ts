@@ -36,6 +36,8 @@ export function positionsStatusMessage(sync: PositionsSync | null | undefined, n
       return 'Site blocked our crawler'
     case 'needs_js':
       return 'Site needs JavaScript; not readable yet'
+    case 'thin_site':
+      return 'Site has almost no readable content'
     case 'no_website':
       return 'No official website on file'
     case 'failed': {

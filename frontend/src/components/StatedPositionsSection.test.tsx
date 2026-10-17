@@ -174,6 +174,7 @@ describe('positionsStatusMessage', () => {
     [withStatus('no_issue_pages'), 'Site processed; no stated positions found'],
     [withStatus('blocked'), 'Site blocked our crawler'],
     [withStatus('needs_js'), 'Site needs JavaScript; not readable yet'],
+    [withStatus('thin_site'), 'Site has almost no readable content'],
     [withStatus('no_website'), 'No official website on file'],
     [withStatus('failed', { last_error: 'HTTP 500' }), 'Last attempt failed: HTTP 500'],
     [null, 'Not processed yet'],

@@ -16,6 +16,7 @@ from services.site_crawler import (
     clean_link,
     host_key,
     is_negative_path,
+    meta_refresh_target,
     normalize_start_url,
     score_link,
 )
@@ -102,6 +103,7 @@ class UrlHelperTests(unittest.TestCase):
             ("/public/index.cfm/privacypolicy", "Privacy Policy"),
             ("/public/index.cfm/news-releases", "News"),
             ("/legislation/committees-and-caucuses", "Committees and Caucuses"),
+            ("/public/index.cfm/congressionally-directed-spending-fy-27", "Congressionally Directed Spending"),
         ]
         for path, text in noise:
             self.assertEqual(score_link(SITE + path, text), 0, path)
@@ -331,6 +333,38 @@ class CrawlTests(unittest.TestCase):
         respx.get(url__regex=rf"{SITE}/.+").mock(return_value=httpx.Response(404, headers={"Content-Type": "text/html"}))
         result = make_crawler().crawl(SITE)
         self.assertEqual(result.status, "needs_js")
+
+    @respx.mock
+    def test_thin_server_rendered_site_is_thin_not_needs_js(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get(f"{SITE}/").mock(return_value=html(
+            "<html><body><nav><a href='/contact'>Contact</a></nav><main><p>Welcome.</p></main></body></html>"
+        ))
+        respx.get(url__regex=rf"{SITE}/.+").mock(return_value=httpx.Response(404, headers={"Content-Type": "text/html"}))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "thin_site")
+
+    @respx.mock
+    def test_follows_meta_refresh_homepage_stub(self):
+        # Senate sites (Moran, Klobuchar, Fischer): / is only a refresh to /public/.
+        mount_site(respx)
+        respx.get(f"{SITE}/start").mock(return_value=html(
+            '<meta http-equiv="refresh" content="0;URL=https://example-rep.house.gov/">'
+        ))
+        result = make_crawler().crawl(f"{SITE}/start")
+        self.assertEqual(result.status, "ok")
+        self.assertIn(f"{SITE}/issues/climate", [p.url for p in result.pages])
+
+    def test_meta_refresh_target_parsing(self):
+        base = f"{SITE}/"
+        self.assertEqual(
+            meta_refresh_target("<meta content='5; url=/public/' http-equiv='Refresh'>", base),
+            f"{SITE}/public/",
+        )
+        self.assertIsNone(meta_refresh_target('<meta http-equiv="refresh" content="300">', base))
+        self.assertIsNone(meta_refresh_target('<meta name="viewport" content="url=/x">', base))
+        big_page = '<meta http-equiv="refresh" content="0;url=/x">' + "<p>text</p>" * 1000
+        self.assertIsNone(meta_refresh_target(big_page, base))
 
     @respx.mock
     def test_retries_server_errors_then_succeeds(self):

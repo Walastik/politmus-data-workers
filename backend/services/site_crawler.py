@@ -117,6 +117,7 @@ NEGATIVE_PATH_SUBSTRINGS = (
     "appropriations-request",
     "funding-request",
     "earmark",
+    "directed-spending",
     "nomination",
     "application-form",
     "app-challenge",
@@ -177,7 +178,7 @@ class CrawledPage:
 
 @dataclass
 class CrawlResult:
-    # ok | no_website | no_issue_pages | blocked | needs_js | failed
+    # ok | no_website | no_issue_pages | blocked | needs_js | thin_site | failed
     status: str
     start_url: str | None = None
     pages: list[CrawledPage] = field(default_factory=list)
@@ -385,6 +386,50 @@ def html_to_text(html: str, url: str | None = None) -> str:
     return text
 
 
+_META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.I)
+_META_REFRESH_RE = re.compile(r"""http-equiv\s*=\s*["']?refresh""", re.I)
+_META_CONTENT_RE = re.compile(r"""content\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+_REFRESH_URL_RE = re.compile(r"""^\s*\d*\s*[;,]\s*url\s*=\s*["']?([^"']+)""", re.I)
+# Only a near-empty page is a redirect stub; a full page with a refresh tag
+# (e.g. an auto-reloading homepage) is content.
+MAX_META_REFRESH_BYTES = 4096
+
+
+def meta_refresh_target(html: str, base_url: str) -> str | None:
+    """Target of a <meta http-equiv="refresh" content="0;url=..."> stub page."""
+    if len(html) > MAX_META_REFRESH_BYTES:
+        return None
+    for tag in _META_TAG_RE.findall(html):
+        if not _META_REFRESH_RE.search(tag):
+            continue
+        content = _META_CONTENT_RE.search(tag)
+        if not content:
+            continue
+        match = _REFRESH_URL_RE.match(next(g for g in content.groups() if g is not None))
+        if match:
+            target, _ = urldefrag(urljoin(base_url, match.group(1).strip()))
+            return target
+    return None
+
+
+_JS_APP_MARKERS = (
+    "__next_data__",
+    'id="__next"',
+    'id="__nuxt"',
+    'id="root"',
+    'id="app"',
+    "ng-version=",
+    "data-reactroot",
+)
+
+
+def looks_like_js_app(html: str) -> bool:
+    """True when the HTML is a client-rendered app shell (Next, Nuxt, React,
+    Angular, Vue) rather than a server-rendered page."""
+    lowered = html.lower().replace("'", '"')
+    return any(marker in lowered for marker in _JS_APP_MARKERS)
+
+
 def _is_under(url: str, parent: str) -> bool:
     """True when url's path sits below parent's path."""
     child, base = path_segments(url), path_segments(parent)
@@ -482,10 +527,14 @@ class SiteCrawler:
             result = self._raw_get(current)
             if isinstance(result, Exception):
                 return _Fetch(current, 0, error=f"{type(result).__name__}: {result}")
+            location = None
             if result.is_redirect:
                 location = result.headers.get("Location")
                 if not location:
                     return _Fetch(current, result.status_code, error="redirect without Location")
+            elif result.status_code == 200 and "html" in result.headers.get("Content-Type", "").lower():
+                location = meta_refresh_target(result.text, current)
+            if location:
                 target, _ = urldefrag(urljoin(current, location))
                 target_host = host_key(urlsplit(target).netloc)
                 if allowed_host is not None and target_host != allowed_host:
@@ -687,11 +736,18 @@ class SiteCrawler:
         if len(home_page.text) >= MIN_SITE_TEXT_CHARS:
             # No issue section; some members list priorities on the homepage.
             return CrawlResult(status="no_issue_pages", start_url=start, pages=[home_page])
+        if looks_like_js_app(home.html):
+            return CrawlResult(
+                status="needs_js",
+                start_url=start,
+                pages=pages,
+                error="site returned almost no readable text without JavaScript",
+            )
         return CrawlResult(
-            status="needs_js",
+            status="thin_site",
             start_url=start,
             pages=pages,
-            error="site returned almost no readable text without JavaScript",
+            error="site has almost no readable text and no issue pages",
         )
 
     def _child_candidates(self, html: str, index_url: str, host: str) -> list[LinkCandidate]:
