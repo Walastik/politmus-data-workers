@@ -29,7 +29,7 @@ from database import SessionLocal
 from init_db import ensure_schema
 from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 from services import llm_runtime
-from services.llm_runtime import load_local_module, required_strings
+from services.llm_runtime import TruncatedOutputError, load_local_module, required_strings
 from services.official_positions import (
     DEFAULT_CHUNK_CHARS,
     SourceText,
@@ -42,6 +42,7 @@ from services.official_positions import (
     merge_positions,
     parse_positions,
     persist_official_stances,
+    split_chunk,
     target_vocabulary,
     upsert_source_pages,
     verify_positions,
@@ -227,7 +228,9 @@ def extract_positions(
 ):
     """Map each chunk through the model, verify quotes, and merge.
 
-    Raises if any chunk fails, so a partial result is never saved.
+    A chunk whose answer is cut off at the output limit is split in half and
+    each half extracted, recursively. Raises if any chunk still fails, so a
+    partial result is never saved.
     Returns (merged positions, chunk count, rejection counts by reason).
     """
     chunks = [chunk for source in sources for chunk in chunk_source(source, chunk_chars)]
@@ -237,14 +240,31 @@ def extract_positions(
     if log:
         log(f"  sending {total} chunk(s) to the model...")
 
-    def run(numbered):
-        number, chunk = numbered
+    def extract(chunk, number):
         try:
             raw = chat_fn(
                 build_position_messages(prompt, official, chunk, vocabulary),
                 StatedPositionsOutput.model_json_schema(),
             )
-            result = verify_positions(parse_positions(raw), chunk)
+        except TruncatedOutputError:
+            parts = split_chunk(chunk)
+            if len(parts) < 2:
+                raise
+            if log:
+                log(f"    chunk {number}/{total}: output cut off; retrying as {len(parts)} parts")
+            kept, rejected = [], {}
+            for part in parts:
+                part_kept, part_rejected = extract(part, number)
+                kept.extend(part_kept)
+                for reason, count in part_rejected.items():
+                    rejected[reason] = rejected.get(reason, 0) + count
+            return kept, rejected
+        return verify_positions(parse_positions(raw), chunk)
+
+    def run(numbered):
+        number, chunk = numbered
+        try:
+            result = extract(chunk, number)
         except Exception as exc:
             where = chunk.url + (f" [{chunk.heading}]" if chunk.heading else "")
             raise RuntimeError(f"chunk {number}/{total} {where}: {exc}") from exc

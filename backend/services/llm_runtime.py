@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import fcntl
 import importlib.util
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
@@ -25,6 +26,22 @@ def make_ollama_client(host: str, timeout_seconds: float):
         host=host,
         timeout=httpx.Timeout(timeout_seconds, connect=10.0),
     )
+
+
+class TruncatedOutputError(ValueError):
+    """The model hit num_predict mid-answer, so its JSON is cut off.
+
+    Callers can retry with less input (e.g. split the chunk) instead of
+    failing the whole item.
+    """
+
+
+def _is_json(content: str) -> bool:
+    try:
+        json.loads(content)
+    except ValueError:
+        return False
+    return True
 
 
 def _field(obj, name):
@@ -48,8 +65,10 @@ def make_chat_fn(
 
     Thinking is off by default: reasoning models (e.g. Nemotron) otherwise
     spend the num_predict budget on hidden reasoning and return no answer.
-    An empty answer is retried once with double the output budget (that does
-    not reload the model; only a num_ctx change does, so num_ctx is fixed).
+    An empty or truncated answer (done_reason "length" with JSON that does not
+    parse) is retried once with double the output budget (that does not reload
+    the model; only a num_ctx change does, so num_ctx is fixed). A retry that is
+    still truncated raises TruncatedOutputError.
     timeout_env names the worker's timeout setting in the timeout error.
     """
     if client is None:
@@ -84,6 +103,7 @@ def make_chat_fn(
 
     def chat_fn(messages, format_schema) -> str:
         details = []
+        truncated = False
         # The retry gets double the output budget, but never more than the
         # context window leaves after the prompt (~3 characters per token).
         prompt_tokens = sum(len(m.get("content") or "") for m in messages) // 3
@@ -95,12 +115,28 @@ def make_chat_fn(
             message = _field(response, "message")
             content = _field(message, "content") if message is not None else None
             if content and content.strip():
-                return content
+                # Some models pad complete JSON with whitespace up to the
+                # limit, so "length" only means truncated if it won't parse.
+                if _field(response, "done_reason") != "length" or _is_json(content):
+                    return content
+                truncated = True
+                details.append(
+                    f"attempt {attempt}: cut off at output_tokens={_field(response, 'eval_count')}, "
+                    f"num_predict={budget}"
+                )
+                continue
+            truncated = False
             thinking = (_field(message, "thinking") if message is not None else None) or ""
             details.append(
                 f"attempt {attempt}: done_reason={_field(response, 'done_reason')}, "
                 f"output_tokens={_field(response, 'eval_count')}, "
                 f"thinking_chars={len(thinking)}, num_predict={budget}"
+            )
+        if truncated:
+            raise TruncatedOutputError(
+                "Ollama output was cut off before the JSON ended ("
+                + "; ".join(details)
+                + "). Send less text per call or raise --num-predict."
             )
         raise ValueError(
             "Ollama returned an empty response ("

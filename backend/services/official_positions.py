@@ -38,6 +38,8 @@ SCHEMA_VERSION = "positions-v3"
 SOURCE_OFFICIAL_SITE = "official_site"
 
 DEFAULT_CHUNK_CHARS = 10_000
+# A chunk whose answer is cut off is halved and retried, down to this size.
+MIN_SPLIT_CHUNK_CHARS = 2_000
 MIN_QUOTE_CHARS = 12
 MAX_STANCES_PER_OFFICIAL = 100
 MAX_VOCABULARY_TARGETS = 150
@@ -231,6 +233,23 @@ def _split_long(text: str, max_chars: int) -> list[str]:
     if current:
         out.append(current)
     return out
+
+
+def split_chunk(chunk: Chunk) -> list[Chunk]:
+    """Halve a chunk on paragraph / sentence boundaries, keeping its heading
+    line on each half. A chunk under MIN_SPLIT_CHUNK_CHARS is not split."""
+    if len(chunk.text) < MIN_SPLIT_CHUNK_CHARS:
+        return [chunk]
+    first, _, rest = chunk.text.partition("\n")
+    prefix = first if _HEADING_RE.match(first) else ""
+    content = rest.strip() if prefix else chunk.text
+    parts = _split_long(content, len(content) // 2 + 1)
+    if len(parts) < 2:
+        return [chunk]
+    return [
+        Chunk(chunk.url, chunk.heading, f"{prefix}\n\n{part}" if prefix else part, chunk.page_id)
+        for part in parts
+    ]
 
 
 def _has_content(body: str) -> bool:
