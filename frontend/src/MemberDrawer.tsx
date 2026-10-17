@@ -89,27 +89,19 @@ export default function MemberDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="member-drawer-title"
-        className="relative z-50 flex h-full w-full max-w-md flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
+        className="relative z-50 flex h-dvh w-full max-w-md flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
       >
-        <header className="flex items-start justify-between gap-3 border-b border-slate-800 p-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(official.party)}`}
-              >
-                {partyShort(official.party)}
-              </span>
-              <span className="text-xs text-slate-400">{official.state}</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                {rosterStatusLabel(official)}
-              </span>
-            </div>
-            <h2 id="member-drawer-title" className="mt-2 text-xl font-semibold">
-              {official.name}
-            </h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {officeLine(official)}
-            </p>
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(official.party)}`}
+            >
+              {partyShort(official.party)}
+            </span>
+            <span className="text-xs text-slate-400">{official.state}</span>
+            <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              {rosterStatusLabel(official)}
+            </span>
           </div>
           <button
             type="button"
@@ -121,7 +113,16 @@ export default function MemberDrawer({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="mb-5 border-b border-slate-800 pb-5">
+            <h2 id="member-drawer-title" className="text-xl font-semibold">
+              {official.name}
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              {officeLine(official)}
+            </p>
+          </div>
+
           <ContactSection official={detail ?? official} />
 
           {detail ? (
