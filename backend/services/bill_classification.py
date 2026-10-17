@@ -90,7 +90,14 @@ class BillSummaries(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tldr: str = Field(min_length=MIN_SUMMARY_CHARS, description="One or two plain sentences on what the bill does.")
-    eli5: str = Field(min_length=MIN_SUMMARY_CHARS, description="The bill explained simply for a non-expert.")
+    eli5: str = Field(
+        min_length=MIN_SUMMARY_CHARS,
+        description=(
+            "The bill explained in plain language for a general reader. Keep specific "
+            "real-world terms (e.g. 'data center') and explain them briefly instead of "
+            "replacing them with vague descriptions."
+        ),
+    )
 
     @field_validator("tldr", "eli5")
     @classmethod
