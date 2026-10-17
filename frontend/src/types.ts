@@ -580,6 +580,18 @@ export function stateNameFromAbbr(abbr: string | null | undefined) {
   return found?.name ?? abbr
 }
 
+// Two-letter code for a state given by name or code, or null if unrecognized.
+export function stateAbbr(state: string | null | undefined) {
+  const value = state?.trim().toUpperCase()
+  if (!value) {
+    return null
+  }
+  const found = STATE_OPTIONS.find(
+    (option) => option.abbr === value || option.name.toUpperCase() === value,
+  )
+  return found?.abbr ?? null
+}
+
 export function formatCivicAddress(address: CivicAddress | null | undefined) {
   if (!address) {
     return null

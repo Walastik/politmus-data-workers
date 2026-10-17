@@ -245,18 +245,22 @@ describe('MemberDrawer stated positions', () => {
     const header = container.querySelector('header') as HTMLElement
     const title = screen.getByRole('heading', { name: 'Jane Example' })
     const scroller = title.closest('.overflow-y-auto') as HTMLElement
+    expect(within(scroller).getByText('Active')).toBeInTheDocument()
+    expect(within(scroller).getByText('New York · Representative · District 1')).toBeInTheDocument()
     expect(within(header).queryByText('Jane Example')).not.toBeInTheDocument()
+    expect(within(header).queryByText('D')).not.toBeInTheDocument()
 
     vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 50 } as DOMRect)
     vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ bottom: 20 } as DOMRect)
     fireEvent.scroll(scroller)
+    expect(within(header).getByText('D')).toBeInTheDocument()
     expect(within(header).getByText('Jane Example')).toBeInTheDocument()
-    expect(within(header).getByText('New York · Representative · District 1')).toBeInTheDocument()
+    expect(within(header).getByText('NY')).toBeInTheDocument()
+    expect(within(header).queryByText('Active')).not.toBeInTheDocument()
 
     vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ bottom: 120 } as DOMRect)
     fireEvent.scroll(scroller)
     expect(within(header).queryByText('Jane Example')).not.toBeInTheDocument()
-    expect(within(header).getByText('Active')).toBeInTheDocument()
   })
 
   it('shows nothing new to signed-out users and still loads votes', async () => {

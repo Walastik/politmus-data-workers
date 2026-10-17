@@ -13,6 +13,8 @@ import {
   partyShort,
   positionBadgeClass,
   rosterStatusLabel,
+  stateAbbr,
+  stateNameFromAbbr,
   type Bill,
   type Official,
   type OfficialDetail,
@@ -107,30 +109,19 @@ export default function MemberDrawer({
         className="relative z-50 flex h-dvh w-full max-w-md flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
-          {view.party ? (
+          {titleHidden && view.party ? (
             <div className="flex min-w-0 items-center gap-2">
               <span
                 className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
               >
                 {partyShort(view.party)}
               </span>
-              {titleHidden ? (
-                <>
-                  <span className="min-w-0 truncate text-sm font-semibold text-slate-100">
-                    {view.name}
-                  </span>
-                  <span className="min-w-0 shrink-[3] truncate text-xs text-slate-400">
-                    {view.state} · {officeLine(view)}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="text-xs text-slate-400">{view.state}</span>
-                  <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    {rosterStatusLabel(view)}
-                  </span>
-                </>
-              )}
+              <span className="min-w-0 truncate text-sm font-semibold text-slate-100">
+                {view.name}
+              </span>
+              {stateAbbr(view.state) ? (
+                <span className="shrink-0 text-xs text-slate-400">{stateAbbr(view.state)}</span>
+              ) : null}
             </div>
           ) : (
             <span />
@@ -150,12 +141,26 @@ export default function MemberDrawer({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5" onScroll={onScroll}>
           <div className="mb-5 border-b border-slate-800 pb-5">
-            <h2 ref={titleRef} id="member-drawer-title" className="text-xl font-semibold">
-              {view.name || (loading ? 'Loading…' : official.id)}
-            </h2>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {view.party ? (
+                <span
+                  className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
+                >
+                  {partyShort(view.party)}
+                </span>
+              ) : null}
+              <h2 ref={titleRef} id="member-drawer-title" className="text-xl font-semibold">
+                {view.name || (loading ? 'Loading…' : official.id)}
+              </h2>
+              {view.party ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  {rosterStatusLabel(view)}
+                </span>
+              ) : null}
+            </div>
             {view.party ? (
               <p className="mt-1 text-sm text-slate-400">
-                {officeLine(view)}
+                {[stateNameFromAbbr(view.state), officeLine(view)].filter(Boolean).join(' · ')}
               </p>
             ) : null}
           </div>
