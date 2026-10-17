@@ -108,26 +108,10 @@ export default function BillDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="bill-drawer-title"
-        className="relative z-[70] flex h-full w-full max-w-lg flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
+        className="relative z-[70] flex h-dvh w-full max-w-lg flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
       >
-        <header className="flex items-start justify-between gap-3 border-b border-slate-800 p-5">
-          <div className="min-w-0">
-            <p className="font-mono text-xs text-slate-400">{view.id}</p>
-            <h2
-              id="bill-drawer-title"
-              className="mt-2 text-xl font-semibold leading-snug"
-            >
-              {view.title || 'Untitled bill'}
-            </h2>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <StatusTag status={view.status} />
-              <PolicyAreaTag area={view.policy_area} />
-              <BipartisanTag bill={view} />
-              <SponsorTag bill={view} />
-            </div>
-            <CosponsorLine bill={view} className="mt-2" />
-            <BillDates bill={view} className="mt-3" />
-          </div>
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
+          <p className="truncate font-mono text-xs text-slate-400">{view.id}</p>
           <button
             type="button"
             onClick={onClose}
@@ -140,6 +124,22 @@ export default function BillDrawer({
 
         <div className="relative min-h-0 flex-1">
           <div className="h-full overflow-y-auto p-5">
+            <div className="mb-5 border-b border-slate-800 pb-5">
+              <h2
+                id="bill-drawer-title"
+                className="text-xl font-semibold leading-snug"
+              >
+                {view.title || 'Untitled bill'}
+              </h2>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusTag status={view.status} />
+                <PolicyAreaTag area={view.policy_area} />
+                <BipartisanTag bill={view} />
+                <SponsorTag bill={view} />
+              </div>
+              <CosponsorLine bill={view} className="mt-2" />
+              <BillDates bill={view} className="mt-3" />
+            </div>
             <div className="mb-5">
               <VoteTallyBar
                 summary={view.votes_summary}
