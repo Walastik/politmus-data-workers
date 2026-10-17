@@ -26,8 +26,12 @@ export default function StatedPositionsSection({
   const [showAll, setShowAll] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
 
+  // Display order, so "Show fewer" cuts at the same place the list reads.
   const ordered = useMemo(
-    () => groupPositions(positions).flatMap((group) => group.positions),
+    () =>
+      groupPositions(positions).flatMap((group) =>
+        group.blocks.flatMap((block) => block.positions),
+      ),
     [positions],
   )
   const visibleGroups = useMemo(
@@ -76,14 +80,17 @@ export default function StatedPositionsSection({
               <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 {group.area}
               </h4>
-              <ul className="mt-2 space-y-2.5">
-                {group.positions.map((position, idx) => (
-                  <PositionItem
-                    key={`${position.target_name}-${position.mechanism}-${idx}`}
-                    position={position}
-                  />
-                ))}
-              </ul>
+              <div className="mt-2 space-y-2.5">
+                {group.blocks.map((block, idx) =>
+                  block.positions.length > 1 ? (
+                    <SharedEvidenceBlock key={idx} positions={block.positions} />
+                  ) : (
+                    <ul key={idx}>
+                      <PositionItem position={block.positions[0]} />
+                    </ul>
+                  ),
+                )}
+              </div>
             </div>
           ))}
 
@@ -118,11 +125,45 @@ export default function StatedPositionsSection({
   )
 }
 
-function PositionItem({ position }: { position: OfficialStance }) {
+// Several positions drawn from one passage: the quote and source once, then the
+// positions as compact items.
+function SharedEvidenceBlock({ positions }: { positions: OfficialStance[] }) {
+  const [first] = positions
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/90 p-3 shadow-inner">
+      <EvidenceQuote quote={first.evidence_quote} />
+      <SourceLine sourceUrl={first.source_url} />
+      <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Supports {positions.length} positions
+      </p>
+      <ul className="mt-2 space-y-2 border-l border-slate-800 pl-3">
+        {positions.map((position, idx) => (
+          <PositionItem
+            key={`${position.target_name}-${position.mechanism}-${idx}`}
+            position={position}
+            compact
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function PositionItem({
+  position,
+  compact = false,
+}: {
+  position: OfficialStance
+  compact?: boolean
+}) {
   const line = stanceLine(position)
   const direction = position.direction?.toLowerCase()
   return (
-    <li className="rounded-lg border border-slate-800 bg-slate-900/90 p-3 shadow-inner">
+    <li
+      className={
+        compact ? '' : 'rounded-lg border border-slate-800 bg-slate-900/90 p-3 shadow-inner'
+      }
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <span className="text-sm font-semibold text-slate-100">
           {position.target_name || 'Unnamed target'}
@@ -153,26 +194,48 @@ function PositionItem({ position }: { position: OfficialStance }) {
       {position.summary ? (
         <p className="mt-2 text-xs leading-relaxed text-slate-300">{position.summary}</p>
       ) : null}
-      {position.evidence_quote ? (
-        <blockquote className="mt-2 rounded-r border-l-2 border-purple-500/60 bg-purple-950/30 py-1 pr-2 pl-2.5">
-          <p className="text-[11px] italic text-purple-200">&ldquo;{position.evidence_quote}&rdquo;</p>
-        </blockquote>
-      ) : null}
-      {position.source_url || position.issue_label ? (
-        <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
-          {position.issue_label ? <span>{position.issue_label}</span> : null}
-          {position.source_url ? (
-            <a
-              href={position.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-w-0 break-all text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
-            >
-              Source: {sourceLabel(position.source_url)}
-            </a>
-          ) : null}
-        </p>
-      ) : null}
+      {compact ? (
+        position.issue_label ? (
+          <p className="mt-1 text-[11px] text-slate-500">{position.issue_label}</p>
+        ) : null
+      ) : (
+        <>
+          <EvidenceQuote quote={position.evidence_quote} />
+          <SourceLine sourceUrl={position.source_url} issueLabel={position.issue_label} />
+        </>
+      )}
     </li>
   )
+}
+
+function EvidenceQuote({ quote }: { quote: string | null }) {
+  return quote ? (
+    <blockquote className="mt-2 rounded-r border-l-2 border-purple-500/60 bg-purple-950/30 py-1 pr-2 pl-2.5">
+      <p className="text-[11px] italic text-purple-200">&ldquo;{quote}&rdquo;</p>
+    </blockquote>
+  ) : null
+}
+
+function SourceLine({
+  sourceUrl,
+  issueLabel,
+}: {
+  sourceUrl: string | null
+  issueLabel?: string | null
+}) {
+  return sourceUrl || issueLabel ? (
+    <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
+      {issueLabel ? <span>{issueLabel}</span> : null}
+      {sourceUrl ? (
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 break-all text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
+        >
+          Source: {sourceLabel(sourceUrl)}
+        </a>
+      ) : null}
+    </p>
+  ) : null
 }

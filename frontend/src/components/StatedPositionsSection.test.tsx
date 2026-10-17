@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import MemberDrawer from '../MemberDrawer'
-import { positionsStatusMessage } from '../positions'
+import { groupPositions, positionsStatusMessage } from '../positions'
 import type { Official, OfficialDetail, OfficialStance, PositionsSync } from '../types'
 import StatedPositionsSection from './StatedPositionsSection'
 
@@ -99,6 +99,30 @@ describe('StatedPositionsSection', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(10)
   })
 
+  it('shows a quote shared by several positions once, with them listed under it', () => {
+    render(
+      <StatedPositionsSection
+        sync={okSync}
+        positions={[
+          stance(),
+          stance({ target_name: 'CHIP', emphasis: 'medium' }),
+          stance({
+            target_name: 'Hospitals',
+            emphasis: 'low',
+            evidence_quote: '  i will fight EVERY cut to\n Medicaid.  ',
+          }),
+          stance({ target_name: 'Clinics', evidence_quote: 'Clinics need funding.' }),
+        ]}
+      />,
+    )
+
+    expect(screen.getAllByText('“I will fight every cut to Medicaid.”')).toHaveLength(1)
+    expect(screen.getByText('Supports 3 positions')).toBeInTheDocument()
+    expect(screen.getByText('“Clinics need funding.”')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /^Source:/ })).toHaveLength(2)
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+  })
+
   it('toggles the raw JSON', () => {
     render(<StatedPositionsSection sync={okSync} positions={[stance()]} />)
     fireEvent.click(screen.getByRole('button', { name: 'View raw JSON' }))
@@ -116,6 +140,22 @@ describe('StatedPositionsSection', () => {
     const line = screen.getByText(/^Last attempt failed: ollama timed out x+…$/)
     expect(line).toHaveAttribute('title', error)
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
+  })
+})
+
+describe('groupPositions', () => {
+  it('only merges positions with the same source and quote', () => {
+    const [health] = groupPositions([
+      stance({ target_name: 'A' }),
+      stance({ target_name: 'B', source_url: 'https://www.example.house.gov/other' }),
+      stance({ target_name: 'C', evidence_quote: '“I will fight every cut to Medicaid.”' }),
+      stance({ target_name: 'D', evidence_quote: null }),
+      stance({ target_name: 'E', evidence_quote: null }),
+    ])
+
+    expect(
+      health.blocks.map((block) => block.positions.map((position) => position.target_name)),
+    ).toEqual([['A', 'C'], ['B'], ['D'], ['E']])
   })
 })
 

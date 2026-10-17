@@ -85,10 +85,48 @@ export function sourceLabel(url: string) {
   }
 }
 
-type PositionGroup = { area: string; positions: OfficialStance[] }
+// Positions in one area that cite the same passage. `positions` has one entry
+// unless the source page and quote are shared, in which case the quote and
+// source render once above all of them.
+export type EvidenceBlock = { positions: OfficialStance[] }
 
-// Groups by policy area. Groups keep the API's order (emphasis first), so the
-// area holding the most emphasized position comes first.
+type PositionGroup = { area: string; blocks: EvidenceBlock[] }
+
+// Case, whitespace and surrounding quote marks don't make a passage distinct.
+function normalizeQuote(quote: string | null) {
+  return (quote ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+function evidenceBlocks(positions: OfficialStance[]): EvidenceBlock[] {
+  const blocks: EvidenceBlock[] = []
+  const byEvidence = new Map<string, EvidenceBlock>()
+  for (const position of positions) {
+    const quote = normalizeQuote(position.evidence_quote)
+    if (!quote) {
+      blocks.push({ positions: [position] })
+      continue
+    }
+    const key = `${position.source_url ?? ''}\n${quote}`
+    const block = byEvidence.get(key)
+    if (block) {
+      block.positions.push(position)
+    } else {
+      const next = { positions: [position] }
+      byEvidence.set(key, next)
+      blocks.push(next)
+    }
+  }
+  return blocks
+}
+
+// Groups by policy area, then by shared evidence within an area. Groups keep the
+// API's order (emphasis first), so the area holding the most emphasized position
+// comes first, and a shared quote sits where its most emphasized position would.
 export function groupPositions(positions: OfficialStance[]): PositionGroup[] {
   const groups = new Map<string, OfficialStance[]>()
   for (const position of positions) {
@@ -102,8 +140,10 @@ export function groupPositions(positions: OfficialStance[]): PositionGroup[] {
   }
   return Array.from(groups, ([area, items]) => ({
     area,
-    positions: [...items].sort(
-      (a, b) => (EMPHASIS_RANK[a.emphasis ?? ''] ?? 3) - (EMPHASIS_RANK[b.emphasis ?? ''] ?? 3),
+    blocks: evidenceBlocks(
+      [...items].sort(
+        (a, b) => (EMPHASIS_RANK[a.emphasis ?? ''] ?? 3) - (EMPHASIS_RANK[b.emphasis ?? ''] ?? 3),
+      ),
     ),
   }))
 }
