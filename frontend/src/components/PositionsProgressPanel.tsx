@@ -117,7 +117,11 @@ export default function PositionsProgressPanel({
   const otherAttempted = progress.population > 0 ? ((progress.attempted - ok) / progress.population) * 100 : 0
   const chips: [string, string, number][] = [
     ['ok', 'ok', ok],
-    ['no_positions', 'no positions', (byStatus.no_positions ?? 0) + (byStatus.no_issue_pages ?? 0)],
+    [
+      'no_positions',
+      'no positions',
+      (byStatus.no_positions ?? 0) + (byStatus.no_issue_pages ?? 0) + (byStatus.thin_site ?? 0),
+    ],
     ['blocked', 'blocked', byStatus.blocked ?? 0],
     ['needs_js', 'needs JS', byStatus.needs_js ?? 0],
     ['failed', 'failed', byStatus.failed ?? 0],

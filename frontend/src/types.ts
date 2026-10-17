@@ -21,6 +21,7 @@ export type PositionsStatus =
   | 'no_issue_pages'
   | 'blocked'
   | 'needs_js'
+  | 'thin_site'
   | 'no_website'
   | 'failed'
 
@@ -1328,6 +1329,7 @@ export const POSITIONS_STATUS_LABELS: Record<PositionsStatus, string> = {
   no_issue_pages: 'No issue pages',
   blocked: 'Blocked',
   needs_js: 'Needs JS',
+  thin_site: 'Thin site',
   no_website: 'No website',
   failed: 'Failed',
 }

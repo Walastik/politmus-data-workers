@@ -309,7 +309,7 @@ class OfficialPositionSync(Base):
     __tablename__ = "official_position_sync"
 
     official_id = Column(String, ForeignKey("officials.id"), primary_key=True)
-    # ok | no_positions | no_website | no_issue_pages | blocked | needs_js | failed
+    # ok | no_positions | no_website | no_issue_pages | blocked | needs_js | thin_site | failed
     status = Column(String, nullable=False)
     last_attempt_at = Column(DateTime, nullable=True)
     last_success_at = Column(DateTime, nullable=True)
