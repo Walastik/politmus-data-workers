@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from services.site_crawler import (
     host_key,
     is_negative_path,
     meta_refresh_target,
+    next_data_links,
     normalize_start_url,
     score_link,
 )
@@ -55,6 +57,28 @@ def make_crawler(sleeps=None, **config):
         clock=lambda: 0.0,
         log=lambda _msg: None,
     )
+
+
+def next_data_page(menu) -> str:
+    data = json.dumps({"props": {"pageProps": {"menu": menu}}, "page": "/"})
+    return (
+        "<html><body><div id='__next'><a href='/accessibility'>Accessibility</a></div>"
+        f"<script id='__NEXT_DATA__' type='application/json'>{data}</script></body></html>"
+    )
+
+
+# Shape of luna.house.gov's client-rendered menu.
+NEXT_MENU = [
+    {"link": {"title": "About", "url": "/about"}, "subMenu": []},
+    {
+        "link": {"title": "Issues", "url": "/resources"},
+        "subMenu": [
+            {"subLink": {"title": "Education", "url": "/education"}},
+            {"subLink": {"title": "Energy Independence", "url": "/energy-independence"}},
+        ],
+    },
+    {"link": {"title": "Contact", "url": "https://example-rep.house.gov/contact"}},
+]
 
 
 class UrlHelperTests(unittest.TestCase):
@@ -354,6 +378,28 @@ class CrawlTests(unittest.TestCase):
         result = make_crawler().crawl(f"{SITE}/start")
         self.assertEqual(result.status, "ok")
         self.assertIn(f"{SITE}/issues/climate", [p.url for p in result.pages])
+
+    def test_next_data_links_prefix_submenu_text_with_parent(self):
+        links = next_data_links(json.dumps({"props": {"menu": NEXT_MENU}}))
+        self.assertIn(("/education", "Issues Education"), links)
+        self.assertIn(("/energy-independence", "Issues Energy Independence"), links)
+        self.assertIn(("/about", "About"), links)
+        self.assertGreater(score_link(f"{SITE}/education", "Issues Education"), 0)
+        self.assertEqual(next_data_links("not json"), [])
+
+    @respx.mock
+    def test_follows_issue_links_only_in_next_data_menu(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get(f"{SITE}/").mock(return_value=html(next_data_page(NEXT_MENU)))
+        respx.get(f"{SITE}/resources").mock(return_value=html(fixture("congress.html")))
+        respx.get(f"{SITE}/education").mock(return_value=html(fixture("health-care.html")))
+        respx.get(f"{SITE}/energy-independence").mock(return_value=html(fixture("climate.html")))
+        respx.get(url__regex=rf"{SITE}/.+").mock(return_value=httpx.Response(404, headers={"Content-Type": "text/html"}))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "ok")
+        urls = [p.url for p in result.pages]
+        self.assertIn(f"{SITE}/education", urls)
+        self.assertIn(f"{SITE}/energy-independence", urls)
 
     def test_meta_refresh_target_parsing(self):
         base = f"{SITE}/"

@@ -17,6 +17,7 @@ services/ but never crawls) does not need them.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -347,7 +348,67 @@ def extract_links(html: str, base_url: str, allowed_host: str) -> list[tuple[str
             continue
         text = _WS_RE.sub(" ", anchor.get_text(" ", strip=True)).strip()
         seen[url] = text or (anchor.get("title") or "")
+    script = soup.find("script", id="__NEXT_DATA__")
+    if script is not None and script.string:
+        for href, text in next_data_links(script.string):
+            url = clean_link(base_url, href, allowed_host)
+            if url and url not in seen:
+                seen[url] = text
     return list(seen.items())
+
+
+_LINK_URL_KEYS = ("url", "href", "uri")
+_LINK_TEXT_KEYS = ("title", "label", "text", "name")
+MAX_NEXT_DATA_LINKS = 500
+
+
+def _link_of(node: dict) -> tuple[str, str] | None:
+    url = next((node[k] for k in _LINK_URL_KEYS if isinstance(node.get(k), str)), None)
+    text = next((node[k] for k in _LINK_TEXT_KEYS if isinstance(node.get(k), str)), None)
+    if url and text and url.strip().startswith(("/", "http")):
+        return url.strip(), _WS_RE.sub(" ", text).strip()
+    return None
+
+
+def next_data_links(raw_json: str) -> list[tuple[str, str]]:
+    """(url, text) links from a Next.js page's __NEXT_DATA__ JSON.
+
+    Some member sites (Next.js + a headless CMS) render their nav menu only
+    on the client, so the links exist only in this JSON. A submenu link's
+    text is prefixed with its parent's ("Issues Education"), so issue pages
+    nested under an "Issues" menu score like issue links.
+    """
+    try:
+        data = json.loads(raw_json)
+    except ValueError:
+        return []
+    out: list[tuple[str, str]] = []
+
+    def walk(node, context: str) -> None:
+        if len(out) >= MAX_NEXT_DATA_LINKS:
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item, context)
+            return
+        if not isinstance(node, dict):
+            return
+        own = _link_of(node)
+        if own:
+            out.append((own[0], f"{context} {own[1]}".strip()))
+            return
+        # A menu item often holds its link in a child ({"link": {...},
+        # "subMenu": [...]}); that link's text labels the item's other children.
+        label_child = next(
+            (value for value in node.values() if isinstance(value, dict) and _link_of(value)),
+            None,
+        )
+        child_context = f"{context} {_link_of(label_child)[1]}".strip() if label_child else context
+        for value in node.values():
+            walk(value, context if value is label_child else child_context)
+
+    walk(data, "")
+    return out
 
 
 def page_title(html: str) -> str | None:
