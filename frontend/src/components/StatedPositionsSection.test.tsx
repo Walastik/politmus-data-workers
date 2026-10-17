@@ -231,6 +231,34 @@ describe('MemberDrawer stated positions', () => {
     expect(screen.getByText('Medicaid')).toBeInTheDocument()
   })
 
+  it('shows the name in the top bar once it scrolls out of view', async () => {
+    const { container } = render(
+      <MemberDrawer
+        official={official}
+        onClose={() => {}}
+        selectedBill={null}
+        onSelectBill={() => {}}
+        onCloseBill={() => {}}
+      />,
+    )
+    await screen.findByText('Stated Positions (AI)')
+    const header = container.querySelector('header') as HTMLElement
+    const title = screen.getByRole('heading', { name: 'Jane Example' })
+    const scroller = title.closest('.overflow-y-auto') as HTMLElement
+    expect(within(header).queryByText('Jane Example')).not.toBeInTheDocument()
+
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 50 } as DOMRect)
+    vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ bottom: 20 } as DOMRect)
+    fireEvent.scroll(scroller)
+    expect(within(header).getByText('Jane Example')).toBeInTheDocument()
+    expect(within(header).getByText('New York · Representative · District 1')).toBeInTheDocument()
+
+    vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ bottom: 120 } as DOMRect)
+    fireEvent.scroll(scroller)
+    expect(within(header).queryByText('Jane Example')).not.toBeInTheDocument()
+    expect(within(header).getByText('Active')).toBeInTheDocument()
+  })
+
   it('shows nothing new to signed-out users and still loads votes', async () => {
     clerk.signedIn = false
     render(
