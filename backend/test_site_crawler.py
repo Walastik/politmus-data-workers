@@ -112,6 +112,7 @@ class UrlHelperTests(unittest.TestCase):
             ("/public/index.cfm/foreign-policy", "Foreign Policy"),
             ("/issues/help", "HELP"),  # Senate committee, not a help desk
             ("/legislative-work/healthcare", "Healthcare"),
+            ("/about/issues", "Issues"),  # Senate sites nest issues under /about
         ]
         for path, text in keep:
             self.assertGreater(score_link(SITE + path, text), 0, path)
@@ -210,6 +211,58 @@ class CrawlTests(unittest.TestCase):
         result = make_crawler().crawl(SITE)
         self.assertEqual(result.status, "blocked")
         self.assertFalse(home.called)
+
+    @respx.mock
+    def test_forbidden_robots_txt_blocks(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(403))
+        home = respx.get(f"{SITE}/").mock(return_value=html(fixture("home.html")))
+        result = make_crawler().crawl(SITE)
+        self.assertEqual(result.status, "blocked")
+        self.assertFalse(home.called)
+
+    @respx.mock
+    def test_robots_redirect_to_forbidden_error_page_means_no_rules(self):
+        # Senate sites: /robots.txt -> 302 /404?notfound=/robots.txt -> 403.
+        respx.get(f"{SITE}/robots.txt").mock(
+            return_value=httpx.Response(302, headers={"Location": "/404?notfound=/robots.txt"})
+        )
+        respx.get(f"{SITE}/404").mock(return_value=html("Not found", status=403))
+        crawler = make_crawler()
+        self.assertTrue(crawler.allowed(f"{SITE}/"))
+        self.assertTrue(crawler.allowed(f"{SITE}/issues"))
+
+    @respx.mock
+    def test_robots_redirect_to_html_page_means_no_rules(self):
+        respx.get(f"{SITE}/robots.txt").mock(
+            return_value=httpx.Response(302, headers={"Location": "/not-found"})
+        )
+        respx.get(f"{SITE}/not-found").mock(
+            return_value=html("<html><body>User-agent: *\nDisallow: /</body></html>")
+        )
+        self.assertTrue(make_crawler().allowed(f"{SITE}/"))
+
+    @respx.mock
+    def test_robots_redirect_to_real_robots_file_is_honored(self):
+        respx.get(f"{SITE}/robots.txt").mock(
+            return_value=httpx.Response(301, headers={"Location": "https://www.example-rep.house.gov/robots.txt"})
+        )
+        respx.get("https://www.example-rep.house.gov/robots.txt").mock(
+            return_value=httpx.Response(
+                200, text="User-agent: *\nDisallow: /\n", headers={"Content-Type": "text/plain"}
+            )
+        )
+        self.assertFalse(make_crawler().allowed(f"{SITE}/"))
+
+    @respx.mock
+    def test_redirect_to_soft_404_page_is_not_a_page(self):
+        respx.get(f"{SITE}/robots.txt").mock(return_value=httpx.Response(404))
+        respx.get(f"{SITE}/issues").mock(
+            return_value=httpx.Response(302, headers={"Location": "/404?notfound=/issues"})
+        )
+        respx.get(f"{SITE}/404").mock(return_value=html(fixture("climate.html")))
+        fetch = make_crawler()._get(f"{SITE}/issues", allowed_host="example-rep.house.gov")
+        self.assertIsNone(fetch.html)
+        self.assertEqual(fetch.status, 404)
 
     @respx.mock
     def test_offsite_redirect_is_not_followed(self):
