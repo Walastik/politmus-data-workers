@@ -51,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
 
         ensure_schema()
         matcher = make_matcher(args.host or DEFAULT_HOST, args.model)
-        stats = matcher.rebuild(session) if args.rebuild else matcher.refresh(session)
+        log = lambda line: print(line, flush=True)  # noqa: E731
+        print(f"Embedding target names with {matcher.model} (first run embeds every target)...", flush=True)
+        stats = matcher.rebuild(session, log) if args.rebuild else matcher.refresh(session, log)
     except Exception as exc:
         session.rollback()
         print(f"Target matching failed: {type(exc).__name__}: {exc}", file=sys.stderr)

@@ -26,9 +26,13 @@ from sqlalchemy.orm import Session
 
 DEFAULT_EMBED_MODEL = os.getenv("TARGET_EMBED_MODEL", "nomic-embed-text")
 MATCH_FLOOR = 0.75
+# Closest names kept per target, so a generic name can't flood the table.
+MAX_NEIGHBORS = 20
 EMBED_BATCH = 128
 # Rows of new targets compared against everything at once (memory bound).
 COMPARE_BATCH = 512
+# Rows per INSERT: one round trip each, since the database may be remote.
+WRITE_BATCH = 2000
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
 
@@ -55,22 +59,32 @@ class TargetMatcher:
     targets added since and compares them against everything.
     """
 
-    def __init__(self, embed_fn: EmbedFn, model: str = DEFAULT_EMBED_MODEL, *, floor: float = MATCH_FLOOR):
+    def __init__(
+        self,
+        embed_fn: EmbedFn,
+        model: str = DEFAULT_EMBED_MODEL,
+        *,
+        floor: float = MATCH_FLOOR,
+        max_neighbors: int = MAX_NEIGHBORS,
+    ):
         self.embed_fn = embed_fn
         self.model = model
         self.floor = floor
+        self.max_neighbors = max_neighbors
         self._ids: list[int] = []
         self._matrix = None  # numpy (n, dims), rows L2-normalized
         self._loaded = False
 
-    def rebuild(self, session: Session) -> dict:
+    def rebuild(self, session: Session, log: Callable[[str], None] | None = None) -> dict:
         session.execute(text("DELETE FROM target_matches"))
         session.execute(text("DELETE FROM target_embeddings"))
         session.commit()
         self._ids, self._matrix, self._loaded = [], None, False
-        return self.refresh(session)
+        return self.refresh(session, log)
 
-    def refresh(self, session: Session) -> dict:
+    def refresh(self, session: Session, log: Callable[[str], None] | None = None) -> dict:
+        """Embed targets added since the last refresh and store their near
+        matches. log gets progress lines (by-hand runs embed thousands)."""
         import numpy as np
 
         if not self._loaded:
@@ -89,6 +103,8 @@ class TargetMatcher:
         for start in range(0, len(new), EMBED_BATCH):
             batch = new[start:start + EMBED_BATCH]
             vectors.extend(self.embed_fn([name for _id, name in batch]))
+            if log:
+                log(f"  embedded {min(start + EMBED_BATCH, len(new))}/{len(new)}")
         new_ids = [target_id for target_id, _name in new]
         new_matrix = _normalize(np.asarray(vectors, dtype=np.float32))
 
@@ -96,26 +112,42 @@ class TargetMatcher:
         all_matrix = new_matrix if self._matrix is None else np.vstack([self._matrix, new_matrix])
         offset = len(self._ids)
         pairs: dict[tuple[int, int], float] = {}
+        keep = min(self.max_neighbors + 1, len(all_ids))  # +1: a target is its own closest
         for start in range(0, len(new_ids), COMPARE_BATCH):
             sims = new_matrix[start:start + COMPARE_BATCH] @ all_matrix.T
-            for row, col in zip(*np.nonzero(sims >= self.floor)):
-                i, j = offset + start + int(row), int(col)
-                # New-vs-new pairs show up twice; keep one, and skip self.
-                if i == j or (j >= offset and j < i):
-                    continue
-                a, b = sorted((all_ids[i], all_ids[j]))
-                pairs[(a, b)] = round(float(sims[row, col]), 4)
+            closest = np.argpartition(-sims, keep - 1, axis=1)[:, :keep]
+            for row, cols in enumerate(closest):
+                i = offset + start + row
+                for col in cols:
+                    j = int(col)
+                    similarity = float(sims[row, j])
+                    if i == j or similarity < self.floor:
+                        continue
+                    # Sorted, so a new-vs-new pair found from both ends is stored once.
+                    a, b = sorted((all_ids[i], all_ids[j]))
+                    pairs[(a, b)] = round(similarity, 4)
+        if log:
+            log(f"  saving {len(new_ids)} embeddings and {len(pairs)} near pairs")
 
-        for target_id, vector in zip(new_ids, new_matrix):
+        for start in range(0, len(new_ids), WRITE_BATCH):
+            ids = new_ids[start:start + WRITE_BATCH]
             session.execute(text(
-                "INSERT INTO target_embeddings (target_id, model, vector) VALUES (:id, :model, :vector) "
+                "INSERT INTO target_embeddings (target_id, model, vector) "
+                "SELECT id, :model, vector FROM unnest(CAST(:ids AS integer[]), CAST(:vectors AS bytea[])) AS u(id, vector) "
                 "ON CONFLICT (target_id) DO UPDATE SET model = EXCLUDED.model, vector = EXCLUDED.vector"
-            ), {"id": target_id, "model": self.model, "vector": vector.tobytes()})
-        if pairs:
+            ), {
+                "model": self.model,
+                "ids": ids,
+                "vectors": [new_matrix[k].tobytes() for k in range(start, start + len(ids))],
+            })
+        items = sorted(pairs.items())
+        for start in range(0, len(items), WRITE_BATCH):
+            batch = items[start:start + WRITE_BATCH]
             session.execute(text(
-                "INSERT INTO target_matches (target_a, target_b, similarity) VALUES (:a, :b, :s) "
+                "INSERT INTO target_matches (target_a, target_b, similarity) "
+                "SELECT * FROM unnest(CAST(:a AS integer[]), CAST(:b AS integer[]), CAST(:s AS double precision[])) "
                 "ON CONFLICT (target_a, target_b) DO UPDATE SET similarity = EXCLUDED.similarity"
-            ), [{"a": a, "b": b, "s": s} for (a, b), s in pairs.items()])
+            ), {"a": [a for (a, _b), _s in batch], "b": [b for (_a, b), _s in batch], "s": [s for _p, s in batch]})
         session.commit()
 
         self._ids, self._matrix = all_ids, all_matrix
