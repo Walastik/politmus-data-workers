@@ -248,6 +248,126 @@ class SenatorMatchTests(unittest.TestCase):
         self.assertEqual(len(unknown), 4)
 
 
+GARCIA_DETAIL = {
+    "directOrderName": 'Jesús G. "Chuy" García',
+    "firstName": "Jesús",
+    "middleName": 'G. "Chuy"',
+    "lastName": "García",
+    "nickName": "Chuy",
+    "honorificName": "Mr.",
+}
+
+
+class NamePartsTests(unittest.TestCase):
+    def test_reads_every_part_congress_gives(self):
+        from congress_client import _name_parts_from_member
+
+        self.assertEqual(
+            _name_parts_from_member({**GARCIA_DETAIL, "suffixName": "Jr."}),
+            {
+                "first_name": "Jesús",
+                "middle_name": 'G. "Chuy"',
+                "last_name": "García",
+                "suffix_name": "Jr.",
+                "nickname": "Chuy",
+                "honorific_name": "Mr.",
+            },
+        )
+
+    def test_list_payload_has_no_parts(self):
+        from congress_client import _name_parts_from_member
+
+        listing = {"bioguideId": "A000370", "name": "Adams, Alma S.", "state": "North Carolina"}
+        self.assertEqual(set(_name_parts_from_member(listing).values()), {None})
+
+    def test_official_keeps_inverted_name_and_builds_display_name(self):
+        from congress_client import _combine_member_payloads, official_from_member
+
+        listing = {"bioguideId": "A000370", "name": "Adams, Alma S.", "state": "North Carolina"}
+        detail = {"firstName": "Alma", "middleName": "S.", "lastName": "Adams"}
+        official = official_from_member(_combine_member_payloads(listing, detail))
+        self.assertEqual(official.name, "Adams, Alma S.")
+        self.assertEqual(
+            (official.first_name, official.middle_name, official.last_name),
+            ("Alma", "S.", "Adams"),
+        )
+        self.assertEqual(official.display_name, "Alma S. Adams")
+
+    def test_display_name_formats(self):
+        from models import Official
+
+        bishop = Official(
+            name="Bishop, Sanford D.", first_name="Sanford", middle_name="D.",
+            last_name="Bishop", suffix_name="Jr.",
+        )
+        self.assertEqual(bishop.display_name, "Sanford D. Bishop Jr.")
+        cruz = Official(name="Cruz, Ted", first_name="Ted", last_name="Cruz")
+        self.assertEqual(cruz.display_name, "Ted Cruz")
+        not_backfilled = Official(name="Adams, Alma S.")
+        self.assertEqual(not_backfilled.display_name, "Adams, Alma S.")
+
+    def test_upsert_keeps_stored_parts_when_incoming_has_none(self):
+        from congress_client import upsert_official
+        from models import Official
+
+        existing = Official(id="A000370", name="Adams, Alma S.", first_name="Alma",
+                            middle_name="S.", last_name="Adams")
+        session = MagicMock()
+        session.get.return_value = existing
+        upsert_official(session, Official(id="A000370", name="Adams, Alma S."))
+        self.assertEqual(existing.display_name, "Alma S. Adams")
+
+    def test_upsert_replaces_parts_together(self):
+        from congress_client import upsert_official
+        from models import Official
+
+        existing = Official(id="A000370", name="Adams, Alma S.", first_name="Alma",
+                            middle_name="S.", last_name="Adams")
+        session = MagicMock()
+        session.get.return_value = existing
+        upsert_official(
+            session,
+            Official(id="A000370", name="Adams, Alma", first_name="Alma", last_name="Adams"),
+        )
+        self.assertIsNone(existing.middle_name)
+        self.assertEqual(existing.display_name, "Alma Adams")
+
+    @patch("congress_client._require_api_key")
+    @patch("congress_client.ensure_schema")
+    @patch("congress_client.fetch_member")
+    @patch("congress_client.SessionLocal")
+    def test_backfill_fills_missing_name_parts(
+        self, mock_session_local, mock_fetch, _ensure, _require_key
+    ):
+        import requests
+        from congress_client import backfill_name_parts
+        from models import Official
+
+        garcia = Official(id="G000586", name='García, Jesús G. "Chuy"')
+        gone = Official(id="X000001", name="Gone, Former")
+        session = MagicMock()
+        session.query.return_value.filter.return_value.filter.return_value.all.return_value = [
+            garcia,
+            gone,
+        ]
+        mock_session_local.return_value = session
+
+        def fetch(bioguide_id):
+            if bioguide_id == "X000001":
+                raise requests.HTTPError("404")
+            return GARCIA_DETAIL
+
+        mock_fetch.side_effect = fetch
+        stats = backfill_name_parts()
+
+        self.assertEqual(stats, {"missing": 2, "filled": 1, "failed": 1})
+        self.assertEqual(garcia.nickname, "Chuy")
+        self.assertEqual(garcia.honorific_name, "Mr.")
+        self.assertEqual(garcia.display_name, 'Jesús G. "Chuy" García')
+        self.assertIsNone(gone.last_name)
+        session.commit.assert_called_once()
+
+
 class PositionAndDateTests(unittest.TestCase):
     def test_normalizes_senate_vote_cast(self):
         self.assertEqual(normalize_position("Yea"), "Yes")

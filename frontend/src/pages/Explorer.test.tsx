@@ -45,7 +45,11 @@ function official(id: string, name: string, extra: Partial<Official> = {}): Offi
 
 const roster = [
   official('A1', 'Alice Done', { positions_status: 'ok', positions_count: 12 }),
-  official('B2', 'Bob Blocked', { positions_status: 'blocked', positions_count: null }),
+  official('B2', 'Blocked, Bob', {
+    display_name: 'Bob Blocked',
+    positions_status: 'blocked',
+    positions_count: null,
+  }),
   official('C3', 'Cara Pending'),
 ]
 
@@ -121,6 +125,15 @@ describe('Explorer stated positions', () => {
     expect(screen.getByText('Alice Done')).toBeInTheDocument()
     expect(screen.queryByText('Bob Blocked')).not.toBeInTheDocument()
     expect(screen.queryByText('Cara Pending')).not.toBeInTheDocument()
+  })
+
+  it('shows the display name on roster cards when the API has one', async () => {
+    renderExplorer()
+    fireEvent.click(screen.getByRole('button', { name: 'Roster' }))
+
+    expect(await screen.findByText('Bob Blocked')).toBeInTheDocument()
+    expect(screen.queryByText('Blocked, Bob')).not.toBeInTheDocument()
+    expect(screen.getByText('Alice Done')).toBeInTheDocument()
   })
 
   it('shows none of it when signed out', async () => {

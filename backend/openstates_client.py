@@ -327,6 +327,8 @@ def official_from_person(person, state_name):
     return Official(
         id=openstates_id,
         name=_text_or_none(person.get("name")),
+        first_name=_text_or_none(person.get("given_name")),
+        last_name=_text_or_none(person.get("family_name")),
         state=state_name,
         party=_party_from_person(person),
         office=office,
@@ -356,6 +358,8 @@ def upsert_official(session, incoming):
         return incoming
 
     existing.name = incoming.name
+    existing.first_name = incoming.first_name
+    existing.last_name = incoming.last_name
     existing.state = incoming.state
     existing.party = incoming.party
     existing.office = incoming.office

@@ -59,6 +59,19 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS openstates_id VARCHAR"
         ))
+        # Filled by `congress_client.py members` / `backfill-name-parts` and
+        # the OpenStates sync.
+        for column in (
+            "first_name",
+            "middle_name",
+            "last_name",
+            "suffix_name",
+            "nickname",
+            "honorific_name",
+        ):
+            conn.execute(text(
+                f"ALTER TABLE officials ADD COLUMN IF NOT EXISTS {column} VARCHAR"
+            ))
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_officials_openstates_id "
             "ON officials (openstates_id) WHERE openstates_id IS NOT NULL"

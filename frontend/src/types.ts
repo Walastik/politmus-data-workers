@@ -1,6 +1,14 @@
 export interface Official {
   id: string
   name: string
+  // Built by the API from the stored name parts; falls back to `name`.
+  display_name?: string | null
+  first_name?: string | null
+  middle_name?: string | null
+  last_name?: string | null
+  suffix_name?: string | null
+  nickname?: string | null
+  honorific_name?: string | null
   state: string
   party: string
   office: string | null
@@ -57,6 +65,7 @@ export interface PositionsSync {
 export interface PositionsProgressItem {
   official_id: string
   name: string | null
+  display_name?: string | null
   state: string | null
   party: string | null
   office: string | null
@@ -541,6 +550,12 @@ export function positionBadgeClass(position: string | null) {
   if (position === 'No') return 'bg-red-900/60 text-red-300'
   if (position === 'Present') return 'bg-amber-900/60 text-amber-300'
   return 'bg-slate-700 text-slate-300'
+}
+
+// The API's display name ("Alma S. Adams", built from the stored name parts),
+// falling back to the stored name.
+export function officialName(official: Pick<Official, 'name' | 'display_name'>) {
+  return official.display_name || official.name
 }
 
 export function officeLine(official: Official) {
