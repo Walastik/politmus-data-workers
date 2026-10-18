@@ -163,6 +163,8 @@ class OpenStatesMappingTests(unittest.TestCase):
         person = {
             "id": "ocd-person/example",
             "name": "Jane Doe",
+            "given_name": "Jane",
+            "family_name": "Doe",
             "party": "Democrat",
             "current_role": {
                 "title": "Senator",
@@ -190,6 +192,8 @@ class OpenStatesMappingTests(unittest.TestCase):
         self.assertEqual(official.phone, "512-555-0100")
         self.assertEqual(official.website_url, "https://senate.example.gov")
         self.assertTrue(official.current_member)
+        self.assertEqual((official.first_name, official.last_name), ("Jane", "Doe"))
+        self.assertEqual(official.display_name, "Jane Doe")
 
     def test_maps_governor(self):
         person = {

@@ -2,7 +2,7 @@ from typing import Optional
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, desc, nulls_last
+from sqlalchemy import case, desc, func, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
@@ -39,7 +39,7 @@ def list_officials(
     q: Optional[str] = Query(
         default=None,
         max_length=100,
-        description="Case-insensitive substring match on official name.",
+        description="Case-insensitive substring match on the stored name or first/last name.",
     ),
     limit: int = Query(default=600, ge=1, le=1000),
     current_member: Optional[bool] = Query(
@@ -65,7 +65,16 @@ def list_officials(
     if state_value:
         query = query.filter(Official.state.ilike(state_value))
     if name_pattern:
-        query = query.filter(Official.name.ilike(name_pattern, escape="\\"))
+        # The stored name, plus first-name-first forms with and without the
+        # middle name, so "Alma Adams" and "Alma S. Adams" both match.
+        searchable = (
+            Official.name,
+            func.concat_ws(" ", Official.first_name, Official.middle_name, Official.last_name),
+            func.concat_ws(" ", Official.first_name, Official.last_name),
+        )
+        query = query.filter(
+            or_(*(column.ilike(name_pattern, escape="\\") for column in searchable))
+        )
     if current_member is not None:
         query = query.filter(Official.current_member.is_(current_member))
     if level:
@@ -111,6 +120,13 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
     return OfficialDetailOut(
         id=official.id,
         name=official.name,
+        display_name=official.display_name,
+        first_name=official.first_name,
+        middle_name=official.middle_name,
+        last_name=official.last_name,
+        suffix_name=official.suffix_name,
+        nickname=official.nickname,
+        honorific_name=official.honorific_name,
         state=official.state,
         party=official.party,
         office=official.office,

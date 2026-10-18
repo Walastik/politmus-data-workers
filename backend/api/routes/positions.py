@@ -36,6 +36,7 @@ def _items(db: Session, *filters, limit: int) -> list[PositionsProgressItemOut]:
         PositionsProgressItemOut(
             official_id=official.id,
             name=official.name,
+            display_name=official.display_name,
             state=official.state,
             party=official.party,
             office=official.office,

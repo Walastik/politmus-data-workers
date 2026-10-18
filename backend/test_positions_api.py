@@ -96,10 +96,11 @@ class PositionsApiTests(unittest.TestCase):
 
         session = self.SessionLocal()
 
-        def official(official_id, name, current=True, website="https://example.house.gov"):
+        def official(official_id, name, current=True, website="https://example.house.gov", **parts):
             session.add(Official(
                 id=official_id,
                 name=name,
+                **parts,
                 state="New York",
                 party="Democratic",
                 office="Representative",
@@ -109,7 +110,7 @@ class PositionsApiTests(unittest.TestCase):
                 level="federal",
             ))
 
-        official(self.DONE, "Zzpos Alpha")
+        official(self.DONE, "Zzpos Alpha", first_name="Alpha", middle_name="Q.", last_name="Zzpos")
         official(self.FAILED, "Zzpos Bravo")
         official(self.NEVER, "Zzpos Charlie")
         official(self.FORMER, "Zzpos Delta", current=False)
@@ -200,6 +201,23 @@ class PositionsApiTests(unittest.TestCase):
         self.assertEqual(sync["attempts"], 1)
         self.assertEqual(sync["extractor_version"], "v-test")
         self.assertIsNone(sync["last_error"])
+
+    def test_returns_name_parts_and_searches_them(self):
+        detail = self.client.get(f"/api/officials/{self.DONE}").json()
+        self.assertEqual(detail["name"], "Zzpos Alpha")
+        self.assertEqual(
+            (detail["first_name"], detail["middle_name"], detail["last_name"]),
+            ("Alpha", "Q.", "Zzpos"),
+        )
+        self.assertEqual(detail["display_name"], "Alpha Q. Zzpos")
+
+        for query in ("Alpha Zzpos", "Alpha Q. Zzpos"):
+            rows = self.client.get("/api/officials", params={"q": query}).json()
+            self.assertEqual([row["id"] for row in rows], [self.DONE])
+        self.assertEqual(rows[0]["display_name"], "Alpha Q. Zzpos")
+
+        never = self.client.get(f"/api/officials/{self.NEVER}").json()
+        self.assertEqual(never["display_name"], "Zzpos Charlie")
 
     def test_detail_for_official_never_attempted(self):
         response = self.client.get(f"/api/officials/{self.NEVER}")

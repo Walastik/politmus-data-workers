@@ -72,10 +72,16 @@ python init_db.py
 
 Talks to Congress.gov and writes into Postgres. Commands:
 
-**Current member roster** — fetches current members, then each member’s detail record (Capitol phone, DC office address, and official website), and upserts them into `officials` (id is the member’s Bioguide ID):
+**Current member roster** — fetches current members, then each member’s detail record (Capitol phone, DC office address, official website, and the name parts `first_name`, `middle_name`, `last_name`, `suffix_name`, `nickname` and `honorific_name`), and upserts them into `officials` (id is the member’s Bioguide ID). `name` keeps Congress.gov’s inverted form ("Adams, Alma S.") for sorting and Senate matching. The API's `display_name` ("Alma S. Adams") is built from the parts in `Official.display_name`, so the display format can change without re-ingesting:
 
 ```bash
 python congress_client.py members
+```
+
+**Name-part backfill** — one-off: fills the name parts for federal officials stored before those columns existed, including former members added as bill sponsors, which `members` does not revisit. Safe to re-run; it only fetches officials still missing a last name:
+
+```bash
+python congress_client.py backfill-name-parts
 ```
 
 **Recent bills and roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date, Congress.gov `latestAction`, and a derived `status` such as Became Law / Vetoed / Passed House), then loads House member votes from Congress.gov and Senate member votes from Senate.gov XML. Each roll call is stored in `roll_calls` (question, result, and required threshold when the source publishes one); member positions go in `votes` linked to that roll call:

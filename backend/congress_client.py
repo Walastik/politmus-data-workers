@@ -763,6 +763,25 @@ def _name_from_member(member):
     )
 
 
+NAME_PART_FIELDS = {
+    "first_name": "firstName",
+    "middle_name": "middleName",
+    "last_name": "lastName",
+    "suffix_name": "suffixName",
+    "nickname": "nickName",
+    "honorific_name": "honorificName",
+}
+
+
+def _name_parts_from_member(member):
+    """Name parts as Congress.gov gives them. Only the member detail payload has them."""
+    parts = {}
+    for column, field in NAME_PART_FIELDS.items():
+        value = str(member.get(field) or "").strip()
+        parts[column] = value or None
+    return parts
+
+
 def _party_from_member(member):
     party = member.get("partyName") or member.get("party")
     if not party:
@@ -861,6 +880,7 @@ def official_from_member(member, bioguide_id=None, current_member=None):
     return Official(
         id=bioguide_id,
         name=_name_from_member(member),
+        **_name_parts_from_member(member),
         state=member.get("state"),
         party=_party_from_member(member),
         office=office_from_member(member),
@@ -876,8 +896,9 @@ def official_from_member(member, bioguide_id=None, current_member=None):
 def upsert_official(session, incoming):
     """Insert or update an official without wiping stored contact fields.
 
-    List-level member payloads omit phone/address/website. SQLAlchemy merge
-    would null those columns, so blank incoming contact is left unchanged.
+    List-level member payloads omit phone/address/website and the name parts.
+    SQLAlchemy merge would null those columns, so blank incoming values are
+    left unchanged.
     """
     existing = session.get(Official, incoming.id)
     if existing is None:
@@ -891,6 +912,11 @@ def upsert_official(session, incoming):
     existing.district = incoming.district
     existing.current_member = incoming.current_member
     existing.level = incoming.level or existing.level or "federal"
+    # Parts move together: a detail payload replaces them all (so a dropped
+    # middle name clears), a list payload has none and leaves them alone.
+    if incoming.last_name:
+        for column in NAME_PART_FIELDS:
+            setattr(existing, column, getattr(incoming, column))
     if incoming.phone:
         existing.phone = incoming.phone
     if incoming.office_address:
@@ -972,6 +998,45 @@ def save_officials(members):
 
         session.commit()
         return saved
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def backfill_name_parts():
+    """Fill name parts for federal officials stored before they existed.
+
+    `members` covers the current roster; this also reaches former members
+    added as bill sponsors, which no other sync revisits.
+    """
+    _require_api_key()
+    ensure_schema()
+    session = SessionLocal()
+    stats = {"missing": 0, "filled": 0, "failed": 0}
+    try:
+        officials = (
+            session.query(Official)
+            .filter(Official.last_name.is_(None))
+            .filter(or_(Official.level == "federal", Official.level.is_(None)))
+            .all()
+        )
+        stats["missing"] = len(officials)
+        for index, official in enumerate(officials, start=1):
+            print(f"[{index}/{stats['missing']}] Fetching member {official.id}...")
+            try:
+                parts = _name_parts_from_member(fetch_member(official.id))
+            except (requests.RequestException, RuntimeError) as exc:
+                print(f"  Failed to fetch {official.id}: {exc}")
+                stats["failed"] += 1
+                continue
+            if parts["last_name"]:
+                for column, value in parts.items():
+                    setattr(official, column, value)
+                stats["filled"] += 1
+        session.commit()
+        return stats
     except Exception:
         session.rollback()
         raise
@@ -2663,6 +2728,7 @@ def main():
             "senate-votes",
             "sponsors",
             "backfill-sponsors",
+            "backfill-name-parts",
             "enrich",
             "extract",
             "classify",
@@ -2673,6 +2739,7 @@ def main():
         "senate-votes: Senate.gov roll-call XML (one vote, one session, "
         "an entire congress, or incremental catch-up). "
         "backfill-sponsors: insert missing historical sponsors. "
+        "backfill-name-parts: fill first/middle/last name etc. on stored officials. "
         "enrich: fill policy area, CRS summary, dates, sponsorship, "
         "and vote-velocity on existing bills. "
         "extract: pull policy effects from bill summaries with Ollama. "
@@ -2722,6 +2789,14 @@ def main():
         members = fetch_current_members()
         saved = save_officials(members)
         print(f"Fetched {len(members)} members and saved {saved} officials.")
+        return
+
+    if args.command == "backfill-name-parts":
+        stats = backfill_name_parts()
+        print(
+            f"Name parts: {stats['filled']} filled of {stats['missing']} missing "
+            f"({stats['failed']} failed)."
+        )
         return
 
     if args.command in {"sponsors", "backfill-sponsors"}:

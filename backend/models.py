@@ -7,7 +7,16 @@ class Official(Base):
     __tablename__ = 'officials'
 
     id = Column(String, primary_key=True)
+    # Congress.gov's inverted form ("Adams, Alma S."); used for sorting and matching.
     name = Column(String)
+    # Name parts as the source gives them (Congress.gov member detail, or
+    # OpenStates given/family name). display_name is built from these.
+    first_name = Column(String, nullable=True)
+    middle_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    suffix_name = Column(String, nullable=True)
+    nickname = Column(String, nullable=True)
+    honorific_name = Column(String, nullable=True)
     state = Column(String)
     party = Column(String)
     office = Column(String)
@@ -20,6 +29,14 @@ class Official(Base):
     openstates_id = Column(String, nullable=True, unique=True)
 
     bills = relationship("Bill", back_populates="sponsor")
+
+    @property
+    def display_name(self):
+        """How the app shows the name. Change the format here; the parts are stored."""
+        if self.first_name and self.last_name:
+            parts = [self.first_name, self.middle_name, self.last_name, self.suffix_name]
+            return " ".join(part for part in parts if part)
+        return self.name
 
 class Bill(Base):
     __tablename__ = 'bills'

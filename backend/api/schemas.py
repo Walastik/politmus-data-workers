@@ -11,6 +11,14 @@ class OfficialOut(BaseModel):
 
     id: str
     name: Optional[str] = None
+    # Built from the name parts (Official.display_name); falls back to name.
+    display_name: Optional[str] = None
+    first_name: Optional[str] = None
+    middle_name: Optional[str] = None
+    last_name: Optional[str] = None
+    suffix_name: Optional[str] = None
+    nickname: Optional[str] = None
+    honorific_name: Optional[str] = None
     state: Optional[str] = None
     party: Optional[str] = None
     office: Optional[str] = None
@@ -85,6 +93,7 @@ class OfficialDetailOut(OfficialOut):
 class PositionsProgressItemOut(BaseModel):
     official_id: str
     name: Optional[str] = None
+    display_name: Optional[str] = None
     state: Optional[str] = None
     party: Optional[str] = None
     office: Optional[str] = None

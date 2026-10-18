@@ -16,6 +16,7 @@ function officialFromItem(item: PositionsProgressItem): Official {
   return {
     id: item.official_id,
     name: item.name ?? item.official_id,
+    display_name: item.display_name,
     state: item.state ?? '',
     party: item.party ?? '',
     office: item.office,
@@ -232,7 +233,7 @@ function ProgressList({
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium text-slate-100">
-                      {item.name ?? item.official_id}
+                      {item.display_name ?? item.name ?? item.official_id}
                       {item.state ? <span className="ml-1.5 text-slate-500">{item.state}</span> : null}
                     </span>
                     <span className="flex shrink-0 items-center gap-2 text-slate-400">

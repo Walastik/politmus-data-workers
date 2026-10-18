@@ -8,8 +8,8 @@ import CopyLinkButton from './components/CopyLinkButton'
 import StatedPositionsSection from './components/StatedPositionsSection'
 import {
   billStub,
-  displayName,
   officeLine,
+  officialName,
   partyBadgeClass,
   partyShort,
   positionBadgeClass,
@@ -118,7 +118,7 @@ export default function MemberDrawer({
                 {partyShort(view.party)}
               </span>
               <span className="min-w-0 truncate text-sm font-semibold text-slate-100">
-                {displayName(view.name)}
+                {officialName(view)}
               </span>
               {stateAbbr(view.state) ? (
                 <span className="shrink-0 text-xs text-slate-400">{stateAbbr(view.state)}</span>
@@ -151,7 +151,7 @@ export default function MemberDrawer({
                 </span>
               ) : null}
               <h2 ref={titleRef} id="member-drawer-title" className="text-xl font-semibold">
-                {displayName(view.name) || (loading ? 'Loading…' : official.id)}
+                {officialName(view) || (loading ? 'Loading…' : official.id)}
               </h2>
               {view.party ? (
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
