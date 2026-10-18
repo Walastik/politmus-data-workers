@@ -170,14 +170,26 @@ describe('MemberDrawer accountability', () => {
   })
 
   it('shows the headline score and scorecard to signed-in users', async () => {
-    render(<MemberDrawer official={official} onClose={() => {}} />)
+    render(<MemberDrawer
+        official={official}
+        onClose={() => {}}
+        selectedBill={null}
+        onSelectBill={() => {}}
+        onCloseBill={() => {}}
+      />)
     expect(await screen.findByText('Says vs. votes')).toBeInTheDocument()
     expect(screen.getByTestId('score-headline')).toHaveTextContent('75%')
   })
 
   it('hides scores when signed out', async () => {
     clerk.signedIn = false
-    render(<MemberDrawer official={official} onClose={() => {}} />)
+    render(<MemberDrawer
+        official={official}
+        onClose={() => {}}
+        selectedBill={null}
+        onSelectBill={() => {}}
+        onCloseBill={() => {}}
+      />)
     expect(await screen.findByText('No recorded votes in the ingested bills.')).toBeInTheDocument()
     expect(screen.queryByText('Says vs. votes')).not.toBeInTheDocument()
     expect(screen.queryByTestId('score-headline')).not.toBeInTheDocument()

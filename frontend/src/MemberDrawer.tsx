@@ -185,7 +185,7 @@ export default function MemberDrawer({
                 score={detail.accountability}
                 alignments={detail.alignments ?? []}
                 onSelectBill={(alignment) =>
-                  setSelectedBill(billFromAlignment(alignment, detail.votes))
+                  onSelectBill(billFromAlignment(alignment, detail.votes))
                 }
               />
             </SignedIn>
