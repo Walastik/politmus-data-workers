@@ -64,6 +64,7 @@ class OfficialStanceOut(BaseModel):
     stance: Optional[str] = None
     policy_direction: Optional[str] = None
     emphasis: Optional[str] = None
+    scope: Optional[str] = None
     summary: Optional[str] = None
     evidence_quote: Optional[str] = None
     source_url: Optional[str] = None
@@ -126,7 +127,12 @@ class VoteAlignmentOut(BaseModel):
     stance_evidence_quote: Optional[str] = None
     stance_source_url: Optional[str] = None
     policy_area: Optional[str] = None
+    effect_relation: Optional[str] = None
+    stance_scope: Optional[str] = None
+    bill_effect_count: Optional[int] = None
     points: int
+    counted: bool = True
+    reason: Optional[str] = None
 
 
 class OfficialDetailOut(OfficialOut):

@@ -28,7 +28,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from database import SessionLocal
-from services.accountability import compute_alignments, passage_roll_call_ids, summarize
+from services.accountability import compute_alignments, passage_roll_call_ids, summarize, vote_results
 
 BACKEND_DIR = Path(__file__).resolve().parent
 LAB_DIR = Path(os.getenv("LAB_DIR", Path.home() / "politmus-lab"))
@@ -284,10 +284,19 @@ def snapshot(fixture: dict) -> dict:
                         "bill_direction": a.effect_direction,
                         "wants": a.stance_direction,
                         "emphasis": a.stance_emphasis,
-                        "reason": getattr(a, "reason", None),
+                        "scope": a.stance_scope,
+                        "relation": a.effect_relation,
+                        "magnitude": a.effect_magnitude,
+                        "counted": a.counted,
+                        "reason": a.reason,
                     }
                     for a in rows
                     if a.bill_id in bill_ids
+                },
+                "votes": {
+                    f"{vote_rows[0].bill_id} ({vote_rows[0].vote_position})": result
+                    for vote_rows, result in vote_results(rows)
+                    if vote_rows[0].bill_id in bill_ids
                 },
             }
     finally:
@@ -369,17 +378,23 @@ def render(snap: dict) -> str:
             f"**Score (all bills):** {g.get('points', 0):+d} points, {pct} aligned, "
             f"{g.get('matches_total', 0)} matches",
             "",
+            "**Votes on the fixture bills:** "
+            + (", ".join(f"{k} {v:+d}" for k, v in sorted(g.get("votes", {}).items())) or "none counted"),
+            "",
             "**Matches on the fixture bills:**",
             "",
         ]
         matches = g.get("matches", {})
         if matches:
-            out += ["| Pts | Vote | Bill / target / mechanism | Bill does | Wants | Emphasis | Reason |",
-                    "|---|---|---|---|---|---|---|"]
+            out += ["| Pts | Counted | Vote | Bill / target / mechanism | Bill does | Magnitude | Relation "
+                    "| Wants | Emphasis | Scope | Reason |",
+                    "|---|---|---|---|---|---|---|---|---|---|---|"]
             for key, m in sorted(matches.items()):
                 out.append(
-                    f"| {m['points']:+d} | {m['vote']} | {_cell(key)} | {m['bill_direction']} | "
-                    f"{m['wants']} | {_cell(m['emphasis'])} | {_cell(m.get('reason') or '')} |"
+                    f"| {m['points']:+d} | {'yes' if m.get('counted', True) else 'no'} | {m['vote']} | "
+                    f"{_cell(key)} | {m['bill_direction']} | {_cell(m.get('magnitude'))} | "
+                    f"{_cell(m.get('relation'))} | {m['wants']} | {_cell(m['emphasis'])} | "
+                    f"{_cell(m.get('scope'))} | {_cell(m.get('reason') or '')} |"
                 )
         else:
             out.append("None.")
@@ -438,7 +453,9 @@ def diff(old: dict, new: dict) -> list[str]:
                 f"  ~ {name} score: {g0.get('points')} ({g0.get('alignment_pct')}%) -> "
                 f"{g1.get('points')} ({g1.get('alignment_pct')}%)"
             )
-        compare(f"{name} match", g0.get("matches", {}), g1.get("matches", {}), ("points", "reason"))
+        compare(f"{name} match", g0.get("matches", {}), g1.get("matches", {}), ("points", "counted", "reason"))
+        compare(f"{name} vote", {k: {"net": v} for k, v in g0.get("votes", {}).items()},
+                {k: {"net": v} for k, v in g1.get("votes", {}).items()}, ("net",))
     return lines
 
 

@@ -13,6 +13,20 @@ Only Yes/No votes on passage-type questions count (see is_passage_question),
 and only the latest one per official, bill and chamber, so a bill voted on
 twice is not double counted. Bills must be classified (status ok).
 
+Not every match counts (apply_rules keeps the rest, with a reason, so the
+drawer can show them):
+- low-emphasis positions (inferred from a slogan or value statement);
+- local positions (one district, state, facility) on a broad bill;
+- medium-emphasis positions on an unrelated add-on (relation secondary), or
+  on anything but a high-magnitude provision of a broad bill. High-emphasis
+  positions, which name the change, count on any provision;
+- a match on the same policy (target, mechanism, effect direction) as a
+  later vote in the same Congress, so companion bills (a chamber's version
+  and the final one) count once.
+
+Each vote then scores once: its counted matches net to +1, -1, or 0, so one
+vote on a bill with several matching provisions is one point.
+
 Scores are derived data: rescore() rewrites an official's vote_alignments and
 official_scores rows only when the hash of their computed rows changes, so it
 is safe (and cheap, no LLM) to run after every ingest or worker run.
@@ -23,7 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from typing import Callable, Iterable
 
@@ -34,7 +48,17 @@ from models import OfficialScore, OfficialStance, RollCall, Vote, VoteAlignment
 
 # Bump when scoring rules or the stored row shape change; every official is
 # rewritten on the next run.
-ENGINE_VERSION = "accountability-v1"
+ENGINE_VERSION = "accountability-v2"
+
+# A bill with this many classified effects is broad (omnibus, NDAA,
+# reconciliation): one vote on it says little about any single provision.
+BROAD_BILL_MIN_EFFECTS = 10
+
+REASON_LOW_EMPHASIS = "low_emphasis"
+REASON_LOCAL_ON_BROAD = "local_on_broad_bill"
+REASON_UNRELATED_PROVISION = "unrelated_provision"
+REASON_MINOR_PROVISION = "minor_provision"
+REASON_LATER_VOTE = "later_vote"
 
 SCORED_POSITIONS = ("Yes", "No")
 _OPPOSITES = {("increase", "decrease"), ("decrease", "increase")}
@@ -130,6 +154,15 @@ class Alignment:
     stance_source_url: str | None
     policy_area: str | None
     points: int
+    effect_relation: str | None = None
+    stance_scope: str | None = None
+    bill_effect_count: int | None = None
+    counted: bool = True
+    reason: str | None = None
+
+    @property
+    def broad_bill(self) -> bool:
+        return (self.bill_effect_count or 0) >= BROAD_BILL_MIN_EFFECTS
 
     def key(self) -> tuple:
         return (self.bill_id, self.roll_call_id, self.target_id, self.mechanism)
@@ -142,7 +175,8 @@ class Alignment:
             self.effect_direction, self.effect_magnitude, self.effect_rationale,
             self.stance_direction, self.stance_emphasis, self.stance_summary,
             self.stance_evidence_quote, self.stance_source_url, self.policy_area,
-            self.points,
+            self.points, self.effect_relation, self.stance_scope, self.bill_effect_count,
+            self.counted, self.reason,
         ]
 
 
@@ -152,22 +186,79 @@ def inputs_hash(alignments: Iterable[Alignment]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def summarize(alignments: list[Alignment]) -> dict:
-    """Totals for official_scores."""
-    aligned = sum(1 for a in alignments if a.points > 0)
-    conflicting = sum(1 for a in alignments if a.points < 0)
-    areas: dict[str, dict[str, int]] = defaultdict(lambda: {"points": 0, "aligned": 0, "conflicting": 0})
+def rule_reason(a: Alignment) -> str | None:
+    """Why a match is kept out of the score, or None if it counts."""
+    if a.stance_emphasis == "low":
+        return REASON_LOW_EMPHASIS
+    if a.broad_bill and a.stance_scope == "local":
+        return REASON_LOCAL_ON_BROAD
+    if a.stance_emphasis != "high":
+        if a.effect_relation == "secondary":
+            return REASON_UNRELATED_PROVISION
+        if a.broad_bill and a.effect_magnitude != "high":
+            return REASON_MINOR_PROVISION
+    return None
+
+
+def _congress(bill_id: str) -> str:
+    return bill_id.split("-", 1)[0]
+
+
+def apply_rules(alignments: list[Alignment]) -> list[Alignment]:
+    """One official's matches with counted / reason set (see module doc)."""
+    out = [replace(a, counted=False, reason=r) if (r := rule_reason(a)) else a for a in alignments]
+    latest: dict[tuple, Alignment] = {}
+    for a in out:
+        if not a.counted:
+            continue
+        policy = (_congress(a.bill_id), a.target_id, a.mechanism, a.effect_direction)
+        current = latest.get(policy)
+        if current is None or (a.vote_date or date.min, a.roll_call_id) > (
+            current.vote_date or date.min, current.roll_call_id
+        ):
+            latest[policy] = a
+    keep = {id(a) for a in latest.values()}
+    return [
+        a if not a.counted or id(a) in keep else replace(a, counted=False, reason=REASON_LATER_VOTE)
+        for a in out
+    ]
+
+
+def vote_results(alignments: list[Alignment]) -> list[tuple[list[Alignment], int]]:
+    """Counted matches grouped by vote, each with its net result (+1, -1, 0)."""
+    votes: dict[tuple, list[Alignment]] = defaultdict(list)
     for a in alignments:
-        area = areas[a.policy_area or "Other"]
-        area["points"] += a.points
-        area["aligned" if a.points > 0 else "conflicting"] += 1
+        if a.counted:
+            votes[(a.bill_id, a.roll_call_id)].append(a)
+    out = []
+    for rows in votes.values():
+        net = sum(a.points for a in rows)
+        out.append((rows, (net > 0) - (net < 0)))
+    return out
+
+
+def summarize(alignments: list[Alignment]) -> dict:
+    """Totals for official_scores. aligned / conflicting count votes, not
+    matches: a vote whose counted matches cancel out is neither."""
+    results = vote_results(alignments)
+    aligned = sum(1 for _rows, result in results if result > 0)
+    conflicting = sum(1 for _rows, result in results if result < 0)
+    areas: dict[str, dict[str, int]] = defaultdict(lambda: {"points": 0, "aligned": 0, "conflicting": 0})
+    for rows, result in results:
+        if not result:
+            continue
+        # The area of the matches that decided the vote.
+        deciding = [a.policy_area or "Other" for a in rows if a.points == result]
+        area = areas[max(sorted(set(deciding)), key=deciding.count)]
+        area["points"] += result
+        area["aligned" if result > 0 else "conflicting"] += 1
     matches = aligned + conflicting
     return {
         "points": aligned - conflicting,
         "aligned": aligned,
         "conflicting": conflicting,
-        "bills_scored": len({a.bill_id for a in alignments}),
-        "stances_matched": len({(a.target_id, a.mechanism) for a in alignments}),
+        "bills_scored": len({rows[0].bill_id for rows, result in results if result}),
+        "stances_matched": len({(a.target_id, a.mechanism) for rows, _r in results for a in rows}),
         "alignment_pct": round(100.0 * aligned / matches, 1) if matches else None,
         "by_policy_area": dict(sorted(areas.items())),
     }
@@ -182,7 +273,10 @@ def passage_roll_call_ids(session: Session) -> list[int]:
 
 
 _ALIGNMENTS_SQL = """
-WITH latest_votes AS (
+WITH bill_sizes AS (
+    SELECT bill_id, count(*) AS effects FROM bill_effects GROUP BY bill_id
+),
+latest_votes AS (
     SELECT DISTINCT ON (v.official_id, rc.bill_id, rc.chamber)
         v.official_id, v.position, rc.id AS roll_call_id, rc.bill_id,
         rc.chamber, rc.date
@@ -198,7 +292,7 @@ stances AS (
     -- One stance per target + mechanism (several source types may repeat it).
     SELECT DISTINCT ON (s.official_id, s.target_id, s.mechanism)
         s.official_id, s.target_id, s.mechanism, s.direction, s.emphasis,
-        s.summary, s.evidence_quote, s.source_url, s.policy_area
+        s.summary, s.evidence_quote, s.source_url, s.policy_area, s.scope
     FROM official_stances s
     WHERE TRUE {stance_filter}
     ORDER BY s.official_id, s.target_id, s.mechanism,
@@ -209,10 +303,12 @@ stances AS (
 SELECT lv.official_id, lv.bill_id, lv.roll_call_id, lv.chamber, lv.date,
        lv.position, e.target_id, t.name, e.mechanism, e.direction,
        e.magnitude, e.rationale, s.direction, s.emphasis, s.summary,
-       s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area)
+       s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area),
+       e.relation, s.scope, bs.effects
 FROM latest_votes lv
 JOIN bills b ON b.id = lv.bill_id AND b.classification_status = 'ok'
 JOIN bill_effects e ON e.bill_id = lv.bill_id
+JOIN bill_sizes bs ON bs.bill_id = lv.bill_id
 JOIN stances s ON s.official_id = lv.official_id
               AND s.target_id = e.target_id
               AND s.mechanism = e.mechanism
@@ -223,8 +319,9 @@ JOIN policy_targets t ON t.id = e.target_id
 def compute_alignments(
     session: Session, official_ids: list[str] | None = None
 ) -> dict[str, list[Alignment]]:
-    """Scored matches per official (only officials with at least one match
-    appear). official_ids=None computes everyone in one query."""
+    """Matches per official with rules applied (only officials with at
+    least one match appear). official_ids=None computes everyone in one
+    query."""
     roll_call_ids = passage_roll_call_ids(session)
     if not roll_call_ids:
         return {}
@@ -249,11 +346,13 @@ def compute_alignments(
             mechanism=row[8], effect_direction=row[9], effect_magnitude=row[10],
             effect_rationale=row[11], stance_direction=row[12], stance_emphasis=row[13],
             stance_summary=row[14], stance_evidence_quote=row[15], stance_source_url=row[16],
-            policy_area=row[17], points=points,
+            policy_area=row[17], points=points, effect_relation=row[18],
+            stance_scope=row[19], bill_effect_count=row[20],
         ))
-    for rows in out.values():
-        rows.sort(key=Alignment.key)
-    return dict(out)
+    return {
+        official_id: sorted(apply_rules(rows), key=Alignment.key)
+        for official_id, rows in out.items()
+    }
 
 
 def officials_with_stances(session: Session, official_ids: list[str] | None = None) -> set[str]:
@@ -291,7 +390,9 @@ def _write(session: Session, official_id: str, alignments: list[Alignment], dige
             stance_emphasis=a.stance_emphasis, stance_summary=a.stance_summary,
             stance_evidence_quote=a.stance_evidence_quote,
             stance_source_url=a.stance_source_url, policy_area=a.policy_area,
-            points=a.points, computed_at=now,
+            effect_relation=a.effect_relation, stance_scope=a.stance_scope,
+            bill_effect_count=a.bill_effect_count, points=a.points,
+            counted=a.counted, reason=a.reason, computed_at=now,
         ))
     totals = summarize(alignments)
     score = session.get(OfficialScore, official_id)
@@ -334,7 +435,8 @@ def rescore(
     existing = dict(existing_query.all())
 
     stats = {"officials": len(eligible), "updated": 0, "unchanged": 0, "removed": 0,
-             "matches": sum(len(rows) for rows in computed.values())}
+             "matches": sum(a.counted for rows in computed.values() for a in rows),
+             "not_counted": sum(not a.counted for rows in computed.values() for a in rows)}
     for official_id in sorted(eligible):
         alignments = computed.get(official_id, [])
         digest = inputs_hash(alignments)

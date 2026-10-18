@@ -50,10 +50,12 @@ def show_official(official_id: str, session_factory=None) -> int:
             .all()
         )
         for a, title in rows:
+            mark = f"{a.points:+d}" if a.counted else " 0"
+            why = "" if a.counted else f"  [not counted: {a.reason}]"
             print(
-                f"  {a.points:+d}  {a.vote_position:<3} {a.bill_id} ({a.chamber}, {a.vote_date}) "
+                f"  {mark}  {a.vote_position:<3} {a.bill_id} ({a.chamber}, {a.vote_date}) "
                 f"{a.target_name} / {a.mechanism}: bill {a.effect_direction}, "
-                f"wants {a.stance_direction}  — {title or ''}"
+                f"wants {a.stance_direction} ({a.stance_emphasis}){why}  — {title or ''}"
             )
         return 0
     finally:
@@ -100,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Updated:                  {stats['updated']}")
     print(f"  Unchanged:                {stats['unchanged']}")
     print(f"  Removed:                  {stats['removed']}")
-    print(f"  Scored matches:           {stats['matches']}")
+    print(f"  Counted matches:          {stats['matches']}")
+    print(f"  Matches not counted:      {stats['not_counted']}")
     return 0
 
 

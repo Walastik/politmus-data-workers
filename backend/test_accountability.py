@@ -9,8 +9,14 @@ os.environ.setdefault(
 
 from services.accountability import (
     ENGINE_VERSION,
+    REASON_LATER_VOTE,
+    REASON_LOCAL_ON_BROAD,
+    REASON_LOW_EMPHASIS,
+    REASON_MINOR_PROVISION,
+    REASON_UNRELATED_PROVISION,
     Alignment,
     alignment_points,
+    apply_rules,
     inputs_hash,
     is_passage_question,
     summarize,
@@ -87,34 +93,44 @@ class PassageQuestionTests(unittest.TestCase):
             self.assertFalse(is_passage_question(question), question)
 
 
-def _alignment(points, bill="B1", target=1, area="Health"):
-    return Alignment(
-        official_id="O1", bill_id=bill, roll_call_id=1, chamber="House",
-        vote_date=date(2026, 1, 1), vote_position="Yes", target_id=target,
+def _alignment(points, bill="119-hr-1", target=1, area="Health", roll_call=None, **fields):
+    base = dict(
+        official_id="O1", bill_id=bill, roll_call_id=roll_call or abs(hash(bill)) % 10_000,
+        chamber="House", vote_date=date(2026, 1, 1), vote_position="Yes", target_id=target,
         target_name="Medicaid", mechanism="funding", effect_direction="increase",
         effect_magnitude="high", effect_rationale=None, stance_direction="increase",
         stance_emphasis="high", stance_summary=None, stance_evidence_quote=None,
         stance_source_url=None, policy_area=area, points=points,
+        effect_relation="core", stance_scope="national", bill_effect_count=3,
     )
+    base.update(fields)
+    return Alignment(**base)
 
 
 class SummaryTests(unittest.TestCase):
-    def test_totals_and_percentage(self):
+    def test_each_vote_scores_once_by_its_net_matches(self):
         totals = summarize([
-            _alignment(1),
-            _alignment(1, bill="B2", target=2),
-            _alignment(-1, bill="B2", target=3, area="Immigration"),
+            _alignment(1, bill="119-hr-1", roll_call=1),
+            # Two matches on one vote that cancel out: neither aligned nor conflicting.
+            _alignment(1, bill="119-hr-2", roll_call=2, target=2),
+            _alignment(-1, bill="119-hr-2", roll_call=2, target=3, area="Immigration"),
+            # Two contradictions and one agreement on one vote: one conflicting vote.
+            _alignment(-1, bill="119-hr-3", roll_call=3, target=4, area="Immigration"),
+            _alignment(-1, bill="119-hr-3", roll_call=3, target=5, area="Immigration"),
+            _alignment(1, bill="119-hr-3", roll_call=3, target=6),
+            # Not counted: ignored.
+            _alignment(-1, bill="119-hr-4", roll_call=4, counted=False, reason=REASON_LOW_EMPHASIS),
         ])
-        self.assertEqual(totals["points"], 1)
-        self.assertEqual(totals["aligned"], 2)
+        self.assertEqual(totals["points"], 0)
+        self.assertEqual(totals["aligned"], 1)
         self.assertEqual(totals["conflicting"], 1)
         self.assertEqual(totals["bills_scored"], 2)
-        self.assertEqual(totals["stances_matched"], 3)
-        self.assertEqual(totals["alignment_pct"], 66.7)
+        self.assertEqual(totals["stances_matched"], 6)
+        self.assertEqual(totals["alignment_pct"], 50.0)
         self.assertEqual(
             totals["by_policy_area"],
             {
-                "Health": {"points": 2, "aligned": 2, "conflicting": 0},
+                "Health": {"points": 1, "aligned": 1, "conflicting": 0},
                 "Immigration": {"points": -1, "aligned": 0, "conflicting": 1},
             },
         )
@@ -123,9 +139,67 @@ class SummaryTests(unittest.TestCase):
         self.assertIsNone(summarize([])["alignment_pct"])
 
     def test_hash_ignores_order_and_tracks_content(self):
-        a, b = _alignment(1), _alignment(-1, bill="B2")
+        a, b = _alignment(1), _alignment(-1, bill="119-hr-2")
         self.assertEqual(inputs_hash([a, b]), inputs_hash([b, a]))
         self.assertNotEqual(inputs_hash([a]), inputs_hash([a, b]))
+
+
+BROAD = 12
+
+
+class RuleTests(unittest.TestCase):
+    def reasons(self, *alignments):
+        return [a.reason for a in apply_rules(list(alignments))]
+
+    def test_explicit_national_position_on_a_core_provision_counts(self):
+        [a] = apply_rules([_alignment(1)])
+        self.assertTrue(a.counted)
+        self.assertIsNone(a.reason)
+
+    def test_low_emphasis_never_counts(self):
+        self.assertEqual(self.reasons(_alignment(1, stance_emphasis="low")), [REASON_LOW_EMPHASIS])
+
+    def test_local_position_counts_only_on_a_narrow_bill(self):
+        self.assertEqual(self.reasons(_alignment(1, stance_scope="local")), [None])
+        self.assertEqual(
+            self.reasons(_alignment(1, stance_scope="local", bill_effect_count=BROAD)),
+            [REASON_LOCAL_ON_BROAD],
+        )
+
+    def test_unrelated_provision_counts_only_for_explicit_positions(self):
+        self.assertEqual(
+            self.reasons(_alignment(1, effect_relation="secondary", stance_emphasis="medium")),
+            [REASON_UNRELATED_PROVISION],
+        )
+        self.assertEqual(self.reasons(_alignment(1, effect_relation="secondary")), [None])
+
+    def test_broad_bill_minor_provision_counts_only_for_explicit_positions(self):
+        minor = dict(bill_effect_count=BROAD, effect_magnitude="medium")
+        self.assertEqual(
+            self.reasons(_alignment(1, stance_emphasis="medium", **minor)), [REASON_MINOR_PROVISION]
+        )
+        self.assertEqual(self.reasons(_alignment(1, **minor)), [None])
+        self.assertEqual(
+            self.reasons(_alignment(1, stance_emphasis="medium", bill_effect_count=BROAD)), [None]
+        )
+
+    def test_same_policy_counts_once_per_congress_on_the_latest_vote(self):
+        senate_version = _alignment(1, bill="119-s-2296", roll_call=1, vote_date=date(2025, 10, 9))
+        final = _alignment(-1, bill="119-s-1071", roll_call=2, vote_date=date(2025, 12, 17),
+                           vote_position="No")
+        other_congress = _alignment(1, bill="118-hr-2670", roll_call=3, vote_date=date(2023, 7, 14))
+        cut = _alignment(1, bill="119-hr-4", roll_call=4, effect_direction="decrease",
+                         vote_position="No", vote_date=date(2025, 7, 17))
+        self.assertEqual(
+            self.reasons(senate_version, final, other_congress, cut),
+            [REASON_LATER_VOTE, None, None, None],
+        )
+
+    def test_a_match_kept_out_by_a_rule_does_not_supersede_an_earlier_vote(self):
+        earlier = _alignment(1, bill="119-s-2296", roll_call=1, vote_date=date(2025, 10, 9))
+        later_low = _alignment(-1, bill="119-s-1071", roll_call=2, vote_date=date(2025, 12, 17),
+                               stance_emphasis="low")
+        self.assertEqual(self.reasons(earlier, later_low), [None, REASON_LOW_EMPHASIS])
 
 
 def _test_database_available() -> bool:
@@ -312,11 +386,13 @@ class AccountabilityEngineTests(unittest.TestCase):
             },
         )
         score = self._score(self.ALICE)
+        # The mixed bill's +1 and -1 are one vote that nets to 0, so only the
+        # Medicaid cut vote scores.
         self.assertEqual(
             (score.points, score.aligned, score.conflicting, score.bills_scored, score.stances_matched),
-            (1, 2, 1, 2, 2),
+            (1, 1, 0, 1, 2),
         )
-        self.assertEqual(score.alignment_pct, 66.7)
+        self.assertEqual(score.alignment_pct, 100.0)
         self.assertEqual(score.engine_version, ENGINE_VERSION)
 
     def test_official_with_positions_but_no_scored_votes_gets_an_empty_score(self):
@@ -342,7 +418,7 @@ class AccountabilityEngineTests(unittest.TestCase):
         stats = self._rescore()
         self.assertEqual((stats["updated"], stats["unchanged"]), (1, 1))
         score = self._score(self.ALICE)
-        self.assertEqual((score.points, score.alignment_pct), (3, 100.0))
+        self.assertEqual((score.points, score.alignment_pct), (2, 100.0))
 
     def test_force_rewrites_everyone(self):
         self._rescore()
@@ -383,17 +459,18 @@ class AccountabilityEngineTests(unittest.TestCase):
 
         detail = self.client.get(f"/api/officials/{self.ALICE}").json()
         self.assertEqual(detail["score_points"], 1)
-        self.assertEqual(detail["score_pct"], 66.7)
-        self.assertEqual(detail["score_matches"], 3)
-        self.assertEqual(detail["accountability"]["aligned"], 2)
+        self.assertEqual(detail["score_pct"], 100.0)
+        self.assertEqual(detail["score_matches"], 1)
+        self.assertEqual(detail["accountability"]["aligned"], 1)
         self.assertEqual(
-            detail["accountability"]["by_policy_area"]["Immigration"],
-            {"points": -1, "aligned": 0, "conflicting": 1},
+            detail["accountability"]["by_policy_area"],
+            {"Health": {"points": 1, "aligned": 1, "conflicting": 0}},
         )
         first = detail["alignments"][0]
         self.assertEqual(first["bill_id"], self.BILL_TWICE)  # newest vote first
         self.assertEqual(first["bill_title"], f"Title {self.BILL_TWICE}")
         self.assertEqual((first["vote_position"], first["points"]), ("No", 1))
+        self.assertEqual((first["counted"], first["reason"], first["bill_effect_count"]), (True, None, 1))
         self.assertEqual(first["stance_evidence_quote"], "I will fight for Medicaid.")
 
         unscored = self.client.get(f"/api/officials/{self.CAROL}").json()
@@ -403,7 +480,7 @@ class AccountabilityEngineTests(unittest.TestCase):
         listing = {o["id"]: o for o in self.client.get("/api/officials", params={"q": "Zzacc"}).json()}
         self.assertEqual(
             (listing[self.ALICE]["score_points"], listing[self.ALICE]["score_pct"], listing[self.ALICE]["score_matches"]),
-            (1, 66.7, 3),
+            (1, 100.0, 1),
         )
         self.assertEqual(listing[self.BOB]["score_matches"], 0)
         self.assertIsNone(listing[self.CAROL]["score_points"])

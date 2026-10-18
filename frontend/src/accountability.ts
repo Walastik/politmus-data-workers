@@ -1,4 +1,4 @@
-import type { Official } from './types'
+import type { Official, VoteAlignment } from './types'
 
 // Below this many scored matches the percentage is too noisy to headline.
 export const MIN_MATCHES_FOR_PCT = 5
@@ -33,9 +33,48 @@ export function pointsToneClass(points: number) {
 }
 
 export function pointsBadgeClass(points: number) {
-  return points > 0
-    ? 'border-emerald-700/70 bg-emerald-950/80 text-emerald-300'
-    : 'border-rose-700/70 bg-rose-950/80 text-rose-300'
+  if (points > 0) return 'border-emerald-700/70 bg-emerald-950/80 text-emerald-300'
+  if (points < 0) return 'border-rose-700/70 bg-rose-950/80 text-rose-300'
+  return 'border-slate-700 bg-slate-800 text-slate-300'
+}
+
+// Same threshold as BROAD_BILL_MIN_EFFECTS in backend services/accountability.py.
+export const BROAD_BILL_MIN_EFFECTS = 10
+
+// Why a match is kept out of the score (VoteAlignment.reason).
+export const NOT_COUNTED_REASONS: Record<string, string> = {
+  low_emphasis: 'the position is only implied by a general statement',
+  local_on_broad_bill: 'a local position does not say much about a vote on a broad bill',
+  unrelated_provision:
+    'this is an unrelated add-on to the bill; only positions they state directly count here',
+  minor_provision: 'a minor part of a broad bill; only positions they state directly count here',
+  later_vote: 'a later vote on the same policy counts instead',
+}
+
+export function notCountedReason(reason: string | null | undefined) {
+  return NOT_COUNTED_REASONS[reason ?? ''] ?? 'kept out of the score'
+}
+
+export interface VoteGroup {
+  key: string
+  matches: VoteAlignment[]
+  // Net of the counted matches (+1, -1, 0), or null when none count.
+  result: number | null
+}
+
+// One entry per vote, in the order the API returns them (newest first). The
+// vote scores once: its counted matches net to +1, -1, or 0.
+export function groupByVote(alignments: VoteAlignment[]): VoteGroup[] {
+  const groups = new Map<string, VoteAlignment[]>()
+  for (const alignment of alignments) {
+    const key = `${alignment.bill_id}-${alignment.roll_call_id}`
+    groups.set(key, [...(groups.get(key) ?? []), alignment])
+  }
+  return [...groups].map(([key, matches]) => {
+    const counted = matches.filter((m) => m.counted !== false)
+    const net = counted.reduce((sum, m) => sum + m.points, 0)
+    return { key, matches, result: counted.length ? Math.sign(net) : null }
+  })
 }
 
 export function isScored(official: Pick<Official, 'score_matches'>) {

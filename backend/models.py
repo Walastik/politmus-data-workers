@@ -129,6 +129,9 @@ class BillEffect(Base):
     # low | medium | high
     magnitude = Column(String, nullable=False)
     rationale = Column(Text, nullable=True)
+    # core (the bill's stated purpose) | secondary (an unrelated add-on);
+    # NULL for effects classified before the field existed.
+    relation = Column(String, nullable=True)
 
     bill = relationship("Bill", back_populates="effects")
     target = relationship("PolicyTarget", back_populates="effects")
@@ -261,8 +264,12 @@ class OfficialStance(Base):
     # Noun as the model wrote it, plus its slug for classification_metadata joins.
     target_name = Column(String, nullable=True)
     target_slug = Column(String, nullable=True, index=True)
-    # low | medium | high: how prominently the official features it.
+    # low | medium | high: how directly the quote states the change
+    # (high: names the change; medium: clearly implies it; low: inferred
+    # from a slogan or value statement).
     emphasis = Column(String, nullable=True)
+    # national | local (one district, state, facility, or project).
+    scope = Column(String, nullable=True)
     # One of the CRS policy areas (same list as bills.policy_area).
     policy_area = Column(String, nullable=True)
     # The site's own heading for the issue, e.g. "Climate".
@@ -372,8 +379,15 @@ class VoteAlignment(Base):
     stance_evidence_quote = Column(Text, nullable=True)
     stance_source_url = Column(String, nullable=True)
     policy_area = Column(String, nullable=True)
+    effect_relation = Column(String, nullable=True)
+    stance_scope = Column(String, nullable=True)
+    # bill_effects rows on the bill; BROAD_BILL_MIN_EFFECTS or more is broad.
+    bill_effect_count = Column(Integer, nullable=True)
     # +1 voted for what they say they want, -1 against it.
     points = Column(Integer, nullable=False)
+    # False when a rule keeps the match out of the score; reason says which.
+    counted = Column(Boolean, nullable=False, default=True, server_default="true")
+    reason = Column(String, nullable=True)
     computed_at = Column(DateTime, nullable=False)
 
 

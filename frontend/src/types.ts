@@ -46,6 +46,7 @@ export interface OfficialStance {
   stance: 'supports' | 'opposes' | string | null
   policy_direction: string | null
   emphasis: 'low' | 'medium' | 'high' | string | null
+  scope?: 'national' | 'local' | string | null
   summary: string | null
   evidence_quote: string | null
   source_url: string | null
@@ -142,7 +143,12 @@ export interface VoteAlignment {
   stance_evidence_quote: string | null
   stance_source_url: string | null
   policy_area: string | null
+  effect_relation?: 'core' | 'secondary' | string | null
+  stance_scope?: 'national' | 'local' | string | null
+  bill_effect_count?: number | null
   points: number
+  counted?: boolean
+  reason?: string | null
 }
 
 export interface OfficialDetail extends Official {
@@ -211,6 +217,7 @@ export interface ClassificationIntent {
   mechanism: 'funding' | 'regulation' | 'oversight' | 'taxation' | string
   direction: 'increase' | 'decrease' | 'maintain' | 'mixed' | string
   magnitude: 'low' | 'medium' | 'high' | string
+  relation?: 'core' | 'secondary' | string | null
   rationale?: string
   citation?: string
 }

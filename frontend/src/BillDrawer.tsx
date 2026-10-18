@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Sparkles, X } from 'lucide-react'
 import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
+import { BROAD_BILL_MIN_EFFECTS } from './accountability'
 import { apiUrl } from './api'
 import CopyLinkButton from './components/CopyLinkButton'
 import VotePartyList from './VotePartyList'
@@ -20,6 +21,7 @@ import {
   mechanismBadgeClass,
   type Bill,
   type BillRollCall,
+  type ClassificationIntent,
   type ClassificationMetadata,
   type VoteChamber,
 } from './types'
@@ -409,6 +411,33 @@ function CrsSummary({ text }: { text: string }) {
   )
 }
 
+// Flags omnibus-style bills: many effects, or add-ons unrelated to the
+// bill's stated purpose (intent relation "secondary").
+function BreadthNote({ intents }: { intents: ClassificationIntent[] }) {
+  const unrelated = intents.filter((intent) => intent.relation === 'secondary')
+  const broad = intents.length >= BROAD_BILL_MIN_EFFECTS
+  if (!broad && unrelated.length === 0) return null
+  return (
+    <div className="mt-3 rounded-lg border border-amber-600/40 bg-amber-950/20 p-3 text-xs text-amber-100">
+      {broad ? (
+        <p>
+          <strong>Broad bill:</strong> {intents.length} separate policy effects. A single yes or
+          no vote on it says little about any one of them.
+        </p>
+      ) : null}
+      {unrelated.length > 0 ? (
+        <p className={broad ? 'mt-1.5' : ''}>
+          <strong>
+            Includes {unrelated.length} provision{unrelated.length === 1 ? '' : 's'} unrelated to
+            its main purpose:
+          </strong>{' '}
+          {unrelated.map((intent) => `${intent.target} (${intent.mechanism})`).join(', ')}.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function AiClassificationSection({
   metadata,
   model,
@@ -463,6 +492,8 @@ function AiClassificationSection({
         </div>
       ) : null}
 
+      <BreadthNote intents={intents} />
+
       {intents.length > 0 ? (
         <div className="mt-3 space-y-3">
           <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -495,6 +526,11 @@ function AiClassificationSection({
                   {intent.magnitude ? (
                     <span className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono uppercase text-slate-400">
                       {intent.magnitude}
+                    </span>
+                  ) : null}
+                  {intent.relation === 'secondary' ? (
+                    <span className="rounded border border-amber-600/50 bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                      Unrelated
                     </span>
                   ) : null}
                 </div>

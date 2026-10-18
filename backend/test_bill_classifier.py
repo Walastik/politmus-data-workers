@@ -74,6 +74,7 @@ def intent(**overrides) -> dict:
         "mechanism": "funding",
         "direction": "increase",
         "magnitude": "high",
+        "relation": "core",
         "rationale": "Adds $2 billion to the fund.",
     }
     data.update(overrides)
@@ -153,7 +154,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(data["eli5"], ELI5)
         self.assertEqual(
             set(data["intents"][0]),
-            {"target", "mechanism", "direction", "magnitude", "rationale", "citation"},
+            {"target", "mechanism", "direction", "magnitude", "relation", "rationale", "citation"},
         )
         self.assertEqual((data["model"], data["version"], data["chunks"]), ("m", "v", 3))
         self.assertEqual(data["rejected"], {REJECT_CITATION: 2})
@@ -382,6 +383,10 @@ class ClassifyLongBillTests(unittest.TestCase):
         self.assertTrue(any("chunk 1/" in line for line in logs))
         for _, user in model.calls[:-1]:
             self.assertIn("Part ", user)
+        # Later chunks see the summary's opening so they can tell core from add-on effects.
+        chunk_users = [user for _, user in model.calls[:-1]]
+        self.assertNotIn("<overview>", next(u for u in chunk_users if f"Part 1 of {result.chunks}" in u))
+        self.assertIn("<overview>", next(u for u in chunk_users if f"Part 2 of {result.chunks}" in u))
 
     def test_chunk_failure_names_the_chunk(self):
         def chunk(user):
@@ -414,7 +419,7 @@ class ClassifyLongBillTests(unittest.TestCase):
 class VersionTests(unittest.TestCase):
     def test_version_changes_with_prompts_and_model(self):
         base = classifier_version(("system",), "qwen3.6:27b")
-        self.assertTrue(base.startswith("bills-v1|p"))
+        self.assertTrue(base.startswith("bills-v2|p"))
         self.assertTrue(base.endswith("|qwen3.6:27b"))
         self.assertNotEqual(base, classifier_version(("system2",), "qwen3.6:27b"))
         self.assertNotEqual(base, classifier_version(("system", "summary"), "qwen3.6:27b"))

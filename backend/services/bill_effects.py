@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func
@@ -19,6 +19,7 @@ MAGNITUDES = ("low", "medium", "high")
 Mechanism = Literal["funding", "regulation", "oversight", "taxation"]
 Direction = Literal["increase", "decrease", "maintain", "mixed"]
 Magnitude = Literal["low", "medium", "high"]
+Relation = Literal["core", "secondary"]
 
 DEFAULT_GUIDELINES_NAME = "default"
 
@@ -85,6 +86,10 @@ class ExtractedEffect(BaseModel):
     magnitude: Magnitude = Field(description="low, medium, or high.")
     rationale: str = Field(
         description="1 to 2 sentences citing the summary."
+    )
+    relation: Optional[Relation] = Field(
+        default=None,
+        description="core if part of the bill's stated purpose, secondary if an unrelated add-on.",
     )
 
 
@@ -276,6 +281,7 @@ def persist_bill_effects(
             existing.direction = effect.direction
             existing.magnitude = effect.magnitude
             existing.rationale = effect.rationale
+            existing.relation = effect.relation
             stored.append(existing)
             continue
         row = BillEffect(
@@ -285,6 +291,7 @@ def persist_bill_effects(
             direction=effect.direction,
             magnitude=effect.magnitude,
             rationale=effect.rationale,
+            relation=effect.relation,
         )
         session.add(row)
         stored.append(row)

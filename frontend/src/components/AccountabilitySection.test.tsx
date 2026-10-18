@@ -90,6 +90,43 @@ describe('ScoreHeadline', () => {
 })
 
 describe('AccountabilitySection', () => {
+  it('scores a vote once and explains matches that do not count', () => {
+    render(
+      <AccountabilitySection
+        score={score}
+        alignments={[
+          alignment({ bill_id: '119-s-1071', bill_title: 'NDAA', roll_call_id: 7 }),
+          alignment({
+            bill_id: '119-s-1071',
+            bill_title: 'NDAA',
+            roll_call_id: 7,
+            target_name: 'ICE',
+            effect_relation: 'secondary',
+            stance_direction: 'decrease',
+            points: -1,
+          }),
+          alignment({
+            bill_id: '119-s-1071',
+            bill_title: 'NDAA',
+            roll_call_id: 7,
+            target_name: 'Military Bases',
+            stance_emphasis: 'low',
+            points: 1,
+            counted: false,
+            reason: 'low_emphasis',
+          }),
+        ]}
+      />,
+    )
+    // +1 and -1 counted on one vote: one card, mixed.
+    expect(screen.getAllByRole('button', { name: 'Open details for NDAA' })).toHaveLength(1)
+    expect(screen.getByLabelText('Mixed, no points')).toHaveTextContent('0')
+    expect(screen.getByText(/increases ICE funding/)).toHaveTextContent('(via an unrelated provision)')
+    expect(
+      screen.getByText(/Not counted: the position is only implied by a general statement/),
+    ).toBeInTheDocument()
+  })
+
   it('lists each scored vote with its verdict and evidence', () => {
     const onSelectBill = vi.fn()
     render(
@@ -112,6 +149,7 @@ describe('AccountabilitySection', () => {
     expect(screen.getByText(/6 votes matched and 2 contradicted/)).toBeInTheDocument()
     expect(screen.getByText(/increases Medicaid funding/)).toHaveTextContent('consistent: wants it increased')
     expect(screen.getByText(/increases Border Patrol funding/)).toHaveTextContent('contradicts: wants it cut')
+    expect(screen.getByLabelText('Contradicts, minus one')).toHaveTextContent('−1')
     expect(screen.getByLabelText('Score by policy area')).toHaveTextContent('Immigration −1')
     expect(screen.getAllByText(/I will fight every cut to Medicaid/)).toHaveLength(2)
 

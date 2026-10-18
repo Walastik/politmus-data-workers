@@ -30,6 +30,7 @@ from services.bill_effects import (
     ExtractedEffect,
     Magnitude,
     Mechanism,
+    Relation,
     clean_target_name,
     slugify_target,
 )
@@ -43,11 +44,14 @@ from services.official_positions import (
 
 # Bump when the output schema, input text, or validation rules change so
 # every bill is re-classified on the next run.
-SCHEMA_VERSION = "bills-v1"
+SCHEMA_VERSION = "bills-v2"
 
 DEFAULT_CHUNK_CHARS = 10_000
 MIN_SUMMARY_CHARS = 20
 MAX_INTENTS = 60
+# Start of the summary shown with later chunks, so the model can tell a
+# provision that serves the bill's purpose (core) from an add-on (secondary).
+OVERVIEW_CONTEXT_CHARS = 1500
 SOURCE_CRS_SUMMARY = "crs_summary"
 
 REJECT_CITATION = "citation not in summary"
@@ -73,6 +77,12 @@ class BillIntent(BaseModel):
     mechanism: Mechanism = Field(description="funding, regulation, oversight, or taxation.")
     direction: Direction = Field(description="increase, decrease, maintain, or mixed.")
     magnitude: Magnitude = Field(description="low, medium, or high.")
+    relation: Relation = Field(
+        description=(
+            "core if the effect is part of the bill's stated purpose (its title and overview); "
+            "secondary if it is an add-on unrelated to that purpose."
+        )
+    )
     rationale: str = Field(description="One sentence on why this label fits the citation.")
 
 
@@ -181,6 +191,7 @@ class ClassificationResult:
                     "mechanism": i.mechanism,
                     "direction": i.direction,
                     "magnitude": i.magnitude,
+                    "relation": i.relation,
                     "rationale": i.rationale,
                     "citation": i.citation,
                 }
@@ -203,6 +214,7 @@ class ClassificationResult:
                 direction=i.direction,
                 magnitude=i.magnitude,
                 rationale=f'{i.rationale.strip()} "{i.citation}"'.strip(),
+                relation=i.relation,
             )
             for i in self.intents
         ])
@@ -363,10 +375,18 @@ def build_full_messages(prompt: str, bill: BillSnapshot, text: str) -> list[dict
     return _messages(prompt, user)
 
 
-def build_chunk_messages(prompt: str, bill: BillSnapshot, chunk, number: int, total: int) -> list[dict[str, str]]:
+def build_chunk_messages(
+    prompt: str, bill: BillSnapshot, chunk, number: int, total: int, overview: str = ""
+) -> list[dict[str, str]]:
     where = f"Part {number} of {total} of the CRS summary" + (f", section: {chunk.heading}" if chunk.heading else "")
+    context = (
+        "Opening of the CRS summary, for judging the bill's purpose only (do not cite it):\n"
+        f"<overview>\n{overview[:OVERVIEW_CONTEXT_CHARS]}\n</overview>\n\n"
+        if overview and number > 1
+        else ""
+    )
     user = (
-        f"Analyze this bill:\n{describe_bill(bill)}\n\n{where}.\n<summary>\n{chunk.text}\n</summary>\n\n"
+        f"Analyze this bill:\n{describe_bill(bill)}\n\n{context}{where}.\n<summary>\n{chunk.text}\n</summary>\n\n"
         "Return only the policy intents found in this part; the TLDR and ELI5 are written "
         f"separately. {_CITATION_RULE} Return JSON matching the schema."
     )
@@ -551,7 +571,7 @@ def classify_bill(
         number, chunk = numbered
         try:
             data = load_json(chat_fn(
-                build_chunk_messages(prompt, bill, chunk, number, total),
+                build_chunk_messages(prompt, bill, chunk, number, total, chunks[0].text),
                 BillIntentsOnly.model_json_schema(),
             ))
             result = verify_intents(parse_intents(data), chunk.text)
