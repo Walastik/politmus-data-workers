@@ -172,17 +172,19 @@ def select_officials(
     version: str,
     now: datetime,
     limit: int | None,
-    official_id: str | None = None,
+    official_id: str | list[str] | None = None,
     level: str = "federal",
     force: bool = False,
     max_age_days: float = DEFAULT_MAX_AGE_DAYS,
     require_pages: bool = False,
 ) -> list[tuple[Official, OfficialPositionSync | None]]:
+    """official_id (one id or a list) selects those officials, due or not."""
     query = session.query(Official, OfficialPositionSync).outerjoin(
         OfficialPositionSync, OfficialPositionSync.official_id == Official.id
     )
     if official_id:
-        return query.filter(Official.id == official_id).all()
+        ids = [official_id] if isinstance(official_id, str) else list(official_id)
+        return query.filter(Official.id.in_(ids)).order_by(Official.id).all()
     query = query.filter(
         Official.level == level,
         Official.current_member.is_(True),
@@ -334,7 +336,7 @@ def _empty_stats(model, dry_run):
 def run_positions(
     *,
     limit: int | None = 5,
-    official_id: str | None = None,
+    official_id: str | list[str] | None = None,
     level: str = "federal",
     force: bool = False,
     dry_run: bool = False,
@@ -713,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     parser.add_argument("--limit", type=int, default=5, help="Maximum officials this run (default 5). 0 for all due.")
-    parser.add_argument("--official-id", help="Process one official by id (e.g. O000172). Ignores due checks.")
+    parser.add_argument("--official-id", action="append", help="Process this official by id (e.g. O000172), repeatable. Ignores due checks.")
     parser.add_argument("--level", default="federal", help="Official level to select (default federal).")
     parser.add_argument("--force", action="store_true", help="Re-extract even when pages and version are unchanged.")
     parser.add_argument("--dry-run", action="store_true", help="Crawl and call the model but write nothing; print positions.")

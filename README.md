@@ -210,7 +210,7 @@ Re-running is idempotent. `official_position_sync` records each official's statu
 
 ```bash
 python official_positions.py --limit 20 --crawl-only        # see which pages are found; no model calls
-python official_positions.py --official-id O000172 --dry-run # crawl + model, print JSON, write nothing
+python official_positions.py --official-id O000172 --dry-run # crawl + model, print JSON, write nothing (--official-id is repeatable)
 python official_positions.py --limit 3                      # test on a few
 python official_positions.py --show O000172                 # print stored positions
 python official_positions.py --extract-only --force         # re-run the model on stored pages
@@ -267,6 +267,22 @@ No model calls, so a full run takes seconds. It is idempotent: each official's c
 ./scripts/run_scoring.sh --dry-run             # compute and report, write nothing
 ./scripts/run_scoring.sh --show O000172        # print one official's score and matches
 ```
+
+### `lab.py` (scoring lab)
+
+A fast loop for tuning the bill prompt, the positions prompt, and scoring on a small fixed set: one broad and one narrow bill (plus a bill for any chamber those two miss) and three officials per party, each party with at least one senator and one representative who voted on them. It runs the real workers against the `DATABASE_URL` database, so the fixture rows are updated in place.
+
+```bash
+./scripts/lab.sh pick             # choose the fixture (edit ~/politmus-lab/fixture.json to swap anything)
+./scripts/lab.sh report           # snapshot what is stored now (use first, as the baseline)
+./scripts/lab.sh bills            # re-classify the fixture bills, regrade, report
+./scripts/lab.sh positions        # re-extract the fixture officials from stored pages (no crawl), regrade, report
+./scripts/lab.sh grade            # regrade only, report
+./scripts/lab.sh all              # bills, positions, grade, report
+./scripts/lab.sh positions -- --model gemma3:27b   # arguments after -- go to the worker
+```
+
+Each report is saved under `~/politmus-lab/runs/<time>/` (`report.md`, `snapshot.json`, `diff.txt`, set `LAB_DIR` to move it) with the git commit and a hash of each local prompt file, and prints what changed since the previous run: effects and positions added, removed, or relabelled, and score and match changes. `positions` takes the same lock as a full positions run, so stop a full run first.
 
 ### `openstates_client.py`
 

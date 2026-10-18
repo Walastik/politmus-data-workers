@@ -906,6 +906,23 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         self.assertEqual(sync.status, "failed")
         self.assertIn("socket exploded", sync.last_error)
 
+    def test_official_id_list_selects_each_official_even_when_not_due(self):
+        from models import Official
+        from official_positions import select_officials
+
+        session = self.SessionLocal()
+        session.add(Official(
+            id="ZZTEST0002", name="Rep 2", state="Ohio", party="Independent",
+            office="Representative", district=2, current_member=False, level="zztest",
+        ))
+        session.commit()
+        rows = select_officials(
+            session, version="v1", now=self.clock[0], limit=1,
+            official_id=["ZZTEST0002", self.OFFICIAL_ID],
+        )
+        session.close()
+        self.assertEqual([official.id for official, _sync in rows], [self.OFFICIAL_ID, "ZZTEST0002"])
+
     def _cleanup_extra(self):
         from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 
