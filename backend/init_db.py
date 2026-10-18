@@ -218,6 +218,9 @@ def ensure_schema():
             "bill_effect_count INTEGER",
             "counted BOOLEAN NOT NULL DEFAULT true",
             "reason VARCHAR",
+            "stance_target_id INTEGER",
+            "stance_target_name VARCHAR",
+            "match_similarity DOUBLE PRECISION",
         ):
             conn.execute(text(
                 f"ALTER TABLE vote_alignments ADD COLUMN IF NOT EXISTS {column_sql}"

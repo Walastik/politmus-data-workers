@@ -52,6 +52,8 @@ def show_official(official_id: str, session_factory=None) -> int:
         for a, title in rows:
             mark = f"{a.points:+d}" if a.counted else " 0"
             why = "" if a.counted else f"  [not counted: {a.reason}]"
+            if a.match_similarity is not None:
+                why += f"  [position: {a.stance_target_name}, similarity {a.match_similarity:.2f}]"
             print(
                 f"  {mark}  {a.vote_position:<3} {a.bill_id} ({a.chamber}, {a.vote_date}) "
                 f"{a.target_name} / {a.mechanism}: bill {a.effect_direction}, "

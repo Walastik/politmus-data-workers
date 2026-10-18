@@ -4,7 +4,7 @@ classifier, the stated-positions extractor, and accountability scoring.
     lab.py pick      choose the fixture (1 broad + 1 narrow bill, 3 officials per party)
     lab.py bills     re-classify the fixture bills
     lab.py positions re-extract the fixture officials from stored pages (no crawl)
-    lab.py grade     rescore the fixture officials
+    lab.py grade     embed new target names, then rescore the fixture officials
     lab.py all       bills, positions, grade, then report
     lab.py report    snapshot what is in the database now and diff it with the last run
 
@@ -28,7 +28,13 @@ from pathlib import Path
 from sqlalchemy import text
 
 from database import SessionLocal
-from services.accountability import compute_alignments, passage_roll_call_ids, summarize, vote_results
+from services.accountability import (
+    TARGET_MATCH_THRESHOLD,
+    compute_alignments,
+    passage_roll_call_ids,
+    summarize,
+    vote_results,
+)
 
 BACKEND_DIR = Path(__file__).resolve().parent
 LAB_DIR = Path(os.getenv("LAB_DIR", Path.home() / "politmus-lab"))
@@ -201,6 +207,7 @@ def run_positions(fixture, extra) -> None:
 
 
 def run_grade(fixture, extra) -> None:
+    run([sys.executable, "match_targets.py"])
     ids = [arg for o in fixture["officials"] for arg in ("--official-id", o["id"])]
     run([sys.executable, "score_officials.py", *ids, *extra])
 
@@ -289,6 +296,8 @@ def snapshot(fixture: dict) -> dict:
                         "magnitude": a.effect_magnitude,
                         "counted": a.counted,
                         "reason": a.reason,
+                        "position_target": a.stance_target_name,
+                        "similarity": a.match_similarity,
                     }
                     for a in rows
                     if a.bill_id in bill_ids
@@ -298,6 +307,7 @@ def snapshot(fixture: dict) -> dict:
                     for vote_rows, result in vote_results(rows)
                     if vote_rows[0].bill_id in bill_ids
                 },
+                "near_misses": near_misses(session, official_id, bill_ids),
             }
     finally:
         session.close()
@@ -306,11 +316,30 @@ def snapshot(fixture: dict) -> dict:
         "taken_at": datetime.now().isoformat(timespec="seconds"),
         "git": _git_rev(),
         "prompts": {name: _file_hash(path) for name, path in PROMPT_FILES.items()},
+        "threshold": TARGET_MATCH_THRESHOLD,
         "fixture": fixture,
         "bills": bills,
         "officials": officials,
         "grading": grading,
     }
+
+
+def near_misses(session, official_id: str, bill_ids: list[str]) -> list[dict]:
+    """Stored name pairs below the scoring threshold between this official's
+    positions and the fixture bills' intents (same mechanism): candidates
+    for lowering TARGET_MATCH_THRESHOLD, or proof it should stay."""
+    rows = session.execute(text(
+        "SELECT DISTINCT e.bill_id, te.name AS bill_target, ts.name AS position_target, "
+        "e.mechanism, m.similarity "
+        "FROM bill_effects e "
+        "JOIN official_stances s ON s.official_id = :official AND s.mechanism = e.mechanism "
+        "JOIN target_matches m ON (m.target_a, m.target_b) IN ((e.target_id, s.target_id), (s.target_id, e.target_id)) "
+        "JOIN policy_targets te ON te.id = e.target_id "
+        "JOIN policy_targets ts ON ts.id = s.target_id "
+        "WHERE e.bill_id = ANY(:bills) AND m.similarity < :threshold "
+        "ORDER BY m.similarity DESC"
+    ), {"official": official_id, "bills": bill_ids, "threshold": TARGET_MATCH_THRESHOLD}).mappings()
+    return [dict(r) for r in rows]
 
 
 def _git_rev() -> str | None:
@@ -336,6 +365,8 @@ def render(snap: dict) -> str:
         "",
         f"git `{snap['git']}` · llm_config.py `{snap['prompts']['bills']}` · "
         f"positions_llm_config.py `{snap['prompts']['positions']}`",
+        "",
+        f"Target match threshold `{TARGET_MATCH_THRESHOLD}`",
         "",
         "## Bills",
     ]
@@ -386,18 +417,31 @@ def render(snap: dict) -> str:
         ]
         matches = g.get("matches", {})
         if matches:
-            out += ["| Pts | Counted | Vote | Bill / target / mechanism | Bill does | Magnitude | Relation "
-                    "| Wants | Emphasis | Scope | Reason |",
-                    "|---|---|---|---|---|---|---|---|---|---|---|"]
+            out += ["| Pts | Counted | Vote | Bill / target / mechanism | Position target (similarity) "
+                    "| Bill does | Magnitude | Relation | Wants | Emphasis | Scope | Reason |",
+                    "|---|---|---|---|---|---|---|---|---|---|---|---|"]
             for key, m in sorted(matches.items()):
+                position = (
+                    f"{m.get('position_target')} ({m['similarity']:.2f})"
+                    if m.get("similarity") is not None else "same"
+                )
                 out.append(
                     f"| {m['points']:+d} | {'yes' if m.get('counted', True) else 'no'} | {m['vote']} | "
-                    f"{_cell(key)} | {m['bill_direction']} | {_cell(m.get('magnitude'))} | "
+                    f"{_cell(key)} | {_cell(position)} | {m['bill_direction']} | {_cell(m.get('magnitude'))} | "
                     f"{_cell(m.get('relation'))} | {m['wants']} | {_cell(m['emphasis'])} | "
                     f"{_cell(m.get('scope'))} | {_cell(m.get('reason') or '')} |"
                 )
         else:
             out.append("None.")
+        misses = g.get("near_misses", [])
+        if misses:
+            out += ["", f"**Near misses (similar names below {snap.get('threshold', TARGET_MATCH_THRESHOLD)}):**", "",
+                    "| Similarity | Bill | Bill target | Position target | Mechanism |", "|---|---|---|---|---|"]
+            for n in misses:
+                out.append(
+                    f"| {n['similarity']:.3f} | {n['bill_id']} | {_cell(n['bill_target'])} | "
+                    f"{_cell(n['position_target'])} | {n['mechanism']} |"
+                )
         overlapping = {k: s for k, s in o["stances"].items() if k in all_effect_keys}
         out += ["", "**Positions on targets the fixture bills touch:**", ""]
         out += _stance_table(overlapping) if overlapping else ["None."]
@@ -453,7 +497,8 @@ def diff(old: dict, new: dict) -> list[str]:
                 f"  ~ {name} score: {g0.get('points')} ({g0.get('alignment_pct')}%) -> "
                 f"{g1.get('points')} ({g1.get('alignment_pct')}%)"
             )
-        compare(f"{name} match", g0.get("matches", {}), g1.get("matches", {}), ("points", "counted", "reason"))
+        compare(f"{name} match", g0.get("matches", {}), g1.get("matches", {}),
+                ("points", "counted", "reason", "position_target"))
         compare(f"{name} vote", {k: {"net": v} for k, v in g0.get("votes", {}).items()},
                 {k: {"net": v} for k, v in g1.get("votes", {}).items()}, ("net",))
     return lines

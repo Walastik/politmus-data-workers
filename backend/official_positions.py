@@ -30,6 +30,7 @@ from init_db import ensure_schema
 from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 from services import llm_runtime
 from services.accountability import try_rescore
+from services.target_matching import make_matcher, try_refresh
 from services.llm_runtime import TruncatedOutputError, load_local_module, required_strings
 from services.official_positions import (
     DEFAULT_CHUNK_CHARS,
@@ -354,6 +355,7 @@ def run_positions(
     crawl_config=None,
     prompts: Prompts | None = None,
     chat_fn=None,
+    matcher=None,
     crawler=None,
     session_factory=None,
     now_fn=utcnow,
@@ -393,6 +395,8 @@ def run_positions(
             return stats
 
         if chat_fn is None and not crawl_only:
+            if matcher is None and not dry_run:
+                matcher = make_matcher(host or DEFAULT_HOST)
             chat_fn = make_chat_fn(
                 model_name,
                 host or DEFAULT_HOST,
@@ -456,6 +460,7 @@ def run_positions(
                     stats=stats,
                     prompt=prompts.positions if prompts else "",
                     chat_fn=chat_fn,
+                    matcher=matcher,
                     vocabulary=vocabulary,
                     version=version,
                     model_name=model_name,
@@ -493,6 +498,7 @@ def _process_official(
     prompt,
     chat_fn,
     vocabulary,
+    matcher=None,
     version,
     model_name,
     force,
@@ -626,6 +632,7 @@ def _process_official(
         session.commit()
         stats["extracted"] += 1
         stats["stances_saved"] += len(saved)
+        try_refresh(matcher, session, log=log)
         try_rescore(session, official_ids=[official.id], log=log)
     except Exception as exc:
         session.rollback()

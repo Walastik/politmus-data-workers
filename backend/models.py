@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, String, Integer, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, Index, LargeBinary, String, Integer, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -105,6 +105,28 @@ class PolicyTarget(Base):
     )
     children = relationship("PolicyTarget", back_populates="parent")
     effects = relationship("BillEffect", back_populates="target")
+
+
+class TargetEmbedding(Base):
+    """One policy target's name embedding (services/target_matching.py)."""
+    __tablename__ = "target_embeddings"
+
+    target_id = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), primary_key=True)
+    model = Column(String, nullable=False)
+    # float32 vector, L2-normalized.
+    vector = Column(LargeBinary, nullable=False)
+
+
+class TargetMatch(Base):
+    """Two targets whose names mean nearly the same thing, stored once with
+    target_a < target_b. Scoring treats pairs at or above
+    TARGET_MATCH_THRESHOLD as one target."""
+    __tablename__ = "target_matches"
+    __table_args__ = (Index("ix_target_matches_target_b", "target_b"),)
+
+    target_a = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), primary_key=True)
+    target_b = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), primary_key=True)
+    similarity = Column(Float, nullable=False)
 
 
 class BillEffect(Base):
@@ -368,6 +390,11 @@ class VoteAlignment(Base):
     vote_position = Column(String, nullable=False)
     target_id = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), nullable=False)
     target_name = Column(String, nullable=True)
+    # The position's own target: the same as target_id, or a near match.
+    stance_target_id = Column(Integer, nullable=True)
+    stance_target_name = Column(String, nullable=True)
+    # Name similarity for a near match; NULL when the targets are the same.
+    match_similarity = Column(Float, nullable=True)
     mechanism = Column(String, nullable=False)
     # What the bill does to the target, and what the official says they want.
     effect_direction = Column(String, nullable=False)

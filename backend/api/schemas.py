@@ -130,6 +130,8 @@ class VoteAlignmentOut(BaseModel):
     effect_relation: Optional[str] = None
     stance_scope: Optional[str] = None
     bill_effect_count: Optional[int] = None
+    stance_target_name: Optional[str] = None
+    match_similarity: Optional[float] = None
     points: int
     counted: bool = True
     reason: Optional[str] = None

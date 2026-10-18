@@ -395,6 +395,46 @@ class AccountabilityEngineTests(unittest.TestCase):
         self.assertEqual(score.alignment_pct, 100.0)
         self.assertEqual(score.engine_version, ENGINE_VERSION)
 
+    def _near_match(self, similarity):
+        """Carol (and Alice, opposite) state positions on "Zzacc Medicaid
+        Program", a near match for the bills' "Zzacc Medicaid"."""
+        from models import OfficialStance, PolicyTarget, TargetMatch
+
+        program = PolicyTarget(name="Zzacc Medicaid Program", slug="zzacc-medicaid-program")
+        self.session.add(program)
+        self.session.flush()
+        for official_id, direction in ((self.CAROL, "increase"), (self.ALICE, "decrease")):
+            self.session.add(OfficialStance(
+                official_id=official_id, target_id=program.id, mechanism="funding",
+                direction=direction, stance="supports", policy_direction=direction,
+                target_name=program.name, emphasis="high", policy_area="Health",
+                source_type="official_site",
+            ))
+        a, b = sorted((self.targets["Medicaid"], program.id))
+        self.session.add(TargetMatch(target_a=a, target_b=b, similarity=similarity))
+        self.session.commit()
+
+    def test_near_target_names_match_above_the_threshold(self):
+        from services.accountability import compute_alignments
+
+        self._near_match(0.9)
+        rows = compute_alignments(self.session, [self.CAROL], threshold=0.85)[self.CAROL]
+        self.assertEqual(
+            [(a.bill_id, a.target_name, a.stance_target_name, a.match_similarity, a.points) for a in rows],
+            [(self.BILL_MIXED, "Zzacc Medicaid", "Zzacc Medicaid Program", 0.9, 1)],
+        )
+        self.assertEqual(compute_alignments(self.session, [self.CAROL], threshold=0.95), {})
+
+    def test_exact_target_wins_over_a_near_match(self):
+        from services.accountability import compute_alignments
+
+        self._near_match(0.9)
+        rows = compute_alignments(self.session, [self.ALICE], threshold=0.85)[self.ALICE]
+        medicaid = [a for a in rows if a.target_name == "Zzacc Medicaid"]
+        self.assertTrue(medicaid)
+        for a in medicaid:
+            self.assertEqual((a.stance_target_name, a.match_similarity), ("Zzacc Medicaid", None))
+
     def test_official_with_positions_but_no_scored_votes_gets_an_empty_score(self):
         self._rescore()
         score = self._score(self.BOB)

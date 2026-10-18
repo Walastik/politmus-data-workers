@@ -49,6 +49,7 @@ from services.bill_classification import (
     summary_text,
 )
 from services.accountability import try_rescore
+from services.target_matching import make_matcher, try_refresh
 from services.bill_effects import persist_bill_effects
 from services.llm_runtime import load_local_module, required_strings
 
@@ -328,6 +329,7 @@ def run_classifier(
     think: bool = False,
     prompts: Prompts | None = None,
     chat_fn=None,
+    matcher=None,
     session_factory=None,
     now_fn=utcnow,
     log=print,
@@ -383,6 +385,8 @@ def run_classifier(
             return stats
 
         if chat_fn is None:
+            if matcher is None and not dry_run:
+                matcher = make_matcher(host or DEFAULT_HOST)
             chat_fn = llm_runtime.make_chat_fn(
                 model_name,
                 host or DEFAULT_HOST,
@@ -405,6 +409,7 @@ def run_classifier(
                 stats=stats,
                 prompts=prompts,
                 chat_fn=chat_fn,
+                matcher=matcher,
                 version=version,
                 model_name=model_name,
                 dry_run=dry_run,
@@ -433,6 +438,7 @@ def _process_bill(
     version,
     model_name,
     dry_run,
+    matcher=None,
     concurrency,
     chunk_chars,
     now_fn,
@@ -511,6 +517,7 @@ def _process_bill(
         return True
     stats["ok"] += 1
     stats["intents_saved"] += len(result.intents)
+    try_refresh(matcher, session, log=log)
     try_rescore(session, bill_ids=[bill_id], log=log)
     return True
 

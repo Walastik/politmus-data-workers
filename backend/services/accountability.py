@@ -1,8 +1,9 @@
 """Accountability engine: do officials vote for what they say they want?
 
 Each bill intent (bill_effects) an official has a stated position on
-(official_stances, same target_id + mechanism) is scored against the
-official's passage vote on that bill:
+(official_stances, same mechanism and the same target, or a target whose
+name means nearly the same thing: see services/target_matching.py) is
+scored against the official's passage vote on that bill:
 
     stance vs intent          Yes   No
     same direction            +1    -1
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
@@ -48,7 +50,11 @@ from models import OfficialScore, OfficialStance, RollCall, Vote, VoteAlignment
 
 # Bump when scoring rules or the stored row shape change; every official is
 # rewritten on the next run.
-ENGINE_VERSION = "accountability-v2"
+ENGINE_VERSION = "accountability-v3"
+
+# Targets whose names are at least this similar (target_matches) count as
+# the same target. An exact target match always wins over a near one.
+TARGET_MATCH_THRESHOLD = float(os.getenv("TARGET_MATCH_THRESHOLD", "0.85"))
 
 # A bill with this many classified effects is broad (omnibus, NDAA,
 # reconciliation): one vote on it says little about any single provision.
@@ -159,6 +165,9 @@ class Alignment:
     bill_effect_count: int | None = None
     counted: bool = True
     reason: str | None = None
+    stance_target_id: int | None = None
+    stance_target_name: str | None = None
+    match_similarity: float | None = None
 
     @property
     def broad_bill(self) -> bool:
@@ -176,7 +185,8 @@ class Alignment:
             self.stance_direction, self.stance_emphasis, self.stance_summary,
             self.stance_evidence_quote, self.stance_source_url, self.policy_area,
             self.points, self.effect_relation, self.stance_scope, self.bill_effect_count,
-            self.counted, self.reason,
+            self.counted, self.reason, self.stance_target_id, self.stance_target_name,
+            self.match_similarity,
         ]
 
 
@@ -211,7 +221,9 @@ def apply_rules(alignments: list[Alignment]) -> list[Alignment]:
     for a in out:
         if not a.counted:
             continue
-        policy = (_congress(a.bill_id), a.target_id, a.mechanism, a.effect_direction)
+        # Keyed by the position's target, so companion bills whose intents
+        # are named differently but match the same position count once.
+        policy = (_congress(a.bill_id), a.stance_target_id or a.target_id, a.mechanism, a.effect_direction)
         current = latest.get(policy)
         if current is None or (a.vote_date or date.min, a.roll_call_id) > (
             current.vote_date or date.min, current.roll_call_id
@@ -258,7 +270,9 @@ def summarize(alignments: list[Alignment]) -> dict:
         "aligned": aligned,
         "conflicting": conflicting,
         "bills_scored": len({rows[0].bill_id for rows, result in results if result}),
-        "stances_matched": len({(a.target_id, a.mechanism) for rows, _r in results for a in rows}),
+        "stances_matched": len({
+            (a.stance_target_id or a.target_id, a.mechanism) for rows, _r in results for a in rows
+        }),
         "alignment_pct": round(100.0 * aligned / matches, 1) if matches else None,
         "by_policy_area": dict(sorted(areas.items())),
     }
@@ -292,40 +306,67 @@ stances AS (
     -- One stance per target + mechanism (several source types may repeat it).
     SELECT DISTINCT ON (s.official_id, s.target_id, s.mechanism)
         s.official_id, s.target_id, s.mechanism, s.direction, s.emphasis,
-        s.summary, s.evidence_quote, s.source_url, s.policy_area, s.scope
+        s.summary, s.evidence_quote, s.source_url, s.policy_area, s.scope,
+        CASE s.emphasis WHEN 'high' THEN 0 WHEN 'medium' THEN 1
+                        WHEN 'low' THEN 2 ELSE 3 END AS emphasis_rank
     FROM official_stances s
     WHERE TRUE {stance_filter}
-    ORDER BY s.official_id, s.target_id, s.mechanism,
-             CASE s.emphasis WHEN 'high' THEN 0 WHEN 'medium' THEN 1
-                             WHEN 'low' THEN 2 ELSE 3 END,
-             s.id
+    ORDER BY s.official_id, s.target_id, s.mechanism, emphasis_rank, s.id
+),
+-- Each target, and each near match in both directions.
+links AS (
+    SELECT id AS effect_target, id AS stance_target, NULL::float AS similarity
+    FROM policy_targets
+    UNION ALL
+    SELECT target_a, target_b, similarity FROM target_matches WHERE similarity >= :threshold
+    UNION ALL
+    SELECT target_b, target_a, similarity FROM target_matches WHERE similarity >= :threshold
+),
+pairs AS (
+    -- One stance per vote and bill intent: the exact target first, then
+    -- the most similar name, then the most explicit position.
+    SELECT DISTINCT ON (lv.official_id, lv.roll_call_id, e.id)
+        lv.official_id, lv.bill_id, lv.roll_call_id, lv.chamber, lv.date,
+        lv.position, e.target_id, e.mechanism, e.direction AS effect_direction,
+        e.magnitude, e.rationale, e.relation, s.direction, s.emphasis, s.summary,
+        s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area) AS policy_area,
+        s.scope, s.target_id AS stance_target_id, l.similarity
+    FROM latest_votes lv
+    JOIN bills b ON b.id = lv.bill_id AND b.classification_status = 'ok'
+    JOIN bill_effects e ON e.bill_id = lv.bill_id
+    JOIN links l ON l.effect_target = e.target_id
+    JOIN stances s ON s.official_id = lv.official_id
+                  AND s.target_id = l.stance_target
+                  AND s.mechanism = e.mechanism
+    ORDER BY lv.official_id, lv.roll_call_id, e.id,
+             l.similarity DESC NULLS FIRST, s.emphasis_rank
 )
-SELECT lv.official_id, lv.bill_id, lv.roll_call_id, lv.chamber, lv.date,
-       lv.position, e.target_id, t.name, e.mechanism, e.direction,
-       e.magnitude, e.rationale, s.direction, s.emphasis, s.summary,
-       s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area),
-       e.relation, s.scope, bs.effects
-FROM latest_votes lv
-JOIN bills b ON b.id = lv.bill_id AND b.classification_status = 'ok'
-JOIN bill_effects e ON e.bill_id = lv.bill_id
-JOIN bill_sizes bs ON bs.bill_id = lv.bill_id
-JOIN stances s ON s.official_id = lv.official_id
-              AND s.target_id = e.target_id
-              AND s.mechanism = e.mechanism
-JOIN policy_targets t ON t.id = e.target_id
+SELECT p.official_id, p.bill_id, p.roll_call_id, p.chamber, p.date,
+       p.position, p.target_id, t.name, p.mechanism, p.effect_direction,
+       p.magnitude, p.rationale, p.direction, p.emphasis, p.summary,
+       p.evidence_quote, p.source_url, p.policy_area,
+       p.relation, p.scope, bs.effects, p.stance_target_id, st.name, p.similarity
+FROM pairs p
+JOIN bill_sizes bs ON bs.bill_id = p.bill_id
+JOIN policy_targets t ON t.id = p.target_id
+JOIN policy_targets st ON st.id = p.stance_target_id
 """
 
 
 def compute_alignments(
-    session: Session, official_ids: list[str] | None = None
+    session: Session, official_ids: list[str] | None = None, *, threshold: float | None = None
 ) -> dict[str, list[Alignment]]:
     """Matches per official with rules applied (only officials with at
     least one match appear). official_ids=None computes everyone in one
-    query."""
+    query. threshold overrides TARGET_MATCH_THRESHOLD."""
     roll_call_ids = passage_roll_call_ids(session)
     if not roll_call_ids:
         return {}
-    params: dict = {"roll_call_ids": roll_call_ids, "positions": list(SCORED_POSITIONS)}
+    params: dict = {
+        "roll_call_ids": roll_call_ids,
+        "positions": list(SCORED_POSITIONS),
+        "threshold": TARGET_MATCH_THRESHOLD if threshold is None else threshold,
+    }
     official_filter = stance_filter = ""
     if official_ids is not None:
         if not official_ids:
@@ -347,7 +388,8 @@ def compute_alignments(
             effect_rationale=row[11], stance_direction=row[12], stance_emphasis=row[13],
             stance_summary=row[14], stance_evidence_quote=row[15], stance_source_url=row[16],
             policy_area=row[17], points=points, effect_relation=row[18],
-            stance_scope=row[19], bill_effect_count=row[20],
+            stance_scope=row[19], bill_effect_count=row[20], stance_target_id=row[21],
+            stance_target_name=row[22], match_similarity=row[23],
         ))
     return {
         official_id: sorted(apply_rules(rows), key=Alignment.key)
@@ -391,7 +433,9 @@ def _write(session: Session, official_id: str, alignments: list[Alignment], dige
             stance_evidence_quote=a.stance_evidence_quote,
             stance_source_url=a.stance_source_url, policy_area=a.policy_area,
             effect_relation=a.effect_relation, stance_scope=a.stance_scope,
-            bill_effect_count=a.bill_effect_count, points=a.points,
+            bill_effect_count=a.bill_effect_count, stance_target_id=a.stance_target_id,
+            stance_target_name=a.stance_target_name, match_similarity=a.match_similarity,
+            points=a.points,
             counted=a.counted, reason=a.reason, computed_at=now,
         ))
     totals = summarize(alignments)

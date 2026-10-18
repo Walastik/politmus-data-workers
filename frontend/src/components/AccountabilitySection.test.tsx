@@ -127,6 +127,25 @@ describe('AccountabilitySection', () => {
     ).toBeInTheDocument()
   })
 
+  it('names the position target when it only nearly matches the bill', () => {
+    render(
+      <AccountabilitySection
+        score={score}
+        alignments={[
+          alignment({
+            target_name: 'Voter Registration',
+            stance_target_name: 'Automatic Voter Registration',
+            match_similarity: 0.91,
+          }),
+        ]}
+        onSelectBill={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/increases Voter Registration funding/)).toHaveTextContent(
+      'wants it increased (their position is on Automatic Voter Registration).',
+    )
+  })
+
   it('lists each scored vote with its verdict and evidence', () => {
     const onSelectBill = vi.fn()
     render(

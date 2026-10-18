@@ -146,6 +146,9 @@ export interface VoteAlignment {
   effect_relation?: 'core' | 'secondary' | string | null
   stance_scope?: 'national' | 'local' | string | null
   bill_effect_count?: number | null
+  // Set when the position names a similar but not identical target.
+  stance_target_name?: string | null
+  match_similarity?: number | null
   points: number
   counted?: boolean
   reason?: string | null

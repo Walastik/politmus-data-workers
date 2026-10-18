@@ -245,7 +245,7 @@ Without it, every mode except `--crawl-only` stops with an error saying the file
 
 ### `score_officials.py` (accountability / litmus score)
 
-Scores whether officials vote for what they say they want. Each classified bill intent (`bill_effects`) that matches one of the official's stated positions (`official_stances`, same `target_id` and `mechanism`) is scored against their passage vote on that bill:
+Scores whether officials vote for what they say they want. Each classified bill intent (`bill_effects`) that matches one of the official's stated positions (`official_stances`, same `mechanism` and the same target or a near match, see below) is scored against their passage vote on that bill:
 
 | Stance vs. bill intent | Yes | No |
 |---|---|---|
@@ -274,6 +274,22 @@ No model calls, so a full run takes seconds. It is idempotent: each official's c
 ./scripts/run_scoring.sh --dry-run             # compute and report, write nothing
 ./scripts/run_scoring.sh --show O000172        # print one official's score and matches
 ```
+
+#### Target matching (`match_targets.py`)
+
+The bill classifier and the positions extractor name targets independently, and the names drift between runs ("Voter Registration" on a bill, "Automatic Voter Registration" in a position). So targets also match by meaning: the workers embed every target name with a local Ollama embedding model (`TARGET_EMBED_MODEL`, default `nomic-embed-text`) and store each pair with cosine similarity of at least 0.75 in `target_matches`. Scoring treats a pair at or above `TARGET_MATCH_THRESHOLD` (default 0.85) as one target; an exact target always wins over a near one, and the match row records the position's own target and the similarity (the drawer shows "their position is on …"). Scoring itself never calls a model, so it still runs on Fly and in CI; targets not embedded yet only match exactly.
+
+Setup on the worker machine: `pip install -r backend/requirements-worker.txt` (numpy) and `ollama pull nomic-embed-text`. The workers refresh matches after each bill or official; after changing the model, or to backfill, run it by hand and rescore:
+
+```bash
+cd backend
+python match_targets.py                                # embed targets added since the last run
+python match_targets.py --rebuild                      # re-embed everything
+python match_targets.py --neighbors "Voter Registration"   # stored matches for one name
+../scripts/run_scoring.sh
+```
+
+The lab report lists each fixture official's near misses (similar names just below the threshold) for tuning it; try a threshold with `TARGET_MATCH_THRESHOLD=0.8 ./scripts/lab.sh grade`.
 
 ### `lab.py` (scoring lab)
 

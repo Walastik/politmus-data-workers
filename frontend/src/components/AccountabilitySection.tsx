@@ -158,7 +158,11 @@ function MatchItem({ match }: { match: VoteAlignment }) {
         {effectPhrase(match.effect_direction, match.target_name, match.mechanism)}
         {counted && match.effect_relation === 'secondary' ? ' (via an unrelated provision)' : ''};{' '}
         {consistent ? 'consistent: ' : 'contradicts: '}
-        {wantsPhrase(match.stance_direction)}.
+        {wantsPhrase(match.stance_direction)}
+        {match.match_similarity != null && match.stance_target_name
+          ? ` (their position is on ${match.stance_target_name})`
+          : ''}
+        .
       </p>
       {counted ? null : (
         <p className="mt-0.5 text-[11px] text-slate-400">
