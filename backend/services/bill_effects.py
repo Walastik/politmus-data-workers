@@ -37,6 +37,9 @@ direction:
 - decrease: cuts, easing, tax reduction, less oversight
 - maintain: continues an existing program or rule without a clear change
 - mixed: both directions for the same target and mechanism
+- for a tax credit, deduction, or exemption target, direction is the size of \
+the benefit: expanding or extending it is an increase, shrinking or ending it \
+is a decrease
 """
 
 DEFAULT_EXTRACTION_PROMPT = """\
