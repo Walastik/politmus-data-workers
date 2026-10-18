@@ -14,6 +14,7 @@ import { useExplorerLinks } from '../useExplorerLinks'
 import { useSavedAddress } from '../useSavedAddress'
 import {
   PARTY_FILTERS,
+  displayName,
   ROSTER_STATUS_FILTERS,
   STATE_OPTIONS,
   officeLine,
@@ -338,7 +339,7 @@ export default function Explorer() {
                         </span>
                         <span className="text-xs text-slate-400">{official.state}</span>
                       </div>
-                      <h3 className="mt-2 text-base font-semibold">{official.name}</h3>
+                      <h3 className="mt-2 text-base font-semibold">{displayName(official.name)}</h3>
                       <p className="mt-1 text-xs text-slate-400">
                         {officeLine(official)}
                       </p>

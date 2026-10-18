@@ -543,6 +543,17 @@ export function positionBadgeClass(position: string | null) {
   return 'bg-slate-700 text-slate-300'
 }
 
+// Congress.gov stores names inverted ("Adams, Alma S.", "Bishop, Sanford D., Jr.").
+// Shows them first name first ("Alma S. Adams", "Sanford D. Bishop Jr."); names
+// without a comma are already in display order and pass through.
+export function displayName(name: string) {
+  const [last, first, ...suffixes] = name.split(',').map((part) => part.trim())
+  if (!first) {
+    return name.trim()
+  }
+  return [first, last, ...suffixes].filter(Boolean).join(' ')
+}
+
 export function officeLine(official: Official) {
   const office = official.office || 'Member of Congress'
   const seat = seatLabel(official)
