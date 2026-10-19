@@ -40,6 +40,9 @@ direction:
 - for a tax credit, deduction, or exemption target, direction is the size of \
 the benefit: expanding or extending it is an increase, shrinking or ending it \
 is a decrease
+- for a cap or limit target under regulation, direction is how tight it is: \
+raising the limit loosens it, so "increases the statutory debt limit by $4 \
+trillion" is Statutory Debt Limit / regulation / decrease
 """
 
 DEFAULT_EXTRACTION_PROMPT = """\
