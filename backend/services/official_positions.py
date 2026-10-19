@@ -41,7 +41,7 @@ DEFAULT_CHUNK_CHARS = 10_000
 # A chunk whose answer is cut off is halved and retried, down to this size.
 MIN_SPLIT_CHUNK_CHARS = 2_000
 MIN_QUOTE_CHARS = 12
-MAX_STANCES_PER_OFFICIAL = 100
+MAX_STANCES_PER_OFFICIAL = 300
 MAX_VOCABULARY_TARGETS = 150
 
 # Congress.gov / CRS policy areas, the same values stored on bills.policy_area

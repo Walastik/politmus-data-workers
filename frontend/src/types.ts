@@ -149,6 +149,8 @@ export interface VoteAlignment {
   // Set when the position names a similar but not identical target.
   stance_target_name?: string | null
   match_similarity?: number | null
+  // More of the bill's target means less of the position's.
+  match_inverse?: boolean
   points: number
   counted?: boolean
   reason?: string | null

@@ -386,7 +386,7 @@ def run_classifier(
 
         if chat_fn is None:
             if matcher is None and not dry_run:
-                matcher = make_matcher(host or DEFAULT_HOST)
+                matcher = make_matcher(host or DEFAULT_HOST, review_model=model_name)
             chat_fn = llm_runtime.make_chat_fn(
                 model_name,
                 host or DEFAULT_HOST,
@@ -517,7 +517,7 @@ def _process_bill(
         return True
     stats["ok"] += 1
     stats["intents_saved"] += len(result.intents)
-    try_refresh(matcher, session, log=log)
+    try_refresh(matcher, session, log=log, bill_ids=[bill_id])
     try_rescore(session, bill_ids=[bill_id], log=log)
     return True
 

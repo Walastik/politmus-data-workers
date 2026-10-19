@@ -160,7 +160,9 @@ function MatchItem({ match }: { match: VoteAlignment }) {
         {consistent ? 'consistent: ' : 'contradicts: '}
         {wantsPhrase(match.stance_direction)}
         {match.match_similarity != null && match.stance_target_name
-          ? ` (their position is on ${match.stance_target_name})`
+          ? match.match_inverse
+            ? ` (their position is on ${match.stance_target_name}, which moves the opposite way)`
+            : ` (their position is on ${match.stance_target_name})`
           : ''}
         .
       </p>

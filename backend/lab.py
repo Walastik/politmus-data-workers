@@ -4,7 +4,7 @@ classifier, the stated-positions extractor, and accountability scoring.
     lab.py pick      choose the fixture (1 broad + 1 narrow bill, 3 officials per party)
     lab.py bills     re-classify the fixture bills
     lab.py positions re-extract the fixture officials from stored pages (no crawl)
-    lab.py grade     embed new target names, then rescore the fixture officials
+    lab.py grade     embed new target names, review the fixture officials' name pairs, rescore
     lab.py all       bills, positions, grade, then report
     lab.py report    snapshot what is in the database now and diff it with the last run
 
@@ -207,8 +207,8 @@ def run_positions(fixture, extra) -> None:
 
 
 def run_grade(fixture, extra) -> None:
-    run([sys.executable, "match_targets.py"])
     ids = [arg for o in fixture["officials"] for arg in ("--official-id", o["id"])]
+    run([sys.executable, "match_targets.py", *ids])
     run([sys.executable, "score_officials.py", *ids, *extra])
 
 
@@ -298,6 +298,7 @@ def snapshot(fixture: dict) -> dict:
                         "reason": a.reason,
                         "position_target": a.stance_target_name,
                         "similarity": a.match_similarity,
+                        "inverse": a.match_inverse,
                     }
                     for a in rows
                     if a.bill_id in bill_ids
@@ -325,18 +326,19 @@ def snapshot(fixture: dict) -> dict:
 
 
 def near_misses(session, official_id: str, bill_ids: list[str]) -> list[dict]:
-    """Stored name pairs below the scoring threshold between this official's
-    positions and the fixture bills' intents (same mechanism): candidates
-    for lowering TARGET_MATCH_THRESHOLD, or proof it should stay."""
+    """Stored name pairs between this official's positions and the fixture
+    bills' intents (same mechanism) that do not match: reviewed unrelated,
+    or unreviewed and below the threshold."""
     rows = session.execute(text(
         "SELECT DISTINCT e.bill_id, te.name AS bill_target, ts.name AS position_target, "
-        "e.mechanism, m.similarity "
+        "e.mechanism, m.similarity, m.verdict "
         "FROM bill_effects e "
         "JOIN official_stances s ON s.official_id = :official AND s.mechanism = e.mechanism "
         "JOIN target_matches m ON (m.target_a, m.target_b) IN ((e.target_id, s.target_id), (s.target_id, e.target_id)) "
         "JOIN policy_targets te ON te.id = e.target_id "
         "JOIN policy_targets ts ON ts.id = s.target_id "
-        "WHERE e.bill_id = ANY(:bills) AND m.similarity < :threshold "
+        "WHERE e.bill_id = ANY(:bills) "
+        "AND (m.verdict = 'unrelated' OR (m.verdict IS NULL AND m.similarity < :threshold)) "
         "ORDER BY m.similarity DESC"
     ), {"official": official_id, "bills": bill_ids, "threshold": TARGET_MATCH_THRESHOLD}).mappings()
     return [dict(r) for r in rows]
@@ -422,7 +424,8 @@ def render(snap: dict) -> str:
                     "|---|---|---|---|---|---|---|---|---|---|---|---|"]
             for key, m in sorted(matches.items()):
                 position = (
-                    f"{m.get('position_target')} ({m['similarity']:.2f})"
+                    f"{m.get('position_target')} ({m['similarity']:.2f}"
+                    f"{', inverse' if m.get('inverse') else ''})"
                     if m.get("similarity") is not None else "same"
                 )
                 out.append(
@@ -435,11 +438,13 @@ def render(snap: dict) -> str:
             out.append("None.")
         misses = g.get("near_misses", [])
         if misses:
-            out += ["", f"**Near misses (similar names below {snap.get('threshold', TARGET_MATCH_THRESHOLD)}):**", "",
-                    "| Similarity | Bill | Bill target | Position target | Mechanism |", "|---|---|---|---|---|"]
+            out += ["", "**Near misses (similar names that did not match):**", "",
+                    "| Similarity | Verdict | Bill | Bill target | Position target | Mechanism |",
+                    "|---|---|---|---|---|---|"]
             for n in misses:
+                verdict = n.get("verdict") or f"unreviewed, below {snap.get('threshold', TARGET_MATCH_THRESHOLD)}"
                 out.append(
-                    f"| {n['similarity']:.3f} | {n['bill_id']} | {_cell(n['bill_target'])} | "
+                    f"| {n['similarity']:.3f} | {_cell(verdict)} | {n['bill_id']} | {_cell(n['bill_target'])} | "
                     f"{_cell(n['position_target'])} | {n['mechanism']} |"
                 )
         overlapping = {k: s for k, s in o["stances"].items() if k in all_effect_keys}
@@ -498,7 +503,7 @@ def diff(old: dict, new: dict) -> list[str]:
                 f"{g1.get('points')} ({g1.get('alignment_pct')}%)"
             )
         compare(f"{name} match", g0.get("matches", {}), g1.get("matches", {}),
-                ("points", "counted", "reason", "position_target"))
+                ("points", "counted", "reason", "position_target", "inverse"))
         compare(f"{name} vote", {k: {"net": v} for k, v in g0.get("votes", {}).items()},
                 {k: {"net": v} for k, v in g1.get("votes", {}).items()}, ("net",))
     return lines

@@ -127,6 +127,8 @@ class TargetMatch(Base):
     target_a = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), primary_key=True)
     target_b = Column(Integer, ForeignKey("policy_targets.id", ondelete="CASCADE"), primary_key=True)
     similarity = Column(Float, nullable=False)
+    # Model review: same | inverse | unrelated; NULL until reviewed.
+    verdict = Column(String, nullable=True)
 
 
 class BillEffect(Base):
@@ -395,6 +397,9 @@ class VoteAlignment(Base):
     stance_target_name = Column(String, nullable=True)
     # Name similarity for a near match; NULL when the targets are the same.
     match_similarity = Column(Float, nullable=True)
+    # True when more of the bill's target means less of the position's, so
+    # the bill's direction was flipped before comparing.
+    match_inverse = Column(Boolean, nullable=False, default=False, server_default="false")
     mechanism = Column(String, nullable=False)
     # What the bill does to the target, and what the official says they want.
     effect_direction = Column(String, nullable=False)

@@ -3,7 +3,9 @@
 Each bill intent (bill_effects) an official has a stated position on
 (official_stances, same mechanism and the same target, or a target whose
 name means nearly the same thing: see services/target_matching.py) is
-scored against the official's passage vote on that bill:
+scored against the official's passage vote on that bill. A pair reviewed as
+inverse (more of one is less of the other) matches with the bill's
+direction flipped:
 
     stance vs intent          Yes   No
     same direction            +1    -1
@@ -52,8 +54,9 @@ from models import OfficialScore, OfficialStance, RollCall, Vote, VoteAlignment
 # rewritten on the next run.
 ENGINE_VERSION = "accountability-v3"
 
-# Targets whose names are at least this similar (target_matches) count as
-# the same target. An exact target match always wins over a near one.
+# Unreviewed target_matches pairs at least this similar count as the same
+# target; reviewed pairs follow their verdict. An exact target match always
+# wins over a near one.
 TARGET_MATCH_THRESHOLD = float(os.getenv("TARGET_MATCH_THRESHOLD", "0.85"))
 
 # A bill with this many classified effects is broad (omnibus, NDAA,
@@ -168,6 +171,14 @@ class Alignment:
     stance_target_id: int | None = None
     stance_target_name: str | None = None
     match_similarity: float | None = None
+    match_inverse: bool = False
+
+    @property
+    def compared_direction(self) -> str:
+        """The bill's direction as it applies to the position's target."""
+        if self.match_inverse:
+            return {"increase": "decrease", "decrease": "increase"}.get(self.effect_direction, self.effect_direction)
+        return self.effect_direction
 
     @property
     def broad_bill(self) -> bool:
@@ -186,7 +197,7 @@ class Alignment:
             self.stance_evidence_quote, self.stance_source_url, self.policy_area,
             self.points, self.effect_relation, self.stance_scope, self.bill_effect_count,
             self.counted, self.reason, self.stance_target_id, self.stance_target_name,
-            self.match_similarity,
+            self.match_similarity, self.match_inverse,
         ]
 
 
@@ -223,7 +234,7 @@ def apply_rules(alignments: list[Alignment]) -> list[Alignment]:
             continue
         # Keyed by the position's target, so companion bills whose intents
         # are named differently but match the same position count once.
-        policy = (_congress(a.bill_id), a.stance_target_id or a.target_id, a.mechanism, a.effect_direction)
+        policy = (_congress(a.bill_id), a.stance_target_id or a.target_id, a.mechanism, a.compared_direction)
         current = latest.get(policy)
         if current is None or (a.vote_date or date.min, a.roll_call_id) > (
             current.vote_date or date.min, current.roll_call_id
@@ -313,14 +324,20 @@ stances AS (
     WHERE TRUE {stance_filter}
     ORDER BY s.official_id, s.target_id, s.mechanism, emphasis_rank, s.id
 ),
--- Each target, and each near match in both directions.
+-- Each target, and each near match in both directions: a reviewed pair by
+-- its verdict, an unreviewed one by the threshold.
+near AS (
+    SELECT target_a, target_b, similarity, verdict = 'inverse' AS inverse
+    FROM target_matches
+    WHERE verdict IN ('same', 'inverse') OR (verdict IS NULL AND similarity >= :threshold)
+),
 links AS (
-    SELECT id AS effect_target, id AS stance_target, NULL::float AS similarity
+    SELECT id AS effect_target, id AS stance_target, NULL::float AS similarity, false AS inverse
     FROM policy_targets
     UNION ALL
-    SELECT target_a, target_b, similarity FROM target_matches WHERE similarity >= :threshold
+    SELECT target_a, target_b, similarity, inverse FROM near
     UNION ALL
-    SELECT target_b, target_a, similarity FROM target_matches WHERE similarity >= :threshold
+    SELECT target_b, target_a, similarity, inverse FROM near
 ),
 pairs AS (
     -- One stance per vote and bill intent: the exact target first, then
@@ -330,7 +347,7 @@ pairs AS (
         lv.position, e.target_id, e.mechanism, e.direction AS effect_direction,
         e.magnitude, e.rationale, e.relation, s.direction, s.emphasis, s.summary,
         s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area) AS policy_area,
-        s.scope, s.target_id AS stance_target_id, l.similarity
+        s.scope, s.target_id AS stance_target_id, l.similarity, l.inverse
     FROM latest_votes lv
     JOIN bills b ON b.id = lv.bill_id AND b.classification_status = 'ok'
     JOIN bill_effects e ON e.bill_id = lv.bill_id
@@ -345,7 +362,8 @@ SELECT p.official_id, p.bill_id, p.roll_call_id, p.chamber, p.date,
        p.position, p.target_id, t.name, p.mechanism, p.effect_direction,
        p.magnitude, p.rationale, p.direction, p.emphasis, p.summary,
        p.evidence_quote, p.source_url, p.policy_area,
-       p.relation, p.scope, bs.effects, p.stance_target_id, st.name, p.similarity
+       p.relation, p.scope, bs.effects, p.stance_target_id, st.name, p.similarity,
+       p.inverse
 FROM pairs p
 JOIN bill_sizes bs ON bs.bill_id = p.bill_id
 JOIN policy_targets t ON t.id = p.target_id
@@ -378,19 +396,21 @@ def compute_alignments(
 
     out: dict[str, list[Alignment]] = defaultdict(list)
     for row in session.execute(text(sql), params):
-        points = alignment_points(row[12], row[9], row[5])
-        if points == 0:
-            continue
-        out[row[0]].append(Alignment(
+        alignment = Alignment(
             official_id=row[0], bill_id=row[1], roll_call_id=row[2], chamber=row[3],
             vote_date=row[4], vote_position=row[5], target_id=row[6], target_name=row[7],
             mechanism=row[8], effect_direction=row[9], effect_magnitude=row[10],
             effect_rationale=row[11], stance_direction=row[12], stance_emphasis=row[13],
             stance_summary=row[14], stance_evidence_quote=row[15], stance_source_url=row[16],
-            policy_area=row[17], points=points, effect_relation=row[18],
+            policy_area=row[17], effect_relation=row[18],
             stance_scope=row[19], bill_effect_count=row[20], stance_target_id=row[21],
-            stance_target_name=row[22], match_similarity=row[23],
-        ))
+            stance_target_name=row[22], match_similarity=row[23], match_inverse=bool(row[24]),
+            points=0,
+        )
+        points = alignment_points(alignment.stance_direction, alignment.compared_direction, alignment.vote_position)
+        if points == 0:
+            continue
+        out[row[0]].append(replace(alignment, points=points))
     return {
         official_id: sorted(apply_rules(rows), key=Alignment.key)
         for official_id, rows in out.items()
@@ -435,7 +455,7 @@ def _write(session: Session, official_id: str, alignments: list[Alignment], dige
             effect_relation=a.effect_relation, stance_scope=a.stance_scope,
             bill_effect_count=a.bill_effect_count, stance_target_id=a.stance_target_id,
             stance_target_name=a.stance_target_name, match_similarity=a.match_similarity,
-            points=a.points,
+            match_inverse=a.match_inverse, points=a.points,
             counted=a.counted, reason=a.reason, computed_at=now,
         ))
     totals = summarize(alignments)

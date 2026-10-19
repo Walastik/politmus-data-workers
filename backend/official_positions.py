@@ -396,7 +396,7 @@ def run_positions(
 
         if chat_fn is None and not crawl_only:
             if matcher is None and not dry_run:
-                matcher = make_matcher(host or DEFAULT_HOST)
+                matcher = make_matcher(host or DEFAULT_HOST, review_model=model_name)
             chat_fn = make_chat_fn(
                 model_name,
                 host or DEFAULT_HOST,
@@ -632,7 +632,7 @@ def _process_official(
         session.commit()
         stats["extracted"] += 1
         stats["stances_saved"] += len(saved)
-        try_refresh(matcher, session, log=log)
+        try_refresh(matcher, session, log=log, official_ids=[official.id])
         try_rescore(session, official_ids=[official.id], log=log)
     except Exception as exc:
         session.rollback()

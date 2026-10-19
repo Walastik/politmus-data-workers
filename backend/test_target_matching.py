@@ -88,13 +88,14 @@ class TargetMatcherTests(unittest.TestCase):
         self.assertEqual(first["pairs"], 0)
 
         self._add("Zztm Automatic Voter Registration")
-        self.assertEqual(matcher.refresh(self.session), {"embedded": 1, "pairs": 1})
+        self.assertEqual(matcher.refresh(self.session), {"embedded": 1, "pairs": 1, "reviewed": 0})
         self.assertEqual(calls[-1], ["Zztm Automatic Voter Registration"])
-        [(name, similarity)] = self._matches()
+        [(name, similarity, verdict)] = self._matches()
+        self.assertIsNone(verdict)
         self.assertEqual(name, "Zztm Automatic Voter Registration")
         self.assertAlmostEqual(similarity, 0.95, places=2)
 
-        self.assertEqual(matcher.refresh(self.session), {"embedded": 0, "pairs": 0})
+        self.assertEqual(matcher.refresh(self.session), {"embedded": 0, "pairs": 0, "reviewed": 0})
 
     def test_try_refresh_logs_instead_of_raising(self):
         from services.target_matching import TargetMatcher, try_refresh

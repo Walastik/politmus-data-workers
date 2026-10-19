@@ -146,6 +146,27 @@ describe('AccountabilitySection', () => {
     )
   })
 
+  it('says when the position target moves the opposite way', () => {
+    render(
+      <AccountabilitySection
+        score={score}
+        alignments={[
+          alignment({
+            target_name: 'Voter Registration Requirements',
+            stance_target_name: 'Automatic Voter Registration',
+            match_similarity: 0.82,
+            match_inverse: true,
+            vote_position: 'No',
+          }),
+        ]}
+        onSelectBill={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/increases Voter Registration Requirements/)).toHaveTextContent(
+      '(their position is on Automatic Voter Registration, which moves the opposite way).',
+    )
+  })
+
   it('lists each scored vote with its verdict and evidence', () => {
     const onSelectBill = vi.fn()
     render(

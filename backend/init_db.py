@@ -221,10 +221,12 @@ def ensure_schema():
             "stance_target_id INTEGER",
             "stance_target_name VARCHAR",
             "match_similarity DOUBLE PRECISION",
+            "match_inverse BOOLEAN NOT NULL DEFAULT false",
         ):
             conn.execute(text(
                 f"ALTER TABLE vote_alignments ADD COLUMN IF NOT EXISTS {column_sql}"
             ))
+        conn.execute(text("ALTER TABLE target_matches ADD COLUMN IF NOT EXISTS verdict VARCHAR"))
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS "
             "uq_bill_effects_bill_target_mechanism "

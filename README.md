@@ -277,15 +277,17 @@ No model calls, so a full run takes seconds. It is idempotent: each official's c
 
 #### Target matching (`match_targets.py`)
 
-The bill classifier and the positions extractor name targets independently, and the names drift between runs ("Voter Registration" on a bill, "Automatic Voter Registration" in a position). So targets also match by meaning: the workers embed every target name with a local Ollama embedding model (`TARGET_EMBED_MODEL`, default `nomic-embed-text`) and store each pair with cosine similarity of at least 0.75 in `target_matches`. Scoring treats a pair at or above `TARGET_MATCH_THRESHOLD` (default 0.85) as one target; an exact target always wins over a near one, and the match row records the position's own target and the similarity (the drawer shows "their position is on …"). Scoring itself never calls a model, so it still runs on Fly and in CI; targets not embedded yet only match exactly.
+The bill classifier and the positions extractor name targets independently, and the names drift between runs ("Voter Registration" on a bill, "Automatic Voter Registration" in a position). So targets also match by meaning: the workers embed every target name with a local Ollama embedding model (`TARGET_EMBED_MODEL`, default `nomic-embed-text`) and store each pair with cosine similarity of at least 0.75 in `target_matches`. Similar names are not always the same policy ("Naval Petroleum Reserves" is not the "Strategic Petroleum Reserve"), and some point opposite ways (more "Voter Registration Requirements" means less "Automatic Voter Registration"). So each pair that could score (a bill intent's target and the position target of an official who voted on that bill, same mechanism, similarity at least `TARGET_REVIEW_FLOOR`, default 0.8) is reviewed once by the worker's chat model and stored with a verdict: `same`, `inverse` (scoring flips the bill's direction before comparing), or `unrelated`. A verdict decides; an unreviewed pair counts when its similarity is at least `TARGET_MATCH_THRESHOLD` (default 0.85). An exact target always wins over a near one, and the match row records the position's own target, the similarity, and whether it was inverse (the drawer shows "their position is on …"). Scoring itself never calls a model, so it still runs on Fly and in CI; targets not embedded yet only match exactly.
 
-Setup on the worker machine: `pip install -r backend/requirements-worker.txt` (numpy) and `ollama pull nomic-embed-text`. The workers refresh matches after each bill or official; after changing the model, or to backfill, run it by hand and rescore:
+Setup on the worker machine: `pip install -r backend/requirements-worker.txt` (numpy) and `ollama pull nomic-embed-text`. The workers embed and review after each bill or official (the review uses the worker's own model, `TARGET_REVIEW_MODEL` by hand); after changing the model, or to backfill, run it by hand and rescore:
 
 ```bash
 cd backend
 python match_targets.py                                # embed targets added since the last run
 python match_targets.py --rebuild                      # re-embed everything
-python match_targets.py --neighbors "Voter Registration"   # stored matches for one name
+python match_targets.py --official-id B001267         # also review that official's pairs (repeatable; --bill-id too)
+python match_targets.py --review-all                   # review every pair that could score (slow)
+python match_targets.py --neighbors "Voter Registration"   # stored matches and verdicts for one name
 ../scripts/run_scoring.sh
 ```
 

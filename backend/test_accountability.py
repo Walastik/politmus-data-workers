@@ -395,7 +395,7 @@ class AccountabilityEngineTests(unittest.TestCase):
         self.assertEqual(score.alignment_pct, 100.0)
         self.assertEqual(score.engine_version, ENGINE_VERSION)
 
-    def _near_match(self, similarity):
+    def _near_match(self, similarity, verdict=None):
         """Carol (and Alice, opposite) state positions on "Zzacc Medicaid
         Program", a near match for the bills' "Zzacc Medicaid"."""
         from models import OfficialStance, PolicyTarget, TargetMatch
@@ -411,7 +411,7 @@ class AccountabilityEngineTests(unittest.TestCase):
                 source_type="official_site",
             ))
         a, b = sorted((self.targets["Medicaid"], program.id))
-        self.session.add(TargetMatch(target_a=a, target_b=b, similarity=similarity))
+        self.session.add(TargetMatch(target_a=a, target_b=b, similarity=similarity, verdict=verdict))
         self.session.commit()
 
     def test_near_target_names_match_above_the_threshold(self):
@@ -424,6 +424,45 @@ class AccountabilityEngineTests(unittest.TestCase):
             [(self.BILL_MIXED, "Zzacc Medicaid", "Zzacc Medicaid Program", 0.9, 1)],
         )
         self.assertEqual(compute_alignments(self.session, [self.CAROL], threshold=0.95), {})
+
+    def test_review_verdict_overrides_the_threshold(self):
+        from services.accountability import compute_alignments
+
+        self._near_match(0.95, verdict="unrelated")
+        self.assertEqual(compute_alignments(self.session, [self.CAROL], threshold=0.85), {})
+
+    def test_reviewed_same_pair_matches_below_the_threshold(self):
+        from services.accountability import compute_alignments
+
+        self._near_match(0.8, verdict="same")
+        rows = compute_alignments(self.session, [self.CAROL], threshold=0.85)[self.CAROL]
+        self.assertEqual([(a.stance_target_name, a.points) for a in rows], [("Zzacc Medicaid Program", 1)])
+
+    def test_inverse_pair_flips_the_bills_direction(self):
+        from services.accountability import compute_alignments
+
+        self._near_match(0.82, verdict="inverse")
+        [row] = compute_alignments(self.session, [self.CAROL], threshold=0.85)[self.CAROL]
+        # Carol wants more Medicaid Program and voted Yes on more Medicaid,
+        # which (as an inverse pair) means less of what she wants.
+        self.assertEqual((row.effect_direction, row.compared_direction, row.match_inverse, row.points),
+                         ("increase", "decrease", True, -1))
+
+    def test_review_asks_once_about_pairs_that_could_score(self):
+        from services.target_matching import TargetMatcher
+
+        self._near_match(0.82)
+        asked = []
+
+        def review(pairs):
+            asked.append(pairs)
+            return ["inverse"] * len(pairs)
+
+        matcher = TargetMatcher(lambda names: [], "fake", review_fn=review, review_floor=0.8)
+        self.assertEqual(matcher.review(self.session, official_ids=[self.BOB]), 0)  # Bob has no such position
+        self.assertEqual(matcher.review(self.session, official_ids=[self.CAROL]), 1)
+        self.assertEqual(asked, [[("Zzacc Medicaid", "Zzacc Medicaid Program")]])
+        self.assertEqual(matcher.review(self.session, official_ids=[self.CAROL]), 0)
 
     def test_exact_target_wins_over_a_near_match(self):
         from services.accountability import compute_alignments
