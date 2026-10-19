@@ -228,21 +228,21 @@ def _congress(bill_id: str) -> str:
 def apply_rules(alignments: list[Alignment]) -> list[Alignment]:
     """One official's matches with counted / reason set (see module doc)."""
     out = [replace(a, counted=False, reason=r) if (r := rule_reason(a)) else a for a in alignments]
-    latest: dict[tuple, Alignment] = {}
-    for a in out:
-        if not a.counted:
-            continue
+    def policy(a: Alignment) -> tuple:
         # Keyed by the position's target, so companion bills whose intents
         # are named differently but match the same position count once.
-        policy = (_congress(a.bill_id), a.stance_target_id or a.target_id, a.mechanism, a.compared_direction)
-        current = latest.get(policy)
-        if current is None or (a.vote_date or date.min, a.roll_call_id) > (
-            current.vote_date or date.min, current.roll_call_id
-        ):
-            latest[policy] = a
-    keep = {id(a) for a in latest.values()}
+        return (_congress(a.bill_id), a.stance_target_id or a.target_id, a.mechanism, a.compared_direction)
+
+    latest: dict[tuple, tuple] = {}
+    for a in out:
+        if a.counted:
+            vote = (a.vote_date or date.min, a.roll_call_id)
+            latest[policy(a)] = max(latest.get(policy(a), vote), vote)
+    # Several intents of one vote matching the same position all stay: the
+    # vote nets them into one point anyway.
     return [
-        a if not a.counted or id(a) in keep else replace(a, counted=False, reason=REASON_LATER_VOTE)
+        a if not a.counted or (a.vote_date or date.min, a.roll_call_id) == latest[policy(a)]
+        else replace(a, counted=False, reason=REASON_LATER_VOTE)
         for a in out
     ]
 

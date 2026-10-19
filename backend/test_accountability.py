@@ -195,6 +195,13 @@ class RuleTests(unittest.TestCase):
             [REASON_LATER_VOTE, None, None, None],
         )
 
+    def test_two_intents_of_one_vote_matching_one_position_both_count(self):
+        # H.R.22: "Voter Registration Requirements" and "Voter Registration
+        # Procedures" both match an Automatic Voter Registration position.
+        requirements = _alignment(1, bill="119-hr-22", roll_call=7, target=1, stance_target_id=9)
+        procedures = _alignment(1, bill="119-hr-22", roll_call=7, target=2, stance_target_id=9)
+        self.assertEqual(self.reasons(requirements, procedures), [None, None])
+
     def test_a_match_kept_out_by_a_rule_does_not_supersede_an_earlier_vote(self):
         earlier = _alignment(1, bill="119-s-2296", roll_call=1, vote_date=date(2025, 10, 9))
         later_low = _alignment(-1, bill="119-s-1071", roll_call=2, vote_date=date(2025, 12, 17),
