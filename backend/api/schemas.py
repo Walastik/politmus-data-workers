@@ -202,6 +202,65 @@ class OfficialFinanceOut(BaseModel):
     peer_comparison: Optional[PeerComparisonOut] = None
 
 
+class PacCategoryOut(BaseModel):
+    key: str
+    label: str
+    total: float
+    share: Optional[float] = None
+    pac_count: int
+    gift_count: int
+
+
+class PacOut(BaseModel):
+    """All of one PAC's gifts to the official in one election, combined."""
+
+    # contributor committee ID, or the name when FEC has no ID; pass it back
+    # to /finance/pacs/gifts.
+    pac_key: str
+    committee_id: Optional[str] = None
+    name: Optional[str] = None
+    category: str
+    category_label: str
+    total: float
+    gift_count: int
+    first_date: Optional[Date] = None
+    last_date: Optional[Date] = None
+
+
+class PacSummaryOut(BaseModel):
+    official_id: str
+    fec_candidate_id: str
+    election_year: int
+    total: float = 0
+    # FEC's reported PAC total for the election, to check the itemized sum.
+    reported_total: Optional[float] = None
+    # Newest itemized gift; FEC processes itemized data weeks after totals.
+    itemized_through: Optional[Date] = None
+    reported_through: Optional[Date] = None
+    gift_count: int = 0
+    pac_count: int = 0
+    categories: list[PacCategoryOut] = Field(default_factory=list)
+    top_pacs: list[PacOut] = Field(default_factory=list)
+    # False until fec_client.py pacs has fetched this official.
+    synced: bool = False
+    last_fetched_at: Optional[datetime] = None
+
+
+class PacListOut(BaseModel):
+    total_count: int
+    items: list[PacOut] = Field(default_factory=list)
+
+
+class PacGiftOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sub_id: str
+    receipt_date: Optional[Date] = None
+    amount: float
+    two_year_period: int
+    pdf_url: Optional[str] = None
+
+
 class PositionsProgressItemOut(BaseModel):
     official_id: str
     name: Optional[str] = None
