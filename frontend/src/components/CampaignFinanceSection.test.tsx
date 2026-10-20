@@ -84,12 +84,17 @@ async function openSection() {
 
 describe('CampaignFinanceSection', () => {
   beforeEach(() => {
+    // The PAC section loads its own summary; this member has none yet.
     vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async () =>
-        new Response(JSON.stringify(finance), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+      async (input) =>
+        new Response(
+          JSON.stringify(
+            String(input).includes('/finance/pacs')
+              ? { synced: false, gift_count: 0, categories: [], top_pacs: [] }
+              : finance,
+          ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
     )
   })
 

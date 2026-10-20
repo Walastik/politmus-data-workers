@@ -5,9 +5,11 @@ from types import SimpleNamespace
 
 from services.finance_insights import (
     chamber_for_office,
+    election_periods,
     funding_mix,
     is_completed,
     latest_completed,
+    pac_category,
     peer_comparison,
     percentile,
 )
@@ -118,6 +120,41 @@ class PeerComparisonTests(unittest.TestCase):
     def test_house_chamber(self):
         self.assertEqual(chamber_for_office("Delegate"), "house")
         self.assertEqual(chamber_for_office("Senator"), "senate")
+
+
+class PacCategoryTests(unittest.TestCase):
+    def test_sponsor_types(self):
+        self.assertEqual(pac_category("Q", "C", "B"), "corporate")
+        self.assertEqual(pac_category("Q", "L", "U"), "labor")
+        self.assertEqual(pac_category("Q", "T", "B"), "trade")
+        self.assertEqual(pac_category("Q", "M", "U"), "membership")
+        self.assertEqual(pac_category("N", "V", "U"), "cooperative")
+        self.assertEqual(pac_category("Q", "W", "U"), "other")
+
+    def test_politicians_win_over_sponsor(self):
+        self.assertEqual(pac_category("Q", "C", "D"), "politicians")
+        self.assertEqual(pac_category("H", None, "P"), "politicians")
+
+    def test_unsponsored_pacs(self):
+        self.assertEqual(pac_category("Q", None, "U"), "ideological")
+        self.assertEqual(pac_category("O", None, "U"), "ideological")
+        # Lobbyist-registered with no sponsor type: can't tell.
+        self.assertEqual(pac_category("Q", None, "B"), "other")
+        self.assertEqual(pac_category(None, None, None), "other")
+
+
+class ElectionPeriodTests(unittest.TestCase):
+    def test_senate_election_spans_three_periods(self):
+        self.assertEqual(election_periods(date(2019, 1, 1), 2024, TODAY), [2020, 2022, 2024])
+
+    def test_house_election_is_one_period(self):
+        self.assertEqual(election_periods(date(2025, 1, 1), 2026, TODAY), [2026])
+
+    def test_future_periods_are_skipped(self):
+        self.assertEqual(election_periods(date(2025, 1, 1), 2030, TODAY), [2026])
+
+    def test_missing_start_uses_election_year(self):
+        self.assertEqual(election_periods(None, 2024, TODAY), [2024])
 
 
 if __name__ == "__main__":

@@ -176,3 +176,63 @@ def peer_comparison(official, rows_by_official, officials_by_id, today=None):
         "party": official.party,
         "metrics": metrics,
     }
+
+
+# PAC categories in display order (the frontend colors them in this order).
+PAC_CATEGORIES = (
+    ("corporate", "Corporate employee PACs"),
+    ("labor", "Labor unions"),
+    ("trade", "Trade associations"),
+    ("membership", "Membership groups"),
+    ("cooperative", "Cooperatives"),
+    ("ideological", "Ideological / issue PACs"),
+    ("politicians", "Politicians' PACs & campaigns"),
+    ("other", "Other / unclassified"),
+)
+PAC_CATEGORY_LABELS = dict(PAC_CATEGORIES)
+
+# FEC organization_type of a connected PAC's sponsor. W (corporation without
+# capital stock) is rare and ambiguous, so it falls through to "other".
+_ORGANIZATION_CATEGORIES = {
+    "C": "corporate",
+    "L": "labor",
+    "T": "trade",
+    "M": "membership",
+    "V": "cooperative",
+}
+# FEC committee_type codes for PACs and super PACs (qualified or not).
+_PAC_COMMITTEE_TYPES = {"N", "Q", "O", "V", "W"}
+_CANDIDATE_COMMITTEE_TYPES = {"H", "S", "P"}
+
+
+def pac_category(committee_type, organization_type, designation):
+    """Category for a contributing committee from its FEC codes.
+
+    Leadership PACs (designation D) and other candidates' campaigns are
+    money from politicians, whatever their sponsor. A PAC with no sponsor
+    type is ideological unless it is lobbyist-registered (designation B):
+    those are usually connected PACs whose sponsor type FEC doesn't have.
+    """
+    designation = (designation or "").upper()
+    committee_type = (committee_type or "").upper()
+    if designation == "D" or committee_type in _CANDIDATE_COMMITTEE_TYPES:
+        return "politicians"
+    if organization_type:
+        return _ORGANIZATION_CATEGORIES.get(organization_type.upper(), "other")
+    if committee_type in _PAC_COMMITTEE_TYPES and designation != "B":
+        return "ideological"
+    return "other"
+
+
+def election_periods(coverage_start_date, election_year, today=None):
+    """FEC two-year periods (even years) an election's totals span, up to now.
+
+    A Senate election's totals start in the cycle after the last one, so a
+    2024 race covers 2020, 2022 and 2024. Periods that haven't started are
+    skipped.
+    """
+    today = today or date.today()
+    current_period = today.year + (today.year % 2)
+    start_year = coverage_start_date.year if coverage_start_date else election_year
+    first = start_year + (start_year % 2)
+    return [year for year in range(first, election_year + 1, 2) if year <= current_period]

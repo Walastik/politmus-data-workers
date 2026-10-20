@@ -31,6 +31,9 @@ class Official(Base):
     # who ran for the House and the Senate has one FEC candidate ID per race.
     fec_candidate_ids = Column(JSONB, nullable=True)
     opensecrets_id = Column(String, nullable=True)
+    # Campaign committees per FEC candidate ID, for Schedule A lookups:
+    # {"S6MN00267": [{"committee_id", "designation", "cycles"}]}.
+    fec_committees = Column(JSONB, nullable=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 
@@ -402,3 +405,44 @@ class OfficialFinanceTotal(Base):
     fetched_at = Column(DateTime, nullable=True)
 
     official = relationship("Official")
+
+
+class PacContribution(Base):
+    """One itemized gift from a PAC or other political committee (Form 3 line 11C).
+
+    sub_id is FEC's unique ID for the Schedule A line, so re-fetching a
+    period replaces rows instead of duplicating them.
+    """
+    __tablename__ = "pac_contributions"
+
+    sub_id = Column(String, primary_key=True)
+    official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
+    fec_candidate_id = Column(String, nullable=False)
+    # The official's campaign committee that received the gift.
+    committee_id = Column(String, nullable=False)
+    two_year_period = Column(Integer, nullable=False)
+    contributor_committee_id = Column(String, nullable=True, index=True)
+    contributor_name = Column(String, nullable=True)
+    amount = Column(Numeric(14, 2), nullable=False)
+    receipt_date = Column(Date, nullable=True, index=True)
+    # services/finance_insights.pac_category of the three FEC codes below.
+    category = Column(String, nullable=False)
+    committee_type = Column(String, nullable=True)
+    organization_type = Column(String, nullable=True)
+    designation = Column(String, nullable=True)
+    pdf_url = Column(String, nullable=True)
+
+
+class PacContributionSync(Base):
+    """When one committee's PAC gifts for one two-year period were last fetched."""
+    __tablename__ = "pac_contribution_sync"
+
+    official_id = Column(String, ForeignKey("officials.id"), primary_key=True)
+    committee_id = Column(String, primary_key=True)
+    two_year_period = Column(Integer, primary_key=True)
+    # The election's coverage_end_date at fetch time; a change means new filings.
+    coverage_end_date = Column(Date, nullable=True)
+    # Newest gift fetched; FEC's itemized data lags the totals by weeks.
+    latest_receipt_date = Column(Date, nullable=True)
+    row_count = Column(Integer, nullable=False, default=0)
+    fetched_at = Column(DateTime, nullable=False)

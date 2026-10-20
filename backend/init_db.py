@@ -66,6 +66,12 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS opensecrets_id VARCHAR"
         ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_committees JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE pac_contribution_sync ADD COLUMN IF NOT EXISTS latest_receipt_date DATE"
+        ))
         for column_sql in (
             "joint_fundraising_transfers NUMERIC(14, 2)",
             "outside_spending JSONB",

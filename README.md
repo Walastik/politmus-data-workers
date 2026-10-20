@@ -274,14 +274,18 @@ Campaign finance for current members of Congress from the [OpenFEC API](https://
 
 **Totals** — for each current federal official, fetches `/candidate/{id}/totals/` for the FEC IDs matching their seat (S… for senators, H… otherwise) and upserts one `official_finance_totals` row per election: receipts, individual (itemized/unitemized), PAC, party and self-funding, spending, cash on hand and debts. The two most recent elections also get donation-size (`by_size`) and donor-state (`by_state`, itemized only) breakdowns from Schedule A, plus outside spending (Schedule E independent expenditures for and against the candidate, with the top spenders on each side). Breakdowns are only re-fetched when FEC's `coverage_end_date` moves. Outside spending for a race still under way is re-fetched on every run, since groups can spend at any time; a finished race's is fetched once. A weekly re-run costs about two requests per member. Requests are paced at `FEC_REQUEST_PAUSE_SECONDS` (default 3.6s, under the 1,000/hour key limit); a first full run takes about 2 hours. If the key runs out (Retry-After over 10 minutes), the run stops; re-running is cheap for members already synced.
 
+**PACs** — after `totals`, fetches every itemized gift from a PAC or other political committee (Schedule A, Form 3 line 11C) for the same two most recent elections into `pac_contributions`. Each PAC is categorized from its FEC codes (`services/finance_insights.pac_category`): corporate, labor, trade, membership or cooperative by its sponsor type; leadership PACs and other candidates' campaigns as politicians; sponsor-less PACs as ideological/issue; anything FEC doesn't classify as other. Gifts are fetched per campaign committee and two-year period (`pac_contribution_sync`): a finished period once after it closes, the current period again only when the election's `coverage_end_date` moves. A first load is roughly 5,000 requests, so `--max-minutes` stops starting new members after a time budget and the next run continues with the least recently synced. The itemized sum matches FEC's reported PAC total (checked for Klobuchar 2024: $1,368,278 both ways).
+
 ```bash
 python fec_client.py crosswalk
 python fec_client.py totals
 python fec_client.py totals --official-id S000033
 python fec_client.py totals --limit 10
+python fec_client.py pacs --max-minutes 300
+python fec_client.py pacs --official-id K000367
 ```
 
-`GET /api/officials/{id}/finance` returns the stored elections (newest first) with a funding mix that adds up to receipts (small donors, larger donors, joint fundraising transfers, PACs, party, candidate, other), small-donor, PAC and in-state shares, top donor states, outside spending, and links to the FEC and OpenSecrets pages. It also returns `peer_comparison`: percentiles for the member's most recent finished election against current members of the same chamber, and of the same party within it, computed from stored rows (`services/finance_insights.py`). Senate and House are never mixed because their totals cover six and two years.
+`GET /api/officials/{id}/finance` returns the stored elections (newest first) with a funding mix that adds up to receipts (small donors, larger donors, joint fundraising transfers, PACs, party, candidate, other), small-donor, PAC and in-state shares, top donor states, outside spending, and links to the FEC and OpenSecrets pages. It also returns `peer_comparison`: percentiles for the member's most recent finished election against current members of the same chamber, and of the same party within it, computed from stored rows (`services/finance_insights.py`). Senate and House are never mixed because their totals cover six and two years. PAC gifts are served by `GET /api/officials/{id}/finance/pacs` (total, category breakdown, top 10), `/finance/pacs/list` (search with `q`, `category`, `sort=amount|gifts|recent|name`, `limit`/`offset`) and `/finance/pacs/gifts` (one PAC's gifts with filing links), each taking `fec_candidate_id` and `election_year`.
 
 ## Deploy to Fly.io
 
@@ -318,7 +322,7 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 ### GitHub Actions ingest
 
-Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. FEC campaign finance runs weekly (Monday 07:30 UTC). Add one GitHub Actions secret:
+Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. FEC campaign finance runs weekly (Monday 07:30 UTC), with PAC gifts in a second job capped at 300 minutes. Add one GitHub Actions secret:
 
 ```bash
 fly tokens create org
@@ -341,4 +345,5 @@ fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.p
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py crosswalk"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py totals"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py pacs --max-minutes 300"
 ```

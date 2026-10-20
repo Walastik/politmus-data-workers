@@ -204,6 +204,57 @@ export interface OfficialFinance {
   peer_comparison?: PeerComparison | null
 }
 
+export interface PacCategory {
+  key: string
+  label: string
+  total: number
+  share?: number | null
+  pac_count: number
+  gift_count: number
+}
+
+export interface Pac {
+  // Pass back to /finance/pacs/gifts.
+  pac_key: string
+  committee_id?: string | null
+  name?: string | null
+  category: string
+  category_label: string
+  total: number
+  gift_count: number
+  first_date?: string | null
+  last_date?: string | null
+}
+
+export interface PacSummary {
+  official_id: string
+  fec_candidate_id: string
+  election_year: number
+  total: number
+  reported_total?: number | null
+  itemized_through?: string | null
+  reported_through?: string | null
+  gift_count: number
+  pac_count: number
+  categories: PacCategory[]
+  top_pacs: Pac[]
+  synced: boolean
+  last_fetched_at?: string | null
+}
+
+export interface PacList {
+  total_count: number
+  items: Pac[]
+}
+
+export interface PacGift {
+  sub_id: string
+  receipt_date?: string | null
+  amount: number
+  two_year_period: number
+  pdf_url?: string | null
+}
+
 export interface ChamberVoteSummary {
   Yes?: number
   No?: number
