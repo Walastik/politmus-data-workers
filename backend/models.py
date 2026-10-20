@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, String, Integer, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, String, Integer, ForeignKey, Numeric, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -27,6 +27,10 @@ class Official(Base):
     website_url = Column(String, nullable=True)
     level = Column(String, nullable=False, default='federal', server_default='federal')
     openstates_id = Column(String, nullable=True, unique=True)
+    # From unitedstates/congress-legislators (fec_client.py crosswalk). A member
+    # who ran for the House and the Senate has one FEC candidate ID per race.
+    fec_candidate_ids = Column(JSONB, nullable=True)
+    opensecrets_id = Column(String, nullable=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 
@@ -350,3 +354,43 @@ class StateSyncLog(Base):
 
     state_code = Column(String, primary_key=True)
     last_synced_at = Column(DateTime, nullable=True)
+
+
+class OfficialFinanceTotal(Base):
+    """OpenFEC campaign totals for one candidate ID and one election.
+
+    election_year is FEC's candidate_election_year: amounts cover the whole
+    election period (2 years for the House, 6 for the Senate). size_breakdown
+    and state_breakdown come from Schedule A aggregates and are only fetched
+    for the most recent elections (see fec_client.py).
+    """
+    __tablename__ = "official_finance_totals"
+
+    official_id = Column(String, ForeignKey("officials.id"), primary_key=True)
+    fec_candidate_id = Column(String, primary_key=True)
+    election_year = Column(Integer, primary_key=True)
+    coverage_start_date = Column(Date, nullable=True)
+    coverage_end_date = Column(Date, nullable=True)
+    receipts = Column(Numeric(14, 2), nullable=True)
+    contributions = Column(Numeric(14, 2), nullable=True)
+    individual_contributions = Column(Numeric(14, 2), nullable=True)
+    individual_itemized = Column(Numeric(14, 2), nullable=True)
+    individual_unitemized = Column(Numeric(14, 2), nullable=True)
+    pac_contributions = Column(Numeric(14, 2), nullable=True)
+    party_contributions = Column(Numeric(14, 2), nullable=True)
+    candidate_contributions = Column(Numeric(14, 2), nullable=True)
+    candidate_loans = Column(Numeric(14, 2), nullable=True)
+    disbursements = Column(Numeric(14, 2), nullable=True)
+    cash_on_hand = Column(Numeric(14, 2), nullable=True)
+    debts = Column(Numeric(14, 2), nullable=True)
+    # [{"size": 0, "total": ..., "count": ...}, ...]; size is the bucket's lower
+    # bound in dollars (0 = $200 and under, which includes unitemized gifts).
+    size_breakdown = Column(JSONB, nullable=True)
+    # Itemized individual contributions only: {"home_state", "in_state",
+    # "out_of_state", "total", "top_states": [{"state", "total", "count"}]}.
+    state_breakdown = Column(JSONB, nullable=True)
+    # coverage_end_date the breakdowns were fetched at; equal means up to date.
+    breakdown_coverage_end_date = Column(Date, nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
+
+    official = relationship("Official")

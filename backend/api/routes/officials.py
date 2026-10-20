@@ -7,14 +7,25 @@ from sqlalchemy.orm import Session
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.schemas import (
+    FinanceElectionOut,
+    FinanceStateOut,
     OfficialDetailOut,
+    OfficialFinanceOut,
     OfficialOut,
     OfficialStanceOut,
     OfficialVoteOut,
     PositionsSyncOut,
 )
 from database import get_db
-from models import Bill, Official, OfficialPositionSync, OfficialStance, RollCall, Vote
+from models import (
+    Bill,
+    Official,
+    OfficialFinanceTotal,
+    OfficialPositionSync,
+    OfficialStance,
+    RollCall,
+    Vote,
+)
 
 router = APIRouter()
 
@@ -87,6 +98,56 @@ def list_officials(
         )
         for official, status, count in rows
     ]
+
+
+def _share(part, whole):
+    if part is None or not whole:
+        return None
+    return round(part / whole, 4)
+
+
+def _finance_election_out(row):
+    sizes = row.size_breakdown or []
+    states = row.state_breakdown or {}
+    small = next((bucket["total"] for bucket in sizes if bucket["size"] == 0), None)
+    return FinanceElectionOut.model_validate(row).model_copy(
+        update={
+            "small_dollar_share": _share(small, sum(bucket["total"] for bucket in sizes)),
+            "in_state_share": _share(states.get("in_state"), states.get("total")),
+            "top_states": [FinanceStateOut(**state) for state in states.get("top_states") or []]
+            or None,
+        }
+    )
+
+
+# Registered before get_official: its {official_id:path} would swallow /finance.
+@router.get("/{official_id:path}/finance", response_model=OfficialFinanceOut)
+def get_official_finance(official_id: str, db: Session = Depends(get_db)):
+    official_id = unquote(official_id)
+    official = db.get(Official, official_id)
+    if not official:
+        raise HTTPException(status_code=404, detail="Official not found")
+
+    rows = (
+        db.query(OfficialFinanceTotal)
+        .filter(OfficialFinanceTotal.official_id == official_id)
+        .order_by(
+            desc(OfficialFinanceTotal.election_year),
+            OfficialFinanceTotal.fec_candidate_id,
+        )
+        .all()
+    )
+    return OfficialFinanceOut(
+        official_id=official.id,
+        fec_candidate_ids=official.fec_candidate_ids or [],
+        opensecrets_id=official.opensecrets_id,
+        opensecrets_url=(
+            f"https://www.opensecrets.org/members-of-congress/summary?cid={official.opensecrets_id}"
+            if official.opensecrets_id
+            else None
+        ),
+        elections=[_finance_election_out(row) for row in rows],
+    )
 
 
 @router.get("/{official_id:path}", response_model=OfficialDetailOut)

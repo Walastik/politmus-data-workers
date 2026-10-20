@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
+import CampaignFinanceSection from './components/CampaignFinanceSection'
 import CopyLinkButton from './components/CopyLinkButton'
 import StatedPositionsSection from './components/StatedPositionsSection'
 import {
@@ -174,6 +175,12 @@ export default function MemberDrawer({
                 positions={detail.stated_positions ?? []}
                 sync={detail.positions_sync ?? null}
               />
+            </SignedIn>
+          ) : null}
+
+          {(view.level ?? 'federal') === 'federal' ? (
+            <SignedIn>
+              <CampaignFinanceSection officialId={official.id} />
             </SignedIn>
           ) : null}
 
