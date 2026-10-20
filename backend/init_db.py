@@ -66,6 +66,15 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS opensecrets_id VARCHAR"
         ))
+        for column_sql in (
+            "joint_fundraising_transfers NUMERIC(14, 2)",
+            "outside_spending JSONB",
+            "outside_spending_fetched_at TIMESTAMP",
+        ):
+            conn.execute(text(
+                "ALTER TABLE official_finance_totals "
+                f"ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
         # Filled by `congress_client.py members` / `backfill-name-parts` and
         # the OpenStates sync.
         for column in (

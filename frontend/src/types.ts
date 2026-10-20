@@ -121,6 +121,48 @@ export interface FinanceState {
   count?: number | null
 }
 
+export interface FundingMixItem {
+  key: string
+  label: string
+  amount: number
+  share?: number | null
+}
+
+export interface OutsideSpender {
+  committee_id?: string | null
+  name?: string | null
+  total: number
+}
+
+export interface OutsideSpending {
+  support_total: number
+  oppose_total: number
+  support_count: number
+  oppose_count: number
+  top_support: OutsideSpender[]
+  top_oppose: OutsideSpender[]
+}
+
+export interface PeerMetric {
+  key: string
+  label: string
+  value?: number | null
+  // Share of the group below this official (0.82 = "more than 82%").
+  chamber_percentile?: number | null
+  chamber_count: number
+  party_percentile?: number | null
+  party_count: number
+}
+
+export interface PeerComparison {
+  election_year: number
+  fec_candidate_id: string
+  chamber: string
+  chamber_label: string
+  party?: string | null
+  metrics: PeerMetric[]
+}
+
 export interface FinanceElection {
   fec_candidate_id: string
   election_year: number
@@ -135,13 +177,19 @@ export interface FinanceElection {
   party_contributions?: number | null
   candidate_contributions?: number | null
   candidate_loans?: number | null
+  joint_fundraising_transfers?: number | null
   disbursements?: number | null
   cash_on_hand?: number | null
   debts?: number | null
   size_breakdown?: FinanceSizeBucket[] | null
   small_dollar_share?: number | null
+  small_donor_share?: number | null
+  pac_share?: number | null
+  funding_mix?: FundingMixItem[] | null
+  home_state?: string | null
   in_state_share?: number | null
   top_states?: FinanceState[] | null
+  outside_spending?: OutsideSpending | null
   fetched_at?: string | null
   fec_url: string
 }
@@ -153,6 +201,7 @@ export interface OfficialFinance {
   opensecrets_url?: string | null
   source: string
   elections: FinanceElection[]
+  peer_comparison?: PeerComparison | null
 }
 
 export interface ChamberVoteSummary {
