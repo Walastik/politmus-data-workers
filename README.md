@@ -318,7 +318,7 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 ### GitHub Actions ingest
 
-Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. Add one GitHub Actions secret:
+Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. FEC campaign finance runs weekly (Monday 07:30 UTC). Add one GitHub Actions secret:
 
 ```bash
 fly tokens create org
@@ -328,10 +328,10 @@ gh secret set FLY_API_TOKEN
 Use an org or personal token, not a deploy-only token (`fly ssh` rejects those). Set `OPENSTATES_API_KEY` on the Fly app (not as a GitHub secret):
 
 ```bash
-fly secrets set OPENSTATES_API_KEY=your_key_here GOOGLE_CIVIC_API_KEY=your_civic_key -a politmus-api
+fly secrets set OPENSTATES_API_KEY=your_key_here GOOGLE_CIVIC_API_KEY=your_civic_key FEC_API_KEY=your_fec_key -a politmus-api
 ```
 
-Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, or **Senate Votes Ingestion** from the Actions tab, or load data once by hand:
+Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, **Senate Votes Ingestion**, or **FEC Campaign Finance Ingestion** from the Actions tab, or load data once by hand:
 
 ```bash
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py members"
@@ -339,4 +339,6 @@ fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.p
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py enrich"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py senate-votes --congress 119 --all-sessions"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py crosswalk"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py totals"
 ```
