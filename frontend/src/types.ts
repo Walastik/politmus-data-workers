@@ -108,6 +108,53 @@ export interface OfficialDetail extends Official {
   positions_sync: PositionsSync | null
 }
 
+export interface FinanceSizeBucket {
+  // Lower bound in dollars: 0 ($200 and under), 200, 500, 1000, 2000 (and up).
+  size: number
+  total: number
+  count?: number | null
+}
+
+export interface FinanceState {
+  state: string
+  total: number
+  count?: number | null
+}
+
+export interface FinanceElection {
+  fec_candidate_id: string
+  election_year: number
+  coverage_start_date?: string | null
+  coverage_end_date?: string | null
+  receipts?: number | null
+  contributions?: number | null
+  individual_contributions?: number | null
+  individual_itemized?: number | null
+  individual_unitemized?: number | null
+  pac_contributions?: number | null
+  party_contributions?: number | null
+  candidate_contributions?: number | null
+  candidate_loans?: number | null
+  disbursements?: number | null
+  cash_on_hand?: number | null
+  debts?: number | null
+  size_breakdown?: FinanceSizeBucket[] | null
+  small_dollar_share?: number | null
+  in_state_share?: number | null
+  top_states?: FinanceState[] | null
+  fetched_at?: string | null
+  fec_url: string
+}
+
+export interface OfficialFinance {
+  official_id: string
+  fec_candidate_ids: string[]
+  opensecrets_id?: string | null
+  opensecrets_url?: string | null
+  source: string
+  elections: FinanceElection[]
+}
+
 export interface ChamberVoteSummary {
   Yes?: number
   No?: number

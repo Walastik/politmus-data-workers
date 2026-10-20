@@ -26,6 +26,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    DATABASE_URL=postgresql://postgres:postgres_password@localhost:5432/politmus_local
    CONGRESS_GOV_API_KEY=your_key_here
    OPENSTATES_API_KEY=your_key_here
+   FEC_API_KEY=your_key_here
    GOOGLE_CIVIC_API_KEY=your_google_civic_api_key_here
    CIVIC_ELECTION_ID_OVERRIDE=
    CLIENT_IP_HEADER=
@@ -36,6 +37,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
 
    - Get a Congress.gov API key at [api.congress.gov/sign-up](https://api.congress.gov/sign-up/).
    - Get an OpenStates API key from [openstates.org/accounts/signup](https://openstates.org/accounts/signup/).
+   - Get a free OpenFEC key at [api.data.gov/signup](https://api.data.gov/signup/) (1,000 requests/hour). Without one `fec_client.py` uses `DEMO_KEY`, which runs out after a handful of requests.
    - **Google Civic Information API key**: Needed for voting location lookups (`POST /api/voter-info`).
      - Enable the **Google Civic Information API** in the [Google Cloud Console](https://console.cloud.google.com/).
      - Create an API key and **restrict the key** under "API restrictions" to only allow calls to the *Google Civic Information API* to minimize risk.
@@ -263,6 +265,23 @@ python openstates_client.py members --all-states
 python openstates_client.py bills --state TX
 python openstates_client.py bills --state Texas --limit 20
 ```
+
+### `fec_client.py`
+
+Campaign finance for current members of Congress from the [OpenFEC API](https://api.open.fec.gov/developers/). None of the other sources (Congress.gov, OpenStates, Google Civic) carry contribution data, and the OpenSecrets API has been retired. State legislators are not covered: there is no reliable free API for state campaign finance.
+
+**Crosswalk** — downloads `legislators-current.json` from [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) (CC0) and sets `officials.fec_candidate_ids` and `opensecrets_id` by bioguide ID. One request; re-run after `congress_client.py members` picks up new members.
+
+**Totals** — for each current federal official, fetches `/candidate/{id}/totals/` for the FEC IDs matching their seat (S… for senators, H… otherwise) and upserts one `official_finance_totals` row per election: receipts, individual (itemized/unitemized), PAC, party and self-funding, spending, cash on hand and debts. The two most recent elections also get donation-size (`by_size`) and donor-state (`by_state`, itemized only) breakdowns from Schedule A. Breakdowns are only re-fetched when FEC's `coverage_end_date` moves, so a re-run costs about one request per member. Requests are paced at `FEC_REQUEST_PAUSE_SECONDS` (default 3.6s, under the 1,000/hour key limit); a first full run takes about 2 hours. If the key runs out (Retry-After over 10 minutes), the run stops; re-running is cheap for members already synced.
+
+```bash
+python fec_client.py crosswalk
+python fec_client.py totals
+python fec_client.py totals --official-id S000033
+python fec_client.py totals --limit 10
+```
+
+`GET /api/officials/{id}/finance` returns the stored elections (newest first) with small-dollar and in-state shares, top donor states, and links to the FEC and OpenSecrets pages.
 
 ## Deploy to Fly.io
 

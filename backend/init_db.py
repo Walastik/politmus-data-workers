@@ -59,6 +59,13 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS openstates_id VARCHAR"
         ))
+        # Filled by `fec_client.py crosswalk`.
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_candidate_ids JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS opensecrets_id VARCHAR"
+        ))
         # Filled by `congress_client.py members` / `backfill-name-parts` and
         # the OpenStates sync.
         for column in (

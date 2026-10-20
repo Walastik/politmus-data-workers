@@ -204,11 +204,16 @@ describe('MemberDrawer stated positions', () => {
   }
 
   beforeEach(() => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(detail), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+    // The drawer also loads campaign finance; each call needs its own Response.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      new Response(
+        JSON.stringify(
+          String(input).endsWith('/finance')
+            ? { official_id: official.id, fec_candidate_ids: [], source: 'FEC', elections: [] }
+            : detail,
+        ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
     )
   })
 

@@ -2,7 +2,7 @@ from datetime import date as Date, datetime
 import re
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -88,6 +88,64 @@ class OfficialDetailOut(OfficialOut):
     votes: list[OfficialVoteOut] = Field(default_factory=list)
     stated_positions: list[OfficialStanceOut] = Field(default_factory=list)
     positions_sync: Optional[PositionsSyncOut] = None
+
+
+class FinanceSizeBucketOut(BaseModel):
+    # Lower bound in dollars: 0 ($200 and under), 200, 500, 1000, 2000 (and up).
+    size: int
+    total: float
+    count: Optional[int] = None
+
+
+class FinanceStateOut(BaseModel):
+    state: str
+    total: float
+    count: Optional[int] = None
+
+
+class FinanceElectionOut(BaseModel):
+    """OpenFEC totals for one candidate ID and election."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fec_candidate_id: str
+    election_year: int
+    coverage_start_date: Optional[Date] = None
+    coverage_end_date: Optional[Date] = None
+    receipts: Optional[float] = None
+    contributions: Optional[float] = None
+    individual_contributions: Optional[float] = None
+    individual_itemized: Optional[float] = None
+    individual_unitemized: Optional[float] = None
+    pac_contributions: Optional[float] = None
+    party_contributions: Optional[float] = None
+    candidate_contributions: Optional[float] = None
+    candidate_loans: Optional[float] = None
+    disbursements: Optional[float] = None
+    cash_on_hand: Optional[float] = None
+    debts: Optional[float] = None
+    size_breakdown: Optional[list[FinanceSizeBucketOut]] = None
+    # Share of individual giving in the $200-and-under bucket.
+    small_dollar_share: Optional[float] = None
+    # Share of itemized individual giving from the official's own state.
+    in_state_share: Optional[float] = None
+    top_states: Optional[list[FinanceStateOut]] = None
+    fetched_at: Optional[datetime] = None
+
+    @computed_field
+    @property
+    def fec_url(self) -> str:
+        return f"https://www.fec.gov/data/candidate/{self.fec_candidate_id}/"
+
+
+class OfficialFinanceOut(BaseModel):
+    official_id: str
+    fec_candidate_ids: list[str] = Field(default_factory=list)
+    opensecrets_id: Optional[str] = None
+    opensecrets_url: Optional[str] = None
+    source: str = "Federal Election Commission (OpenFEC)"
+    # Newest election first.
+    elections: list[FinanceElectionOut] = Field(default_factory=list)
 
 
 class PositionsProgressItemOut(BaseModel):
