@@ -20,6 +20,7 @@ from congress_client import INITIAL_BACKOFF_SECONDS, MAX_RETRIES, _retry_wait_se
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Official, OfficialFinanceTotal
+from services.finance_insights import is_completed
 
 BASE_URL = "https://api.open.fec.gov/v1"
 CROSSWALK_URL = (
@@ -35,6 +36,10 @@ MAX_RATE_LIMIT_WAIT_SECONDS = 600.0
 # elections get them (the one in progress and the last one decided).
 BREAKDOWN_ELECTIONS = 2
 TOP_STATES = 5
+TOP_OUTSIDE_SPENDERS = 5
+# by_candidate aggregates one row per spender and side; a big race can need
+# a few pages.
+OUTSIDE_SPENDING_MAX_PAGES = 5
 
 # FEC column -> OfficialFinanceTotal column.
 TOTALS_FIELDS = {
@@ -47,6 +52,7 @@ TOTALS_FIELDS = {
     "political_party_committee_contributions": "party_contributions",
     "candidate_contribution": "candidate_contributions",
     "loans_made_by_candidate": "candidate_loans",
+    "transfers_from_other_authorized_committee": "joint_fundraising_transfers",
     "disbursements": "disbursements",
     "last_cash_on_hand_end_period": "cash_on_hand",
     "last_debts_owed_by_committee": "debts",
@@ -256,9 +262,62 @@ def fetch_breakdowns(fec_id, election_year, home_state):
     )
 
 
-def sync_official_finance(session, official):
+def outside_spending_summary(results):
+    """Support/oppose totals and top spenders from Schedule E by_candidate rows."""
+    sides = {"S": {}, "O": {}}
+    for row in results:
+        side = sides.get(row.get("support_oppose_indicator"))
+        if side is None:
+            continue
+        key = row.get("committee_id") or row.get("committee_name")
+        spender = side.setdefault(
+            key,
+            {"committee_id": row.get("committee_id"), "name": row.get("committee_name"), "total": 0.0},
+        )
+        spender["total"] += float(row.get("total") or 0)
+
+    summary = {}
+    for code, name in (("S", "support"), ("O", "oppose")):
+        spenders = sorted(sides[code].values(), key=lambda s: s["total"], reverse=True)
+        for spender in spenders:
+            spender["total"] = round(spender["total"], 2)
+        summary[f"{name}_total"] = round(sum(s["total"] for s in spenders), 2)
+        summary[f"{name}_count"] = len(spenders)
+        summary[f"top_{name}"] = spenders[:TOP_OUTSIDE_SPENDERS]
+    return summary
+
+
+def fetch_outside_spending(fec_id, election_year):
+    results = []
+    for page in range(1, OUTSIDE_SPENDING_MAX_PAGES + 1):
+        payload = fec_get(
+            "/schedules/schedule_e/by_candidate/",
+            params={
+                "candidate_id": fec_id,
+                "cycle": election_year,
+                "election_full": "true",
+                "per_page": 100,
+                "page": page,
+            },
+        )
+        results.extend(payload.get("results") or [])
+        pages = (payload.get("pagination") or {}).get("pages") or 1
+        if page >= pages:
+            break
+    return outside_spending_summary(results)
+
+
+def outside_spending_due(row, today=None):
+    """Groups can spend any time, so a race still under way refreshes every run;
+    a finished one is fetched once."""
+    if row.outside_spending is None:
+        return True
+    return not is_completed(row.election_year, today)
+
+
+def sync_official_finance(session, official, today=None):
     """Upsert totals for one official; refresh breakdowns that are out of date."""
-    stats = {"elections": 0, "breakdowns": 0}
+    stats = {"elections": 0, "breakdowns": 0, "outside_spending": 0}
     fec_ids = fec_ids_for_office(official.fec_candidate_ids, official.office)
     home_state = _home_state_abbr(official.state)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -283,6 +342,10 @@ def sync_official_finance(session, official):
     for row in rows[:BREAKDOWN_ELECTIONS]:
         if not row.receipts:
             continue
+        if outside_spending_due(row, today):
+            row.outside_spending = fetch_outside_spending(row.fec_candidate_id, row.election_year)
+            row.outside_spending_fetched_at = now
+            stats["outside_spending"] += 1
         if row.size_breakdown is not None and row.breakdown_coverage_end_date == row.coverage_end_date:
             continue
         row.size_breakdown, row.state_breakdown = fetch_breakdowns(
@@ -329,7 +392,10 @@ def run_totals(official_id=None, limit=None):
                 print(f"  Failed: {exc}")
                 continue
             synced += 1
-            print(f"  {stats['elections']} elections, {stats['breakdowns']} breakdowns refreshed")
+            print(
+                f"  {stats['elections']} elections, {stats['breakdowns']} breakdowns and "
+                f"{stats['outside_spending']} outside-spending totals refreshed"
+            )
         print(f"Done: {synced} synced, {failed} failed, {len(officials)} selected.")
     finally:
         session.close()

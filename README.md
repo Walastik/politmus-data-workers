@@ -272,7 +272,7 @@ Campaign finance for current members of Congress from the [OpenFEC API](https://
 
 **Crosswalk** — downloads `legislators-current.json` from [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) (CC0) and sets `officials.fec_candidate_ids` and `opensecrets_id` by bioguide ID. One request; re-run after `congress_client.py members` picks up new members.
 
-**Totals** — for each current federal official, fetches `/candidate/{id}/totals/` for the FEC IDs matching their seat (S… for senators, H… otherwise) and upserts one `official_finance_totals` row per election: receipts, individual (itemized/unitemized), PAC, party and self-funding, spending, cash on hand and debts. The two most recent elections also get donation-size (`by_size`) and donor-state (`by_state`, itemized only) breakdowns from Schedule A. Breakdowns are only re-fetched when FEC's `coverage_end_date` moves, so a re-run costs about one request per member. Requests are paced at `FEC_REQUEST_PAUSE_SECONDS` (default 3.6s, under the 1,000/hour key limit); a first full run takes about 2 hours. If the key runs out (Retry-After over 10 minutes), the run stops; re-running is cheap for members already synced.
+**Totals** — for each current federal official, fetches `/candidate/{id}/totals/` for the FEC IDs matching their seat (S… for senators, H… otherwise) and upserts one `official_finance_totals` row per election: receipts, individual (itemized/unitemized), PAC, party and self-funding, spending, cash on hand and debts. The two most recent elections also get donation-size (`by_size`) and donor-state (`by_state`, itemized only) breakdowns from Schedule A, plus outside spending (Schedule E independent expenditures for and against the candidate, with the top spenders on each side). Breakdowns are only re-fetched when FEC's `coverage_end_date` moves. Outside spending for a race still under way is re-fetched on every run, since groups can spend at any time; a finished race's is fetched once. A weekly re-run costs about two requests per member. Requests are paced at `FEC_REQUEST_PAUSE_SECONDS` (default 3.6s, under the 1,000/hour key limit); a first full run takes about 2 hours. If the key runs out (Retry-After over 10 minutes), the run stops; re-running is cheap for members already synced.
 
 ```bash
 python fec_client.py crosswalk
@@ -281,7 +281,7 @@ python fec_client.py totals --official-id S000033
 python fec_client.py totals --limit 10
 ```
 
-`GET /api/officials/{id}/finance` returns the stored elections (newest first) with small-dollar and in-state shares, top donor states, and links to the FEC and OpenSecrets pages.
+`GET /api/officials/{id}/finance` returns the stored elections (newest first) with a funding mix that adds up to receipts (small donors, larger donors, joint fundraising transfers, PACs, party, candidate, other), small-donor, PAC and in-state shares, top donor states, outside spending, and links to the FEC and OpenSecrets pages. It also returns `peer_comparison`: percentiles for the member's most recent finished election against current members of the same chamber, and of the same party within it, computed from stored rows (`services/finance_insights.py`). Senate and House are never mixed because their totals cover six and two years.
 
 ## Deploy to Fly.io
 

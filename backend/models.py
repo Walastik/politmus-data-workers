@@ -380,6 +380,9 @@ class OfficialFinanceTotal(Base):
     party_contributions = Column(Numeric(14, 2), nullable=True)
     candidate_contributions = Column(Numeric(14, 2), nullable=True)
     candidate_loans = Column(Numeric(14, 2), nullable=True)
+    # Transfers from joint fundraising committees: mostly individual donors'
+    # money raised together with other candidates or the party.
+    joint_fundraising_transfers = Column(Numeric(14, 2), nullable=True)
     disbursements = Column(Numeric(14, 2), nullable=True)
     cash_on_hand = Column(Numeric(14, 2), nullable=True)
     debts = Column(Numeric(14, 2), nullable=True)
@@ -391,6 +394,11 @@ class OfficialFinanceTotal(Base):
     state_breakdown = Column(JSONB, nullable=True)
     # coverage_end_date the breakdowns were fetched at; equal means up to date.
     breakdown_coverage_end_date = Column(Date, nullable=True)
+    # Schedule E independent expenditures for/against this candidate:
+    # {"support_total", "oppose_total", "support_count", "oppose_count",
+    #  "top_support": [{"committee_id", "name", "total"}], "top_oppose": [...]}.
+    outside_spending = Column(JSONB, nullable=True)
+    outside_spending_fetched_at = Column(DateTime, nullable=True)
     fetched_at = Column(DateTime, nullable=True)
 
     official = relationship("Official")

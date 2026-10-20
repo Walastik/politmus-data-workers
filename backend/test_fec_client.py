@@ -20,6 +20,8 @@ from database import get_db
 from fec_client import (
     crosswalk_ids,
     fec_ids_for_office,
+    outside_spending_due,
+    outside_spending_summary,
     size_breakdown,
     state_breakdown,
     totals_values,
@@ -46,6 +48,7 @@ TOTALS_2024 = {
     "political_party_committee_contributions": 0,
     "candidate_contribution": 0,
     "loans_made_by_candidate": 0,
+    "transfers_from_other_authorized_committee": 1000000.0,
     "disbursements": 20000000.0,
     "last_cash_on_hand_end_period": 22374564.87,
     "last_debts_owed_by_committee": 0,
@@ -62,6 +65,12 @@ SIZES = [
     {"candidate_id": "S4VT00033", "size": 0, "total": 900.0, "count": None},
     {"candidate_id": "S4VT00033", "size": 200, "total": 300.0, "count": 2},
 ]
+OUTSIDE = [
+    {"committee_id": "C001", "committee_name": "Friends PAC", "support_oppose_indicator": "S", "total": 400.0},
+    {"committee_id": "C001", "committee_name": "Friends PAC", "support_oppose_indicator": "S", "total": 100.0},
+    {"committee_id": "C002", "committee_name": "Union Fund", "support_oppose_indicator": "S", "total": 200.0},
+    {"committee_id": "C003", "committee_name": "Against PAC", "support_oppose_indicator": "O", "total": 50.0},
+]
 STATES = [
     {"state": "CA", "total": 500.0, "count": 10},
     {"state": "VT", "total": 300.0, "count": 6},
@@ -76,6 +85,8 @@ def fake_fec_get(path, params=None):
         return {"results": SIZES}
     if "by_state" in path:
         return {"results": STATES}
+    if "schedule_e" in path:
+        return {"results": OUTSIDE, "pagination": {"pages": 1}}
     raise AssertionError(path)
 
 
@@ -128,6 +139,34 @@ class FecGetTests(unittest.TestCase):
             with self.assertRaises(fec_client.RateLimited):
                 fec_client.fec_get("/candidate/S4VT00033/totals/")
         self.assertTrue(all(call.args[0] < 60 for call in sleep.call_args_list))
+
+
+class OutsideSpendingTests(unittest.TestCase):
+    def test_summary_merges_rows_per_spender_and_side(self):
+        summary = outside_spending_summary(OUTSIDE)
+        self.assertEqual(summary["support_total"], 700.0)
+        self.assertEqual(summary["oppose_total"], 50.0)
+        self.assertEqual(summary["support_count"], 2)
+        self.assertEqual(
+            summary["top_support"][0],
+            {"committee_id": "C001", "name": "Friends PAC", "total": 500.0},
+        )
+        self.assertEqual(summary["top_oppose"][0]["name"], "Against PAC")
+
+    def test_summary_without_spending(self):
+        summary = outside_spending_summary([])
+        self.assertEqual(summary["support_total"], 0)
+        self.assertEqual(summary["top_oppose"], [])
+
+    def test_refresh_rule(self):
+        today = date(2026, 10, 19)
+        fresh = unittest.mock.MagicMock(outside_spending={"support_total": 1})
+        missing = unittest.mock.MagicMock(outside_spending=None)
+        fresh.election_year = missing.election_year = 2024
+        self.assertFalse(outside_spending_due(fresh, today))
+        self.assertTrue(outside_spending_due(missing, today))
+        fresh.election_year = 2026
+        self.assertTrue(outside_spending_due(fresh, today))
 
 
 class RouteOrderingTests(unittest.TestCase):
@@ -216,7 +255,9 @@ class FinanceSyncTests(unittest.TestCase):
             official.fec_candidate_ids = ["H8VT01016", "S4VT00033"]
             official.opensecrets_id = "N00000528"
             with patch.object(fec_client, "fec_get", side_effect=fake_fec_get) as mock_get:
-                stats = fec_client.sync_official_finance(session, official)
+                stats = fec_client.sync_official_finance(
+                    session, official, today=date(2026, 10, 19)
+                )
             session.commit()
             return stats, mock_get
         finally:
@@ -224,13 +265,15 @@ class FinanceSyncTests(unittest.TestCase):
 
     def test_sync_is_idempotent_and_skips_fresh_breakdowns(self):
         stats, first = self._sync()
-        self.assertEqual(stats, {"elections": 2, "breakdowns": 2})
-        # One totals call (Senate ID only) plus size + state for each election.
-        self.assertEqual(first.call_count, 5)
+        self.assertEqual(stats, {"elections": 2, "breakdowns": 2, "outside_spending": 2})
+        # One totals call (Senate ID only), then outside spending, size and
+        # state for each election.
+        self.assertEqual(first.call_count, 7)
 
+        # The finished 2024 race keeps its outside spending; 2030 refreshes.
         stats, second = self._sync()
-        self.assertEqual(stats, {"elections": 2, "breakdowns": 0})
-        self.assertEqual(second.call_count, 1)
+        self.assertEqual(stats, {"elections": 2, "breakdowns": 0, "outside_spending": 1})
+        self.assertEqual(second.call_count, 2)
 
         from models import OfficialFinanceTotal
 
@@ -257,6 +300,15 @@ class FinanceSyncTests(unittest.TestCase):
         self.assertEqual(latest["in_state_share"], 0.3)
         self.assertEqual(latest["top_states"][0]["state"], "CA")
         self.assertEqual(latest["fec_url"], "https://www.fec.gov/data/candidate/S4VT00033/")
+        self.assertEqual(latest["home_state"], "VT")
+        self.assertEqual(latest["outside_spending"]["support_total"], 700.0)
+        mix = {item["key"]: item for item in body["elections"][1]["funding_mix"]}
+        self.assertEqual(mix["joint_fundraising"]["amount"], 1000000.0)
+
+        # Peers: the official's own finished election only, nobody else to compare with.
+        comparison = body["peer_comparison"]
+        self.assertEqual(comparison["election_year"], 2024)
+        self.assertEqual(comparison["chamber_label"], "senators")
 
     def test_finance_endpoint_404(self):
         response = self.client.get("/api/officials/ZZFEC404/finance")

@@ -103,6 +103,52 @@ class FinanceStateOut(BaseModel):
     count: Optional[int] = None
 
 
+class FundingMixItemOut(BaseModel):
+    key: str
+    label: str
+    amount: float
+    share: Optional[float] = None
+
+
+class OutsideSpenderOut(BaseModel):
+    committee_id: Optional[str] = None
+    name: Optional[str] = None
+    total: float
+
+
+class OutsideSpendingOut(BaseModel):
+    """Independent expenditures (Schedule E) other groups made for or against."""
+
+    support_total: float = 0
+    oppose_total: float = 0
+    support_count: int = 0
+    oppose_count: int = 0
+    top_support: list[OutsideSpenderOut] = Field(default_factory=list)
+    top_oppose: list[OutsideSpenderOut] = Field(default_factory=list)
+
+
+class PeerMetricOut(BaseModel):
+    key: str
+    label: str
+    value: Optional[float] = None
+    # Share of the comparison group below this official (0.82 = "more than 82%").
+    chamber_percentile: Optional[float] = None
+    chamber_count: int = 0
+    party_percentile: Optional[float] = None
+    party_count: int = 0
+
+
+class PeerComparisonOut(BaseModel):
+    """Latest finished election compared with the rest of the chamber."""
+
+    election_year: int
+    fec_candidate_id: str
+    chamber: str
+    chamber_label: str
+    party: Optional[str] = None
+    metrics: list[PeerMetricOut] = Field(default_factory=list)
+
+
 class FinanceElectionOut(BaseModel):
     """OpenFEC totals for one candidate ID and election."""
 
@@ -121,15 +167,22 @@ class FinanceElectionOut(BaseModel):
     party_contributions: Optional[float] = None
     candidate_contributions: Optional[float] = None
     candidate_loans: Optional[float] = None
+    joint_fundraising_transfers: Optional[float] = None
     disbursements: Optional[float] = None
     cash_on_hand: Optional[float] = None
     debts: Optional[float] = None
     size_breakdown: Optional[list[FinanceSizeBucketOut]] = None
-    # Share of individual giving in the $200-and-under bucket.
+    # Share of individual giving in the $200-and-under bucket (per gift).
     small_dollar_share: Optional[float] = None
-    # Share of itemized individual giving from the official's own state.
+    # Share of individual money from donors whose gifts totaled $200 or less.
+    small_donor_share: Optional[float] = None
+    pac_share: Optional[float] = None
+    funding_mix: Optional[list[FundingMixItemOut]] = None
+    # Itemized individual giving only.
+    home_state: Optional[str] = None
     in_state_share: Optional[float] = None
     top_states: Optional[list[FinanceStateOut]] = None
+    outside_spending: Optional[OutsideSpendingOut] = None
     fetched_at: Optional[datetime] = None
 
     @computed_field
@@ -146,6 +199,7 @@ class OfficialFinanceOut(BaseModel):
     source: str = "Federal Election Commission (OpenFEC)"
     # Newest election first.
     elections: list[FinanceElectionOut] = Field(default_factory=list)
+    peer_comparison: Optional[PeerComparisonOut] = None
 
 
 class PositionsProgressItemOut(BaseModel):
