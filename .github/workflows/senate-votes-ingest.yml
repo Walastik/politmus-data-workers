@@ -47,13 +47,29 @@ jobs:
           # Senate.gov blocks Fly.io datacenter IPs, but not GitHub Actions.
           # We run the script locally here and proxy the DB connection to Fly.
           
-          # Start a proxy to the database in the background
-          flyctl proxy 5432 -a politmus-db &
-          PROXY_PID=$!
-          
-          # Wait for the proxy tunnel to establish
-          sleep 5
-          
+          # Start a proxy to the database in the background, retrying when
+          # the Fly tunnel can't be opened (flyctl exits early in that case).
+          PROXY_PID=
+          for attempt in 1 2 3 4; do
+            flyctl proxy 5432 -a politmus-db &
+            PROXY_PID=$!
+            for _ in $(seq 1 30); do
+              kill -0 "$PROXY_PID" 2>/dev/null || break
+              (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null && break 2
+              sleep 1
+            done
+            kill "$PROXY_PID" 2>/dev/null || true
+            PROXY_PID=
+            if [ "$attempt" -lt 4 ]; then
+              echo "::warning::Fly proxy failed to start (attempt $attempt/4); retrying in $((attempt * 30))s"
+              sleep $((attempt * 30))
+            fi
+          done
+          if [ -z "$PROXY_PID" ]; then
+            echo "::error::Fly proxy failed to start after 4 attempts"
+            exit 1
+          fi
+
           # Rewrite the connection string to use our localhost proxy
           export DATABASE_URL=$(echo $SECRET_DB_URL | sed 's/@.*:5432/@localhost:5432/')
           
