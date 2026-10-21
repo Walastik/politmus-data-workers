@@ -6,6 +6,10 @@ totals: fetch per-election totals for each current member, plus donation-size
     and donor-state breakdowns for their most recent elections.
 pacs: fetch every itemized PAC gift (Form 3 line 11C) for those elections.
     Needs `totals` first; time-boxed and resumable.
+candidates: load everyone running for the House or Senate in a cycle into
+    candidacies, linking sitting members and adding level='candidate'
+    officials for everyone else. `totals --candidates` and `pacs --candidates`
+    then fetch their finance detail.
 """
 
 import argparse
@@ -16,14 +20,15 @@ from decimal import Decimal
 
 import requests
 
-from api.filters import STATE_ABBR_BY_NAME
+from api.filters import STATE_ABBR_BY_NAME, STATE_NAME_BY_ABBR
 from config import FEC_API_KEY
 from congress_client import INITIAL_BACKOFF_SECONDS, MAX_RETRIES, _retry_wait_seconds
 from database import SessionLocal
 from init_db import ensure_schema
 from sqlalchemy import func
 
-from models import Official, OfficialFinanceTotal, PacContribution, PacContributionSync
+from models import Candidacy, Official, OfficialFinanceTotal, PacContribution, PacContributionSync
+from services.candidate_races import CANDIDATE_LEVEL, current_cycle
 from services.finance_insights import election_periods, is_completed, pac_category
 
 BASE_URL = "https://api.open.fec.gov/v1"
@@ -54,6 +59,26 @@ CAMPAIGN_COMMITTEE_DESIGNATIONS = {"P", "A"}
 # by_candidate aggregates one row per spender and side; a big race can need
 # a few pages.
 OUTSIDE_SPENDING_MAX_PAGES = 5
+
+CANDIDATE_OFFICES = {"S": "Senate candidate", "H": "House candidate"}
+# Candidates below this keep their candidacy row (the "all filers" view) but
+# get no totals/PAC detail; there are a few thousand of them.
+CANDIDATE_DETAIL_MIN_RECEIPTS = Decimal("50000")
+# FEC party code -> the full name Congress.gov uses on officials.
+FEC_PARTIES = {
+    "DEM": "Democratic",
+    "DFL": "Democratic",
+    "REP": "Republican",
+    "IND": "Independent",
+    "NPA": "Independent",
+    "NNE": "Independent",
+    "UN": "Independent",
+    "LIB": "Libertarian",
+    "GRE": "Green",
+    "CON": "Constitution",
+}
+NAME_PREFIXES = {"MR", "MRS", "MS", "MISS", "DR", "HON", "REV", "SEN", "REP", "GEN", "COL"}
+NAME_SUFFIXES = {"JR": "Jr.", "SR": "Sr.", "II": "II", "III": "III", "IV": "IV", "V": "V", "MD": "M.D.", "PHD": "Ph.D."}
 
 # FEC column -> OfficialFinanceTotal column.
 TOTALS_FIELDS = {
@@ -178,7 +203,8 @@ def fec_ids_for_office(fec_ids, office):
     FEC IDs start with the office sought: S (Senate), H (House, including
     delegates and the resident commissioner) or P (President).
     """
-    prefix = "S" if (office or "").strip().lower() == "senator" else "H"
+    office = (office or "").strip().lower()
+    prefix = "S" if office in ("senator", CANDIDATE_OFFICES["S"].lower()) else "H"
     return [fec_id for fec_id in fec_ids or [] if fec_id.upper().startswith(prefix)]
 
 
@@ -329,10 +355,15 @@ def outside_spending_due(row, today=None):
     return not is_completed(row.election_year, today)
 
 
-def sync_official_finance(session, official, today=None):
-    """Upsert totals for one official; refresh breakdowns that are out of date."""
+def sync_official_finance(session, official, today=None, fec_ids=None):
+    """Upsert totals for one official; refresh breakdowns that are out of date.
+
+    fec_ids defaults to the IDs for the seat the official holds; a member
+    running for another seat passes that race's ID.
+    """
     stats = {"elections": 0, "breakdowns": 0, "outside_spending": 0}
-    fec_ids = fec_ids_for_office(official.fec_candidate_ids, official.office)
+    if fec_ids is None:
+        fec_ids = fec_ids_for_office(official.fec_candidate_ids, official.office)
     home_state = _home_state_abbr(official.state)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -450,9 +481,10 @@ def pac_sync_due(sync, period, coverage_end_date, today=None):
     return not caught_up and today <= coverage_end_date + timedelta(days=PAC_PROCESSING_DAYS)
 
 
-def pac_targets(session, official, today=None):
+def pac_targets(session, official, today=None, fec_ids=None):
     """(fec_id, period, coverage_end_date) for the official's recent elections."""
-    fec_ids = fec_ids_for_office(official.fec_candidate_ids, official.office)
+    if fec_ids is None:
+        fec_ids = fec_ids_for_office(official.fec_candidate_ids, official.office)
     rows = (
         session.query(OfficialFinanceTotal)
         .filter(
@@ -474,11 +506,11 @@ def pac_targets(session, official, today=None):
     return [(fec_id, period, end) for (fec_id, period), end in sorted(targets.items())]
 
 
-def sync_official_pacs(session, official, today=None):
+def sync_official_pacs(session, official, today=None, fec_ids=None):
     """Fetch the PAC gifts that are due for one official; returns stats."""
     stats = {"periods": 0, "skipped": 0, "gifts": 0}
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    targets = pac_targets(session, official, today)
+    targets = pac_targets(session, official, today, fec_ids)
     committees = dict(official.fec_committees or {})
     for fec_id in sorted({fec_id for fec_id, _, _ in targets}):
         if fec_id not in committees:
@@ -529,6 +561,326 @@ def sync_official_pacs(session, official, today=None):
             stats["periods"] += 1
             stats["gifts"] += len(seen)
     return stats
+
+
+def _name_case(word):
+    """Title-case one word of an all-caps FEC name ("MCCAUL" -> "McCaul")."""
+    word = "-".join(part.capitalize() for part in word.lower().split("-"))
+    word = "'".join(part[:1].upper() + part[1:] for part in word.split("'"))
+    if len(word) > 2 and word.startswith("Mc"):
+        word = "Mc" + word[2:].capitalize()
+    return word
+
+
+def parse_fec_name(fec_name):
+    """Name parts from FEC's "LAST, FIRST MIDDLE SUFFIX" form.
+
+    Quoted or parenthesized words are nicknames ('CRUZ, RAFAEL EDWARD "TED"');
+    honorifics are dropped and suffixes can sit on either side of the comma.
+    """
+    last, _, rest = (fec_name or "").partition(",")
+    parts = {"first_name": None, "middle_name": None, "last_name": None,
+             "suffix_name": None, "nickname": None}
+    given = []
+    for word in rest.replace("(", ' "').replace(")", '" ').split():
+        bare = word.strip('".,').upper()
+        if not bare:
+            continue
+        if word.startswith('"') or word.endswith('"'):
+            parts["nickname"] = _name_case(bare)
+        elif bare in NAME_SUFFIXES:
+            parts["suffix_name"] = NAME_SUFFIXES[bare]
+        elif bare in NAME_PREFIXES:
+            continue
+        else:
+            given.append(_name_case(bare) + ("." if len(bare) == 1 else ""))
+    last_words = []
+    for word in last.split():
+        bare = word.strip(".,").upper()
+        if bare in NAME_SUFFIXES:
+            parts["suffix_name"] = NAME_SUFFIXES[bare]
+        elif bare not in NAME_PREFIXES:
+            last_words.append(_name_case(word.strip(",")))
+    parts["last_name"] = " ".join(last_words) or None
+    if given:
+        parts["first_name"] = given[0]
+        parts["middle_name"] = " ".join(given[1:]) or None
+    return parts
+
+
+def fec_party(code, full=None):
+    if code and code.upper() in FEC_PARTIES:
+        return FEC_PARTIES[code.upper()]
+    if full:
+        return " ".join(_name_case(word) for word in full.split() if word.upper() != "PARTY") or None
+    return None
+
+
+def candidacy_values(result):
+    """Candidacy column values from one /candidates/totals/ row; None if unusable."""
+    office = (result.get("office") or "").upper()
+    state = (result.get("state") or "").upper()
+    if office not in CANDIDATE_OFFICES or not state or not result.get("candidate_id"):
+        return None
+    district = result.get("district_number")
+    return {
+        "fec_candidate_id": result["candidate_id"],
+        "election_year": int(result.get("candidate_election_year") or result["election_year"]),
+        "state": state,
+        "office": office,
+        "district": int(district) if office == "H" and district is not None else 0,
+        "party": fec_party(result.get("party"), result.get("party_full")),
+        "incumbent_challenge": result.get("incumbent_challenge"),
+        "candidate_status": result.get("candidate_status"),
+        "receipts": _money(result.get("receipts")),
+        "disbursements": _money(result.get("disbursements")),
+        "cash_on_hand": _money(result.get("cash_on_hand_end_period")),
+        "coverage_end_date": _date(result.get("coverage_end_date")),
+    }
+
+
+def fetch_candidate_totals(cycle, office, state=None):
+    """Every candidate who raised money for one office and cycle, richest first."""
+    params = {
+        "election_year": cycle,
+        "office": office,
+        "election_full": "true",
+        "is_active_candidate": "true",
+        "has_raised_funds": "true",
+        "per_page": 100,
+        "sort": "-receipts",
+    }
+    if state:
+        params["state"] = state
+    results = []
+    page = 1
+    while True:
+        payload = fec_get("/candidates/totals/", params={**params, "page": page})
+        results.extend(payload.get("results") or [])
+        if page >= ((payload.get("pagination") or {}).get("pages") or 1):
+            return results
+        page += 1
+
+
+def fetch_general_election_candidates(cycle):
+    """FEC candidate IDs whose campaign filed a pre-general report this cycle.
+
+    Filings name only the committee, so their candidate IDs come from
+    /committees/, 100 committees per call.
+    """
+    committee_ids = set()
+    page = 1
+    while True:
+        payload = fec_get(
+            "/filings/",
+            params={
+                "cycle": cycle,
+                "report_type": "12G",
+                "form_type": "F3",
+                "most_recent": "true",
+                "per_page": 100,
+                "page": page,
+            },
+        )
+        committee_ids.update(row["committee_id"] for row in payload.get("results") or [] if row.get("committee_id"))
+        if page >= ((payload.get("pagination") or {}).get("pages") or 1):
+            break
+        page += 1
+    candidate_ids = set()
+    ordered = sorted(committee_ids)
+    for start in range(0, len(ordered), 100):
+        payload = fec_get(
+            "/committees/",
+            params={"committee_id": ordered[start:start + 100], "per_page": 100},
+        )
+        for row in payload.get("results") or []:
+            if row.get("designation") in CAMPAIGN_COMMITTEE_DESIGNATIONS:
+                candidate_ids.update(row.get("candidate_ids") or [])
+    return candidate_ids
+
+
+def member_ids_by_fec_id(session):
+    """FEC candidate ID -> federal official (current or former) holding it."""
+    rows = (
+        session.query(Official.id, Official.fec_candidate_ids)
+        .filter(Official.fec_candidate_ids.isnot(None), Official.level == "federal")
+        .order_by(Official.current_member.asc())
+        .all()
+    )
+    # Current members are listed last so they win a shared ID.
+    return {fec_id: official_id for official_id, fec_ids in rows for fec_id in fec_ids or []}
+
+
+def upsert_candidate_official(session, values, fec_name):
+    """The level='candidate' official for a non-member, created or refreshed."""
+    official = session.get(Official, values["fec_candidate_id"])
+    if official is None:
+        official = Official(
+            id=values["fec_candidate_id"],
+            level=CANDIDATE_LEVEL,
+            current_member=False,
+            fec_candidate_ids=[values["fec_candidate_id"]],
+        )
+        session.add(official)
+    # Wikidata's label beats FEC's legal name once matched.
+    if not official.wikidata_id:
+        parts = parse_fec_name(fec_name)
+        for column, value in parts.items():
+            setattr(official, column, value)
+        # Show the name they campaign under: "Ted Cruz", not "Rafael Edward Cruz".
+        if parts["nickname"]:
+            official.first_name = parts["nickname"]
+            official.middle_name = None
+        official.name = ", ".join(
+            part for part in (parts["last_name"], " ".join(
+                p for p in (parts["first_name"], parts["middle_name"], parts["suffix_name"]) if p
+            )) if part
+        ) or fec_name
+    official.state = STATE_NAME_BY_ABBR.get(values["state"], values["state"])
+    official.party = values["party"]
+    official.office = CANDIDATE_OFFICES[values["office"]]
+    official.district = values["district"] if values["office"] == "H" else None
+    return official
+
+
+def sync_candidacies(session, results, members=None, now=None):
+    """Upsert candidacies from /candidates/totals/ rows; returns stats and seen keys."""
+    members = member_ids_by_fec_id(session) if members is None else members
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    stats = {"candidacies": 0, "members": 0, "candidates": 0, "skipped": 0}
+    seen = set()
+    for result in results:
+        values = candidacy_values(result)
+        if values is None:
+            stats["skipped"] += 1
+            continue
+        key = (values["fec_candidate_id"], values["election_year"])
+        if key in seen:
+            continue
+        seen.add(key)
+        official_id = members.get(values["fec_candidate_id"])
+        if official_id:
+            stats["members"] += 1
+        else:
+            official_id = upsert_candidate_official(session, values, result.get("name")).id
+            stats["candidates"] += 1
+        candidacy = session.get(Candidacy, key)
+        if candidacy is None:
+            candidacy = Candidacy(fec_candidate_id=key[0], election_year=key[1])
+            session.add(candidacy)
+        for column, value in values.items():
+            setattr(candidacy, column, value)
+        candidacy.official_id = official_id
+        candidacy.fetched_at = now
+        stats["candidacies"] += 1
+    session.flush()
+    return stats, seen
+
+
+def run_candidates(cycle=None, offices=None, state=None):
+    """Load every House and Senate candidate for the cycle into candidacies."""
+    ensure_schema()
+    cycle = cycle or current_cycle()
+    offices = offices or sorted(CANDIDATE_OFFICES)
+    state = state.upper() if state else None
+    session = SessionLocal()
+    try:
+        members = member_ids_by_fec_id(session)
+        for office in offices:
+            started = datetime.now(timezone.utc).replace(tzinfo=None)
+            try:
+                results = fetch_candidate_totals(cycle, office, state)
+            except RateLimited as exc:
+                print(f"{office}: {exc}. Stopping; re-run later.")
+                break
+            stats, _ = sync_candidacies(session, results, members, now=started)
+            # A full sweep drops candidates who stopped filing or withdrew.
+            stale = session.query(Candidacy).filter(
+                Candidacy.election_year == cycle,
+                Candidacy.office == office,
+                Candidacy.fetched_at < started,
+            )
+            if state:
+                stale = stale.filter(Candidacy.state == state)
+            removed = stale.delete(synchronize_session=False)
+            session.commit()
+            print(
+                f"{cycle} {office}{' ' + state if state else ''}: {stats['candidacies']} candidacies "
+                f"({stats['members']} members, {stats['candidates']} candidates), {removed} removed."
+            )
+        try:
+            general = fetch_general_election_candidates(cycle)
+        except RateLimited as exc:
+            print(f"Pre-general filings: {exc}. Ballot flags left as they were.")
+            return
+        rows = session.query(Candidacy).filter(Candidacy.election_year == cycle).all()
+        for candidacy in rows:
+            candidacy.in_general_election = candidacy.fec_candidate_id in general
+        session.commit()
+        print(f"{sum(c.in_general_election for c in rows)} candidacies filed a pre-general report.")
+    finally:
+        session.close()
+
+
+def candidacies_due(session, cycle=None, state=None, office=None, official_id=None):
+    """Candidacies worth a detail sync, least recently synced and richest first."""
+    query = session.query(Candidacy).filter(
+        Candidacy.election_year == (cycle or current_cycle()),
+        Candidacy.receipts >= CANDIDATE_DETAIL_MIN_RECEIPTS,
+    )
+    if state:
+        query = query.filter(Candidacy.state == state.upper())
+    if office:
+        query = query.filter(Candidacy.office == office.upper())
+    if official_id:
+        query = query.filter(Candidacy.official_id == official_id)
+    return query.order_by(
+        Candidacy.detail_fetched_at.asc().nulls_first(), Candidacy.receipts.desc()
+    ).all()
+
+
+def run_candidate_detail(kind, cycle=None, state=None, office=None, official_id=None,
+                         limit=None, max_minutes=None):
+    """`totals` or `pacs` for candidacies, within a time budget."""
+    ensure_schema()
+    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
+    session = SessionLocal()
+    try:
+        candidacies = candidacies_due(session, cycle, state, office, official_id)
+        if limit:
+            candidacies = candidacies[:limit]
+        if not candidacies:
+            print("No candidacies to sync. Run `python fec_client.py candidates` first.")
+            return
+        synced = failed = 0
+        for index, candidacy in enumerate(candidacies, start=1):
+            if deadline and time.monotonic() > deadline:
+                print(f"Time budget of {max_minutes} minutes used; stopping. Re-run to continue.")
+                break
+            official = candidacy.official
+            print(f"[{index}/{len(candidacies)}] {candidacy.fec_candidate_id} {official.display_name}")
+            fec_ids = [candidacy.fec_candidate_id]
+            try:
+                if kind == "totals":
+                    stats = sync_official_finance(session, official, fec_ids=fec_ids)
+                    candidacy.detail_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                else:
+                    stats = sync_official_pacs(session, official, fec_ids=fec_ids)
+                session.commit()
+            except RateLimited as exc:
+                session.rollback()
+                print(f"  {exc}. Stopping; re-run later to continue.")
+                break
+            except Exception as exc:
+                session.rollback()
+                failed += 1
+                print(f"  Failed: {exc}")
+                continue
+            synced += 1
+            print(f"  {stats}")
+        print(f"Done: {synced} synced, {failed} failed, {len(candidacies)} selected.")
+    finally:
+        session.close()
 
 
 def run_pacs(official_id=None, limit=None, max_minutes=None):
@@ -662,10 +1014,45 @@ def main():
         type=float,
         help="Stop starting new officials after this many minutes; the next run continues.",
     )
+    candidates = subparsers.add_parser(
+        "candidates",
+        help="Load everyone running for the House or Senate in a cycle into candidacies.",
+    )
+    candidates.add_argument("--cycle", type=int, help="Election year (default: the next even year).")
+    candidates.add_argument("--office", choices=sorted(CANDIDATE_OFFICES), help="Only S or H.")
+    candidates.add_argument("--state", help="Only this postal abbreviation.")
+    for sub in (totals, pacs):
+        sub.add_argument(
+            "--candidates",
+            action="store_true",
+            help=f"Sync this cycle's candidacies that raised at least ${CANDIDATE_DETAIL_MIN_RECEIPTS:,.0f} instead.",
+        )
+        sub.add_argument("--cycle", type=int, help="With --candidates: election year.")
+        sub.add_argument("--state", help="With --candidates: only this postal abbreviation.")
+        sub.add_argument("--office", choices=sorted(CANDIDATE_OFFICES), help="With --candidates: only S or H.")
+    totals.add_argument(
+        "--max-minutes",
+        type=float,
+        help="With --candidates: stop starting new candidates after this many minutes.",
+    )
     args = parser.parse_args()
 
     if args.command == "crosswalk":
         run_crosswalk()
+    elif args.command == "candidates":
+        run_candidates(
+            cycle=args.cycle, offices=[args.office] if args.office else None, state=args.state
+        )
+    elif args.candidates:
+        run_candidate_detail(
+            args.command,
+            cycle=args.cycle,
+            state=args.state,
+            office=args.office,
+            official_id=args.official_id,
+            limit=args.limit,
+            max_minutes=args.max_minutes,
+        )
     elif args.command == "totals":
         run_totals(official_id=args.official_id, limit=args.limit)
     elif args.command == "pacs":

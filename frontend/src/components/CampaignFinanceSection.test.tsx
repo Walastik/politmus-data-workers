@@ -139,3 +139,83 @@ describe('CampaignFinanceSection', () => {
     expect(screen.getByText(/Biggest out-of-state sources: CA/)).toBeInTheDocument()
   })
 })
+
+describe('CampaignFinanceSection race comparison', () => {
+  const candidate = (id: string, name: string, party: string, receipts: number) => ({
+    official_id: id,
+    fec_candidate_id: id,
+    name,
+    party,
+    photo_url: null,
+    website_url: null,
+    incumbent_challenge: 'C',
+    is_member: false,
+    current_member: false,
+    in_general_election: true,
+    receipts,
+    disbursements: null,
+    cash_on_hand: 1_000_000,
+    coverage_end_date: '2026-09-30',
+    positions_count: null,
+    small_donor_share: 0.54,
+    outside_support: 4_276_701,
+    outside_oppose: 1_281_079,
+  })
+
+  const candidateFinance: OfficialFinance = {
+    official_id: 'S6TX00388',
+    fec_candidate_ids: ['S6TX00388'],
+    source: 'Federal Election Commission (OpenFEC)',
+    elections: [election(2026, { fec_candidate_id: 'S6TX00388', home_state: 'TX' })],
+    peer_comparison: null,
+    race_comparison: {
+      key: '2026-TX-S',
+      election_year: 2026,
+      election_date: '2026-11-03',
+      state: 'TX',
+      state_name: 'Texas',
+      office: 'S',
+      district: 0,
+      label: 'U.S. Senate',
+      total_receipts: 148_270_645,
+      ballot_filtered: true,
+      hidden_count: 4,
+      candidates: [
+        candidate('S6TX00479', 'James Talarico', 'Democratic', 128_772_835),
+        candidate('S6TX00388', 'Ken Paxton', 'Republican', 19_497_809),
+      ],
+    },
+  }
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input) =>
+        new Response(
+          JSON.stringify(
+            String(input).includes('/finance/pacs')
+              ? { synced: false, gift_count: 0, categories: [], top_pacs: [] }
+              : candidateFinance,
+          ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('lists the race side by side and marks the candidate', async () => {
+    render(<CampaignFinanceSection officialId="S6TX00388" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Campaign Finance (preview)' }))
+
+    expect(await screen.findByText('The race · Texas · U.S. Senate')).toBeInTheDocument()
+    const rows = screen.getAllByRole('listitem').filter((row) => row.textContent?.includes('Cash'))
+    expect(rows.map((row) => row.textContent?.split('(')[0])).toEqual(['James Talarico', 'Ken Paxton'])
+    expect(rows[1]).toHaveAttribute('aria-current', 'true')
+    expect(rows[0]).toHaveTextContent('Small donors 54%')
+    expect(rows[0]).toHaveTextContent('Outside +$4.3M / −$1.3M')
+    // Members' peer comparison text doesn't apply to a candidate's race.
+    expect(screen.queryByText(/Comparisons with other members/)).not.toBeInTheDocument()
+  })
+})

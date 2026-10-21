@@ -287,6 +287,22 @@ python fec_client.py pacs --official-id K000367
 
 `GET /api/officials/{id}/finance` returns the stored elections (newest first) with a funding mix that adds up to receipts (small donors, larger donors, joint fundraising transfers, PACs, party, candidate, other), small-donor, PAC and in-state shares, top donor states, outside spending, and links to the FEC and OpenSecrets pages. It also returns `peer_comparison`: percentiles for the member's most recent finished election against current members of the same chamber, and of the same party within it, computed from stored rows (`services/finance_insights.py`). Senate and House are never mixed because their totals cover six and two years. PAC gifts are served by `GET /api/officials/{id}/finance/pacs` (total, category breakdown, top 10), `/finance/pacs/list` (search with `q`, `category`, `sort=amount|gifts|recent|name`, `limit`/`offset`) and `/finance/pacs/gifts` (one PAC's gifts with filing links), each taking `fec_candidate_id` and `election_year`.
 
+### Candidates (`fec_client.py candidates`, `wikidata_client.py`)
+
+Everyone running for the House or Senate in the current cycle, including challengers who hold no office. `candidates` sweeps OpenFEC `/candidates/totals/` (candidates with money raised, about 50 requests) into `candidacies`, one row per FEC candidate ID and election with the race (state, office, district), party, incumbent/challenger/open seat and a totals snapshot. A candidate ID held by a member (from the crosswalk) links to that member's row; anyone else gets an `officials` row with `level='candidate'` and the FEC ID as its id, so every finance table, endpoint and the member drawer work for them unchanged, while the roster, lookup, peer comparisons and positions worker (all scoped by level) never see them. FEC records no primary results, so the sweep also flags candidacies whose campaign filed a pre-general (12G) report: once that deadline has passed, races show only those, the candidates on the general-election ballot. Before then a race shows everyone who raised at least $5,000.
+
+`totals --candidates` and `pacs --candidates` fetch the same detail as for members for candidacies with at least $50,000 raised, least recently synced first, within `--max-minutes`. `wikidata_client.py` matches officials on FEC ID (Wikidata P1839) for a bio (description, birth date, occupations, education, offices held) and Wikipedia link; candidates also take their name, portrait and campaign website from it. Few challengers have P1839, so funded candidates without a match get a name search, accepted only when exactly one hit is a person whose offices, districts or description name their state. The **FEC Candidates Ingestion** workflow runs all four daily.
+
+```bash
+python fec_client.py candidates                     # this cycle, House and Senate
+python fec_client.py candidates --state TX --office S
+python fec_client.py totals --candidates --state TX --max-minutes 30
+python fec_client.py pacs --candidates --max-minutes 60
+python wikidata_client.py --level candidate
+```
+
+`GET /api/candidates/races` lists races with their candidates, richest first (`state`, `office=S|H`, `district`, `party`, `q`, `all=true` for every filer, `limit`/`offset`). A state lists the Senate race and then districts in order; nationwide lists the most expensive races first. `GET /api/officials/{id}` adds `candidacies`, `bio` and `wikipedia_url`, and `/finance` adds `race_comparison`, the official's race this cycle.
+
 ## Deploy to Fly.io
 
 Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Vite SPA). Local Vite proxies `/api` to `localhost:8000`. Production builds bake in `VITE_API_URL` from `frontend/.env.production` (`https://politmus-api.fly.dev`) so the SPA on [politmus.com](https://politmus.com) can call the API directly. CORS on the API allows `https://politmus.com`, `https://www.politmus.com`, and `https://politmus-web.fly.dev`.
@@ -322,7 +338,7 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 ### GitHub Actions ingest
 
-Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. FEC campaign finance runs weekly (Monday 07:30 UTC), with PAC gifts in a second job capped at 300 minutes. Add one GitHub Actions secret:
+Scheduled ingest SSHs into `politmus-api` and runs the Python clients there (private Postgres, no public DB URL). Congress.gov runs every 6 hours; OpenStates runs every 12 hours; Senate.gov roll calls run every 2 hours (and again after Congress ingest succeeds) in their own workflow so a catch-up does not block the others. FEC campaign finance runs weekly (Monday 07:30 UTC), with PAC gifts in a second job capped at 300 minutes; FEC candidates run daily (09:30 UTC) and queue behind it. Add one GitHub Actions secret:
 
 ```bash
 fly tokens create org

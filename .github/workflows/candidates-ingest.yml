@@ -1,0 +1,44 @@
+name: FEC Candidates Ingestion
+
+on:
+  schedule:
+    # Daily 09:30 UTC. Shares the fec-ingest concurrency group (and the FEC
+    # key's 1,000 requests/hour), so on Mondays it waits for the member run.
+    # Daily matters around elections: pre- and post-general reports land in
+    # late October and early December; weekly is enough the rest of the cycle.
+    - cron: '30 9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: fec-ingest
+  cancel-in-progress: false
+
+jobs:
+  sync_candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # About 50 requests: every House and Senate candidate with money raised,
+      # then who filed a pre-general report (on the general-election ballot).
+      - name: Load this cycle's candidates
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/fec_client.py candidates"
+
+      # Wikidata, not FEC: names, portraits, campaign sites and bios.
+      - name: Match candidates on Wikidata
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/wikidata_client.py --level candidate"
+
+      # Least recently synced first; the next run picks up where this stopped.
+      - name: Fetch candidate totals and breakdowns
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/fec_client.py totals --candidates --max-minutes 150"
+
+      - name: Fetch candidate PAC contributions
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/fec_client.py pacs --candidates --max-minutes 120"
