@@ -46,6 +46,10 @@ export const EXPLAINERS = {
   peers:
     "Compared with current members of the same chamber, using each member's most recent finished election. " +
     'Senate totals cover six years and House totals two, so the chambers are never mixed.',
+  race:
+    "Everyone in this race, from each campaign's latest FEC report. Raised counts the whole election period, primary included. " +
+    'Small donors is the share of individual money from people who gave $200 or less in total. ' +
+    'Outside money is what independent groups spent for (+) or against (−) the candidate; it is not part of what they raised.',
 }
 
 const money = new Intl.NumberFormat('en-US', {
@@ -60,6 +64,13 @@ const compactMoney = new Intl.NumberFormat('en-US', {
   notation: 'compact',
   maximumFractionDigits: 1,
 })
+
+// Bar fill for a candidate's share of a race.
+export function partyBarClass(party: string | null | undefined) {
+  if (party === 'Democratic') return 'bg-blue-500'
+  if (party === 'Republican') return 'bg-red-500'
+  return 'bg-emerald-500'
+}
 
 export function formatMoney(value: number | null | undefined) {
   return value == null ? '—' : money.format(value)

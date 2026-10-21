@@ -165,6 +165,81 @@ export interface OfficialDetail extends Official {
   positions_sync: PositionsSync | null
   accountability?: AccountabilityScore | null
   alignments?: VoteAlignment[]
+  wikipedia_url?: string | null
+  bio?: OfficialBio | null
+  // Newest election first.
+  candidacies?: Candidacy[]
+}
+
+// From Wikidata (wikidata_client.py).
+export interface OfficialBio {
+  description: string | null
+  birth_date: string | null
+  occupations: string[]
+  education: string[]
+  positions_held: string[]
+}
+
+// One FEC race an official is running in.
+export interface Candidacy {
+  fec_candidate_id: string
+  election_year: number
+  state: string
+  office: 'S' | 'H' | string
+  district: number
+  race_label: string
+  election_date: string | null
+  party: string | null
+  // I (incumbent), C (challenger) or O (open seat).
+  incumbent_challenge: string | null
+  in_general_election: boolean
+  receipts: number | null
+  cash_on_hand: number | null
+  coverage_end_date: string | null
+}
+
+export interface RaceCandidate {
+  official_id: string
+  fec_candidate_id: string
+  name: string | null
+  party: string | null
+  photo_url: string | null
+  website_url: string | null
+  incumbent_challenge: string | null
+  // A member's bioguide row (opens with their votes) rather than a candidate row.
+  is_member: boolean
+  current_member: boolean
+  in_general_election: boolean
+  receipts: number | null
+  disbursements: number | null
+  cash_on_hand: number | null
+  coverage_end_date: string | null
+  positions_count: number | null
+  small_donor_share: number | null
+  outside_support: number | null
+  outside_oppose: number | null
+}
+
+export interface Race {
+  key: string
+  election_year: number
+  election_date: string
+  state: string
+  state_name: string
+  office: 'S' | 'H' | string
+  district: number
+  label: string
+  total_receipts: number
+  // Only campaigns that filed a pre-general report, i.e. on the November ballot.
+  ballot_filtered: boolean
+  hidden_count: number
+  candidates: RaceCandidate[]
+}
+
+export interface RacesPage {
+  total_count: number
+  items: Race[]
+  source: string
 }
 
 export interface FinanceSizeBucket {
@@ -261,6 +336,8 @@ export interface OfficialFinance {
   source: string
   elections: FinanceElection[]
   peer_comparison?: PeerComparison | null
+  // The official's race this cycle, side by side.
+  race_comparison?: Race | null
 }
 
 export interface PacCategory {
@@ -685,7 +762,50 @@ export function billStub(id: string): Bill {
 }
 
 export function rosterStatusLabel(official: Official) {
+  if (isCandidate(official)) {
+    return 'Candidate'
+  }
   return official.current_member ? 'Active' : 'Former'
+}
+
+// Running for office without holding a federal seat (fec_client.py candidates).
+export function isCandidate(official: Pick<Official, 'level'>) {
+  return official.level === 'candidate'
+}
+
+// "Running for U.S. Senate" for a candidate's office line.
+const CANDIDATE_OFFICE_LINES: Record<string, string> = {
+  'Senate candidate': 'Running for U.S. Senate',
+  'House candidate': 'Running for U.S. House',
+}
+
+export function incumbencyLabel(code: string | null | undefined) {
+  if (code === 'I') return 'Incumbent'
+  if (code === 'O') return 'Open seat'
+  if (code === 'C') return 'Challenger'
+  return null
+}
+
+// Race header text, e.g. "Texas · U.S. Senate".
+export function raceTitle(race: Pick<Race, 'state_name' | 'label'>) {
+  return `${race.state_name} · ${race.label}`
+}
+
+// What the drawer header shows before the detail fetch lands.
+export function officialFromRaceCandidate(candidate: RaceCandidate, race: Race): Official {
+  return {
+    ...officialStub(candidate.official_id),
+    name: candidate.name ?? candidate.official_id,
+    display_name: candidate.name,
+    state: race.state_name,
+    party: candidate.party ?? '',
+    office: candidate.is_member ? null : race.office === 'S' ? 'Senate candidate' : 'House candidate',
+    district: race.office === 'H' ? race.district : null,
+    current_member: candidate.current_member,
+    website_url: candidate.website_url,
+    photo_url: candidate.photo_url,
+    level: candidate.is_member ? 'federal' : 'candidate',
+  }
 }
 
 export function formatBillDate(value: string | null | undefined) {
@@ -775,17 +895,23 @@ export function officialName(official: Pick<Official, 'name' | 'display_name'>) 
 }
 
 export function officeLine(official: Official) {
-  const office = official.office || 'Member of Congress'
+  const office =
+    CANDIDATE_OFFICE_LINES[official.office ?? ''] ?? (official.office || 'Member of Congress')
   const seat = seatLabel(official)
   return seat ? `${office} · ${seat}` : office
 }
 
 export function seatLabel(official: Official) {
-  if (official.office === 'Senator' || official.office === 'Governor') {
+  if (
+    official.office === 'Senator' ||
+    official.office === 'Governor' ||
+    official.office === 'Senate candidate'
+  ) {
     return 'Statewide'
   }
   if (
     official.office === 'Representative' ||
+    official.office === 'House candidate' ||
     official.office === 'Delegate' ||
     official.office === 'Resident Commissioner'
   ) {

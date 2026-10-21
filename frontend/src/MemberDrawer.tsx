@@ -1,5 +1,5 @@
 import { SignedIn } from '@clerk/clerk-react'
-import { Globe, MapPin, Phone, Search, X } from 'lucide-react'
+import { ExternalLink, Globe, MapPin, Phone, Search, Vote, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { apiUrl } from './api'
@@ -10,8 +10,12 @@ import CopyLinkButton from './components/CopyLinkButton'
 import OfficialPhoto from './components/OfficialPhoto'
 import ScoreHeadline from './components/ScoreHeadline'
 import StatedPositionsSection from './components/StatedPositionsSection'
+import { formatCompactMoney } from './campaignFinance'
 import {
   billStub,
+  formatBillDate,
+  incumbencyLabel,
+  isCandidate,
   officeLine,
   officialName,
   partyBadgeClass,
@@ -21,7 +25,9 @@ import {
   stateAbbr,
   stateNameFromAbbr,
   type Bill,
+  type Candidacy,
   type Official,
+  type OfficialBio,
   type OfficialDetail,
   type OfficialVote,
   type VoteAlignment,
@@ -190,7 +196,15 @@ export default function MemberDrawer({
             </div>
           </div>
 
+          {detail?.candidacies?.length ? (
+            <CandidacySection candidacies={detail.candidacies} />
+          ) : null}
+
           <ContactSection official={view} />
+
+          {detail?.bio ? (
+            <BackgroundSection bio={detail.bio} wikipediaUrl={detail.wikipedia_url ?? null} />
+          ) : null}
 
           {detail?.accountability ? (
             <SignedIn>
@@ -213,88 +227,92 @@ export default function MemberDrawer({
             </SignedIn>
           ) : null}
 
-          {(view.level ?? 'federal') === 'federal' ? (
+          {(view.level ?? 'federal') === 'federal' || isCandidate(view) ? (
             <SignedIn>
               <CampaignFinanceSection officialId={official.id} />
             </SignedIn>
           ) : null}
 
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Recorded votes
-          </h3>
-          {loading ? (
-            <p className="mt-3 text-sm text-slate-400">Loading vote history...</p>
-          ) : error ? (
-            <p className="mt-3 text-sm text-red-400">{error}</p>
-          ) : votes.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-400">
-              No recorded votes in the ingested bills.
-            </p>
-          ) : (
+          {isCandidate(view) ? null : (
             <>
-              <label className="relative mt-3 block">
-                <span className="sr-only">
-                  Search recorded votes by bill title, CRS summary, bill ID, or yes/no
-                </span>
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-                  aria-hidden="true"
-                />
-                <input
-                  type="search"
-                  value={voteQuery}
-                  onChange={(event) => setVoteQuery(event.target.value)}
-                  placeholder="Title, summary, bill ID, or yes/no"
-                  className="w-full rounded border border-slate-700 bg-slate-800 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
-                />
-              </label>
-              {voteQuery.trim() ? (
-                <p className="mt-2 text-xs text-slate-500">
-                  Showing {filteredVotes.length} of {votes.length}{' '}
-                  {votes.length === 1 ? 'vote' : 'votes'}
-                </p>
-              ) : null}
-              {filteredVotes.length === 0 ? (
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Recorded votes
+              </h3>
+              {loading ? (
+                <p className="mt-3 text-sm text-slate-400">Loading vote history...</p>
+              ) : error ? (
+                <p className="mt-3 text-sm text-red-400">{error}</p>
+              ) : votes.length === 0 ? (
                 <p className="mt-3 text-sm text-slate-400">
-                  No recorded votes match this search.
+                  No recorded votes in the ingested bills.
                 </p>
               ) : (
-                <ul className="mt-3 space-y-3">
-                  {filteredVotes.map((vote) => (
-                    <li key={vote.roll_call_id ?? `${vote.bill_id}-${vote.position}`}>
-                      <button
-                        type="button"
-                        onClick={() => onSelectBill(billFromVote(vote))}
-                        className="w-full rounded-lg border border-slate-800 bg-slate-800/60 p-3 text-left transition hover:border-slate-500 hover:bg-slate-800"
-                        aria-label={`Open details for ${vote.bill_title || vote.bill_id}`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="font-mono text-xs text-slate-400">{vote.bill_id}</p>
-                          <span
-                            className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${positionBadgeClass(vote.position)}`}
+                <>
+                  <label className="relative mt-3 block">
+                    <span className="sr-only">
+                      Search recorded votes by bill title, CRS summary, bill ID, or yes/no
+                    </span>
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="search"
+                      value={voteQuery}
+                      onChange={(event) => setVoteQuery(event.target.value)}
+                      placeholder="Title, summary, bill ID, or yes/no"
+                      className="w-full rounded border border-slate-700 bg-slate-800 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+                    />
+                  </label>
+                  {voteQuery.trim() ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Showing {filteredVotes.length} of {votes.length}{' '}
+                      {votes.length === 1 ? 'vote' : 'votes'}
+                    </p>
+                  ) : null}
+                  {filteredVotes.length === 0 ? (
+                    <p className="mt-3 text-sm text-slate-400">
+                      No recorded votes match this search.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {filteredVotes.map((vote) => (
+                        <li key={vote.roll_call_id ?? `${vote.bill_id}-${vote.position}`}>
+                          <button
+                            type="button"
+                            onClick={() => onSelectBill(billFromVote(vote))}
+                            className="w-full rounded-lg border border-slate-800 bg-slate-800/60 p-3 text-left transition hover:border-slate-500 hover:bg-slate-800"
+                            aria-label={`Open details for ${vote.bill_title || vote.bill_id}`}
                           >
-                            {vote.position ?? 'Unknown'}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-sm font-medium leading-snug">
-                          {vote.bill_title || 'Untitled bill'}
-                        </p>
-                        {vote.question || vote.result ? (
-                          <p className="mt-1 text-xs text-slate-400">
-                            {[vote.chamber, vote.result, vote.question]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </p>
-                        ) : null}
-                        {vote.sponsor_name ? (
-                          <p className="mt-1 text-xs text-slate-500">
-                            Sponsor: {vote.sponsor_name}
-                          </p>
-                        ) : null}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="font-mono text-xs text-slate-400">{vote.bill_id}</p>
+                              <span
+                                className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${positionBadgeClass(vote.position)}`}
+                              >
+                                {vote.position ?? 'Unknown'}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm font-medium leading-snug">
+                              {vote.bill_title || 'Untitled bill'}
+                            </p>
+                            {vote.question || vote.result ? (
+                              <p className="mt-1 text-xs text-slate-400">
+                                {[vote.chamber, vote.result, vote.question]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </p>
+                            ) : null}
+                            {vote.sponsor_name ? (
+                              <p className="mt-1 text-xs text-slate-500">
+                                Sponsor: {vote.sponsor_name}
+                              </p>
+                            ) : null}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
             </>
           )}
@@ -359,13 +377,103 @@ function ContactSection({ official }: { official: Official }) {
               target="_blank"
               rel="noopener noreferrer"
               className="text-slate-200 underline-offset-2 hover:text-white hover:underline"
-              aria-label={`Official website, ${websiteLabel(websiteUrl)} (opens in a new tab)`}
+              aria-label={`${isCandidate(official) ? 'Campaign' : 'Official'} website, ${websiteLabel(websiteUrl)} (opens in a new tab)`}
             >
               {websiteLabel(websiteUrl)}
             </a>
           </li>
         ) : null}
       </ul>
+    </section>
+  )
+}
+
+// This cycle's races (and any later ones); past candidacies are in the finance section.
+function CandidacySection({ candidacies }: { candidacies: Candidacy[] }) {
+  const thisYear = new Date().getFullYear()
+  const running = candidacies.filter((candidacy) => candidacy.election_year >= thisYear)
+  if (running.length === 0) {
+    return null
+  }
+  return (
+    <section className="mb-6 space-y-3" aria-label="Running for office">
+      {running.map((candidacy) => {
+        const incumbency = incumbencyLabel(candidacy.incumbent_challenge)
+        return (
+          <div
+            key={`${candidacy.fec_candidate_id}-${candidacy.election_year}`}
+            className="rounded-xl border border-amber-500/30 bg-amber-950/10 p-4"
+          >
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-300">
+              <Vote className="h-4 w-4" aria-hidden="true" />
+              Running for {candidacy.race_label} · {stateNameFromAbbr(candidacy.state)}
+            </p>
+            <p className="mt-1 text-sm text-slate-300">
+              {[
+                candidacy.election_date
+                  ? `General election ${formatBillDate(candidacy.election_date)}`
+                  : `${candidacy.election_year} election`,
+                incumbency,
+                candidacy.in_general_election ? 'On the November ballot' : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              Raised {formatCompactMoney(candidacy.receipts)} · Cash on hand{' '}
+              {formatCompactMoney(candidacy.cash_on_hand)}
+              {candidacy.coverage_end_date
+                ? ` · FEC filings through ${formatBillDate(candidacy.coverage_end_date)}`
+                : ''}
+            </p>
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+function BackgroundSection({ bio, wikipediaUrl }: { bio: OfficialBio; wikipediaUrl: string | null }) {
+  const born = bio.birth_date ? formatBillDate(bio.birth_date) : null
+  const rows: [string, string][] = [
+    ['Offices held', bio.positions_held.join('; ')],
+    ['Education', bio.education.join('; ')],
+    ['Occupation', bio.occupations.join(', ')],
+    ['Born', born ?? ''],
+  ]
+  const shown = rows.filter(([, value]) => value)
+  if (!bio.description && shown.length === 0) {
+    return null
+  }
+  return (
+    <section className="mb-6">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Background</h3>
+      {bio.description ? <p className="mt-2 text-sm text-slate-300">{bio.description}</p> : null}
+      <dl className="mt-2 space-y-1.5 text-sm">
+        {shown.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs text-slate-500">{label}</dt>
+            <dd className="text-slate-200">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-2 text-[11px] text-slate-500">
+        Source: Wikidata
+        {wikipediaUrl ? (
+          <>
+            {' · '}
+            <a
+              href={wikipediaUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-0.5 text-blue-400 hover:text-blue-300"
+            >
+              Wikipedia
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          </>
+        ) : null}
+      </p>
     </section>
   )
 }

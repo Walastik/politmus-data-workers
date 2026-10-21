@@ -75,6 +75,11 @@ def ensure_schema():
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_committees JSONB"
         ))
+        # Filled by `wikidata_client.py`.
+        for column_sql in ("wikidata_id VARCHAR", "wikipedia_url VARCHAR", "bio JSONB"):
+            conn.execute(text(
+                f"ALTER TABLE officials ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
         conn.execute(text(
             "ALTER TABLE pac_contribution_sync ADD COLUMN IF NOT EXISTS latest_receipt_date DATE"
         ))

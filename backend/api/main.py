@@ -14,7 +14,7 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from api.routes import bills, feed, finance_pacs, lookup, officials, positions, voter_info  # noqa: E402
+from api.routes import bills, candidates, feed, finance_pacs, lookup, officials, positions, voter_info  # noqa: E402
 from api.schemas import HealthOut  # noqa: E402
 from init_db import ensure_schema  # noqa: E402
 
@@ -66,6 +66,7 @@ app.add_middleware(
 # Before officials: its /{official_id:path} route would swallow /finance/pacs.
 app.include_router(finance_pacs.router, prefix="/api/officials", tags=["Officials"])
 app.include_router(officials.router, prefix="/api/officials", tags=["Officials"])
+app.include_router(candidates.router, prefix="/api/candidates", tags=["Candidates"])
 app.include_router(positions.router, prefix="/api/positions", tags=["Positions"])
 app.include_router(bills.router, prefix="/api/bills", tags=["Bills"])
 app.include_router(feed.router, prefix="/api/feed", tags=["Feed"])

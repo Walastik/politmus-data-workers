@@ -1,8 +1,9 @@
-import { Landmark, MapPin, MapPinHouse, Rss, ScrollText, Search, Sparkles, Users } from 'lucide-react'
+import { Landmark, MapPin, MapPinHouse, Rss, ScrollText, Search, Sparkles, Users, Vote } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useEffect, useState, type ReactNode } from 'react'
 import { SignInButton, UserButton, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 
+import CandidatesPanel from '../components/CandidatesPanel'
 import LocationSettings from '../components/LocationSettings'
 import ScoreHeadline from '../components/ScoreHeadline'
 import PositionsProgressPanel from '../components/PositionsProgressPanel'
@@ -134,7 +135,7 @@ export default function Explorer() {
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Politmus Explorer</h1>
               <p className="mt-1 text-sm text-slate-400">
-                Address lookup, congressional roster, and legislation feed
+                Address lookup, congressional roster, candidates, and legislation feed
               </p>
             </div>
           </div>
@@ -165,6 +166,12 @@ export default function Explorer() {
                 icon={<Users className="h-3.5 w-3.5" />}
                 label="Roster"
                 onClick={() => setTab('roster')}
+              />
+              <TabButton
+                active={tab === 'candidates'}
+                icon={<Vote className="h-3.5 w-3.5" />}
+                label="Candidates"
+                onClick={() => setTab('candidates')}
               />
               <TabButton
                 active={tab === 'bills'}
@@ -316,6 +323,8 @@ export default function Explorer() {
         ) : null}
         {tab === 'lookup' ? null : tab === 'bills' ? (
           <BillsFeed onSelectBill={openBill} />
+        ) : tab === 'candidates' ? (
+          <CandidatesPanel onSelectOfficial={openOfficial} />
         ) : (
           <>
             <SignedIn>
