@@ -62,7 +62,7 @@ describe('formatPoints', () => {
 })
 
 describe('ScoreHeadline', () => {
-  it('shows the litmus percentage and raw points', () => {
+  it('shows the Politmus Score percentage and raw points', () => {
     render(<ScoreHeadline points={4} pct={75} matches={8} />)
     const headline = screen.getByTestId('score-headline')
     expect(within(headline).getByText('75%')).toBeInTheDocument()
@@ -73,7 +73,8 @@ describe('ScoreHeadline', () => {
   it('holds back the percentage until there are enough scored votes', () => {
     render(<ScoreHeadline points={-2} pct={0} matches={2} />)
     expect(screen.queryByText('0%')).not.toBeInTheDocument()
-    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.queryByText('—')).not.toBeInTheDocument()
+    expect(screen.getByText('Politmus Score')).toBeInTheDocument()
     expect(screen.getByText('−2')).toBeInTheDocument()
     expect(screen.getByText(/% after 5/)).toBeInTheDocument()
   })
@@ -91,14 +92,14 @@ describe('ScoreHeadline', () => {
 
 // The section starts collapsed; click its header to show the votes.
 function expand() {
-  fireEvent.click(screen.getByRole('button', { name: 'Says vs. votes' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Politmus Report' }))
 }
 
 describe('AccountabilitySection', () => {
   it('starts collapsed, showing only the header', () => {
     render(<AccountabilitySection score={score} alignments={[alignment()]} />)
 
-    const toggle = screen.getByRole('button', { name: 'Says vs. votes' })
+    const toggle = screen.getByRole('button', { name: 'Politmus Report' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText(/increases Medicaid funding/)).not.toBeInTheDocument()
 
@@ -282,7 +283,7 @@ describe('MemberDrawer accountability', () => {
         onSelectBill={() => {}}
         onCloseBill={() => {}}
       />)
-    expect(await screen.findByText('Says vs. votes')).toBeInTheDocument()
+    expect(await screen.findByText('Politmus Report')).toBeInTheDocument()
     expect(screen.getByTestId('score-headline')).toHaveTextContent('75%')
   })
 
@@ -296,7 +297,7 @@ describe('MemberDrawer accountability', () => {
         onCloseBill={() => {}}
       />)
     expect(await screen.findByText('No recorded votes in the ingested bills.')).toBeInTheDocument()
-    expect(screen.queryByText('Says vs. votes')).not.toBeInTheDocument()
+    expect(screen.queryByText('Politmus Report')).not.toBeInTheDocument()
     expect(screen.queryByTestId('score-headline')).not.toBeInTheDocument()
   })
 })

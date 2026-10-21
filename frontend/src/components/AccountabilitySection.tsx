@@ -56,7 +56,7 @@ export default function AccountabilitySection({
             <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden="true" />
           )}
           <Scale className="h-4 w-4 text-slate-300" aria-hidden="true" />
-          Says vs. votes
+          Politmus Report
         </button>
       </h3>
 
