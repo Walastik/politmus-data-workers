@@ -1,6 +1,8 @@
 import { Globe, Phone } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import OfficialPhoto from './components/OfficialPhoto'
+
 import {
   civicRepresentativeToOfficial,
   formatCivicAddress,
@@ -179,16 +181,27 @@ function RepresentativeCard({
           <span className="text-xs text-slate-400">{stateLabel}</span>
         ) : null}
       </div>
-      <h3 className="mt-2 text-base font-semibold">{representative.name}</h3>
-      <p className="mt-1 text-xs text-slate-400">
-        {representative.office}
-        {representative.division_name &&
-        (representative.division_id?.includes('/cd:') ||
-          representative.division_id?.includes('/sldu:') ||
-          representative.division_id?.includes('/sldl:'))
-          ? ` · ${representative.division_name}`
-          : ''}
-      </p>
+      <div className="mt-2 flex items-center gap-3">
+        {representative.photo_url ? (
+          <OfficialPhoto
+            url={representative.photo_url}
+            name={representative.name}
+            party={party}
+          />
+        ) : null}
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold">{representative.name}</h3>
+          <p className="mt-1 text-xs text-slate-400">
+            {representative.office}
+            {representative.division_name &&
+            (representative.division_id?.includes('/cd:') ||
+              representative.division_id?.includes('/sldu:') ||
+              representative.division_id?.includes('/sldl:'))
+              ? ` · ${representative.division_name}`
+              : ''}
+          </p>
+        </div>
+      </div>
       {phone || website ? (
         <ul className="mt-3 space-y-1.5 text-xs text-slate-400">
           {phone ? (

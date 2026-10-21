@@ -261,14 +261,24 @@ def upcoming_elections(
     divisions = {COUNTRY_DIVISION}
     if state_division(state_code):
         divisions.add(state_division(state_code))
+    return _real_upcoming(elections, today, divisions)
 
+
+def all_upcoming_elections(elections: list[dict], today: date) -> list[dict]:
+    """Every real election on or after today, in any division, soonest first."""
+    return _real_upcoming(elections, today, divisions=None)
+
+
+def _real_upcoming(
+    elections: list[dict], today: date, divisions: Optional[set[str]]
+) -> list[dict]:
     matches = []
     for e in elections:
         e_id = str(e.get("id", ""))
         name = str(e.get("name", ""))
         if e_id in TEST_ELECTION_IDS or "test" in name.lower():
             continue
-        if e.get("ocdDivisionId") not in divisions:
+        if divisions is not None and e.get("ocdDivisionId") not in divisions:
             continue
         try:
             day = date.fromisoformat(str(e.get("electionDay")))

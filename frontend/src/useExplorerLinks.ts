@@ -42,6 +42,16 @@ export function useExplorerLinks() {
       : billStub(billId)
     : null
 
+  // Pages without tabs (the feed) reuse the drawer links; leave ?tab off there.
+  const keepTab = useCallback(
+    (params: URLSearchParams) => {
+      if (rawTab !== null || location.pathname === '/dev-explorer') {
+        params.set('tab', tab)
+      }
+    },
+    [location.pathname, rawTab, tab],
+  )
+
   const setTab = useCallback(
     (next: ExplorerTab) => setSearchParams({ tab: next }),
     [setSearchParams],
@@ -50,24 +60,24 @@ export function useExplorerLinks() {
   const openOfficial = useCallback(
     (next: Official) => {
       const params = new URLSearchParams(searchParams)
-      params.set('tab', tab)
+      keepTab(params)
       params.set('official', next.id)
       params.delete('bill')
       setSearchParams(params, { state: { drawerPush: true, official: next } })
     },
-    [searchParams, setSearchParams, tab],
+    [keepTab, searchParams, setSearchParams],
   )
 
   const openBill = useCallback(
     (next: Bill) => {
       const params = new URLSearchParams(searchParams)
-      params.set('tab', tab)
+      keepTab(params)
       params.set('bill', next.id)
       setSearchParams(params, {
         state: { official: state?.official, drawerPush: true, bill: next },
       })
     },
-    [searchParams, setSearchParams, state, tab],
+    [keepTab, searchParams, setSearchParams, state],
   )
 
   const closeDrawer = useCallback(

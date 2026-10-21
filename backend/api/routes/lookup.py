@@ -69,6 +69,7 @@ def _representative_from_official(
         roles=roles,
         phones=phones,
         urls=urls,
+        photo_url=official.photo_url,
         addresses=addresses,
     )
 

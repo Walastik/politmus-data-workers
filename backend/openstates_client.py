@@ -11,6 +11,7 @@ from api.filters import STATE_ABBR_BY_NAME, STATE_NAME_BY_ABBR, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Official, StateSyncLog
+from services.feed_events import record_official_departed, record_official_seated
 from status_mapper import (
     derive_bill_status,
     origin_chamber_from_identifier,
@@ -376,6 +377,20 @@ def upsert_official(session, incoming):
     return existing
 
 
+def _is_current(session, incoming):
+    """Whether the stored row upsert_official would update is already current."""
+    existing = None
+    if incoming.openstates_id:
+        existing = (
+            session.query(Official)
+            .filter(Official.openstates_id == incoming.openstates_id)
+            .one_or_none()
+        )
+    if existing is None:
+        existing = session.get(Official, incoming.id)
+    return existing is not None and bool(existing.current_member)
+
+
 def fetch_state_legislators(state_code):
     """Current legislators and governor for a state, keyed by OpenStates person id.
 
@@ -473,6 +488,14 @@ def sync_state_members(state_code):
     current_ids = []
 
     try:
+        # A state's first sync seats everyone; only later arrivals are news.
+        roster_known = (
+            session.query(Official.id)
+            .filter(Official.level == "state")
+            .filter(Official.state.ilike(state_name))
+            .first()
+            is not None
+        )
         total = len(people)
         print(f"Fetched {total} OpenStates people for {state_name}.")
         for index, person in enumerate(people, start=1):
@@ -484,22 +507,27 @@ def sync_state_members(state_code):
                 f"[{index}/{total}] {official.name} "
                 f"{official.office} district={official.district}"
             )
-            upsert_official(session, official)
+            was_current = _is_current(session, official)
+            stored = upsert_official(session, official)
+            if roster_known and not was_current:
+                session.flush()
+                record_official_seated(session, stored)
             current_ids.append(official.id)
             saved += 1
 
         if current_ids:
-            former = (
+            departing = (
                 session.query(Official)
                 .filter(Official.level == "state")
                 .filter(Official.state.ilike(state_name))
                 .filter(~Official.id.in_(current_ids))
                 .filter(Official.current_member.is_(True))
-                .update(
-                    {Official.current_member: False},
-                    synchronize_session=False,
-                )
+                .all()
             )
+            for former_official in departing:
+                former_official.current_member = False
+                record_official_departed(session, former_official)
+            former = len(departing)
             if former:
                 print(
                     f"  Marked {former} {state_name} state official(s) "

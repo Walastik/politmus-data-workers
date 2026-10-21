@@ -31,7 +31,7 @@ jobs:
         run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py members"
 
       - name: Run Bill & Vote Ingestion
-        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py bills"
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py bills --since-hours 36 --limit 500"
 
       - name: Run Enrichment (Summaries, Policy Areas, Dates)
         run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py enrich"

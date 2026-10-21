@@ -27,6 +27,8 @@ class OfficialOut(BaseModel):
     phone: Optional[str] = None
     office_address: Optional[str] = None
     website_url: Optional[str] = None
+    photo_url: Optional[str] = None
+    photo_attribution: Optional[str] = None
     level: str = "federal"
     openstates_id: Optional[str] = None
     # Stated-positions worker status and saved count; None when not attempted.
@@ -344,6 +346,30 @@ class BillPageOut(BaseModel):
     total: int
 
 
+class FeedItemOut(BaseModel):
+    id: int
+    # bill_introduced | bill_status_changed | vote_held | official_seated | official_departed
+    kind: str
+    occurred_at: Date
+    detected_at: datetime
+    headline: str
+    subline: Optional[str] = None
+    level: str = "federal"
+    state: Optional[str] = None
+    bill: Optional[BillOut] = None
+    official: Optional[OfficialOut] = None
+    roll_call: Optional[RollCallOut] = None
+    # Positions on roll_call by party, e.g. {"Republican": {"Yes": 50, "No": 2}}.
+    tally_by_party: Optional[dict[str, dict[str, int]]] = None
+    payload: Optional[dict] = None
+
+
+class FeedPageOut(BaseModel):
+    items: list[FeedItemOut]
+    # Opaque; pass back as ?cursor= for the next (older) page. None at the end.
+    next_cursor: Optional[str] = None
+
+
 class BillVoterOut(BaseModel):
     official_id: str
     name: str
@@ -494,3 +520,7 @@ class VoterInfoErrorOut(CamelModel):
     upstream_status: str
     detail: str
 
+
+
+class UpcomingElectionsOut(CamelModel):
+    elections: list[ElectionOut]
