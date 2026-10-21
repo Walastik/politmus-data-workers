@@ -1514,3 +1514,38 @@ export function positionsStatusLabel(status: string | null | undefined) {
   }
   return POSITIONS_STATUS_LABELS[status as PositionsStatus] ?? status
 }
+
+export type FeedKind =
+  | 'bill_introduced'
+  | 'bill_status_changed'
+  | 'vote_held'
+  | 'official_seated'
+  | 'official_departed'
+
+export interface FeedItem {
+  id: number
+  kind: FeedKind
+  occurred_at: string
+  detected_at: string
+  headline: string
+  subline: string | null
+  level: string
+  state: string | null
+  bill: Omit<Bill, 'votes_summary' | 'votes_by_party' | 'roll_calls'> | null
+  official: Official | null
+  roll_call: BillRollCall | null
+  // Positions on roll_call by party, e.g. { Republican: { Yes: 50, No: 2 } }.
+  tally_by_party: Record<string, ChamberVoteSummary> | null
+  payload: Record<string, string | null> | null
+}
+
+export interface FeedPage {
+  items: FeedItem[]
+  next_cursor: string | null
+}
+
+export interface UpcomingElection {
+  id: string
+  name: string
+  date: string | null
+}

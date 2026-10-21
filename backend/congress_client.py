@@ -3,7 +3,7 @@ import os
 import re
 import time
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -14,6 +14,12 @@ from database import SessionLocal
 from init_db import ensure_schema
 from models import Bill, Official, RollCall, SenateRollCall, Vote
 from services.bill_analytics import refresh_bill_velocity
+from services.feed_events import (
+    record_bill_events,
+    record_official_departed,
+    record_official_seated,
+    record_vote_held,
+)
 from status_mapper import (
     STATUS_INTRODUCED,
     derive_bill_status,
@@ -532,6 +538,7 @@ def upsert_roll_call(
         )
         session.add(existing)
         session.flush()
+        record_vote_held(session, existing)
         return existing
 
     existing.bill_id = bill_id
@@ -544,6 +551,7 @@ def upsert_roll_call(
         existing.result = result
     if requires is not None:
         existing.requires = requires
+    record_vote_held(session, existing)
     return existing
 
 
@@ -943,6 +951,13 @@ def save_officials(members):
     detail_failed = 0
 
     try:
+        # A first-ever roster load seats everyone; only later arrivals are news.
+        roster_known = (
+            session.query(Official.id)
+            .filter(or_(Official.level == "federal", Official.level.is_(None)))
+            .first()
+            is not None
+        )
         total = len(members)
         for index, member in enumerate(members, start=1):
             bioguide_id = _member_bioguide_id(member)
@@ -967,23 +982,29 @@ def save_officials(members):
             if official is None:
                 continue
 
-            upsert_official(session, official)
+            previous = session.get(Official, official.id)
+            was_current = previous is not None and previous.current_member
+            stored = upsert_official(session, official)
+            if roster_known and not was_current:
+                session.flush()
+                record_official_seated(session, stored)
             current_ids.append(official.id)
             saved += 1
 
         if current_ids:
-            former = (
+            departing = (
                 session.query(Official)
                 .filter(~Official.id.in_(current_ids))
                 .filter(Official.current_member.is_(True))
                 .filter(
                     or_(Official.level == "federal", Official.level.is_(None))
                 )
-                .update(
-                    {Official.current_member: False},
-                    synchronize_session=False,
-                )
+                .all()
             )
+            for official in departing:
+                official.current_member = False
+                record_official_departed(session, official)
+            former = len(departing)
             if former:
                 print(
                     f"  Marked {former} official(s) as not current "
@@ -1478,6 +1499,8 @@ def sync_bill_enrichment():
                     stats["bills_failed"] += 1
 
             if changed:
+                session.flush()
+                record_bill_events(session, bill)
                 session.commit()
             else:
                 stats["bills_unchanged"] += 1
@@ -1497,10 +1520,30 @@ def sync_bill_enrichment():
         session.close()
 
 
-def fetch_recent_bills(limit=50, congress=CURRENT_CONGRESS):
-    path = f"/bill/{congress}" if congress else "/bill"
-    payload = congress_get(path, params={"limit": limit, "format": "json"})
-    return payload.get("bills", [])
+def fetch_recent_bills(limit=50, congress=CURRENT_CONGRESS, since=None):
+    """Most recently updated bills first, paging until `limit` or `since` is reached.
+
+    `since` (aware datetime) maps to Congress.gov's fromDateTime filter so a
+    scheduled run picks up every bill touched since the last run, not just 50.
+    """
+    url = f"/bill/{congress}" if congress else "/bill"
+    params = {
+        "limit": min(limit, PAGE_SIZE),
+        "sort": "updateDate desc",
+        "format": "json",
+    }
+    if since is not None:
+        params["fromDateTime"] = since.astimezone(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+
+    bills = []
+    while url and len(bills) < limit:
+        payload = congress_get(url, params=params)
+        bills.extend(payload.get("bills", []))
+        url = payload.get("pagination", {}).get("next")
+        params = None
+    return bills[:limit]
 
 
 def fetch_bill_detail(congress, bill_type, number):
@@ -1743,7 +1786,7 @@ def upsert_bill(
     )
     if status is not None:
         action_fields["status"] = status
-    session.merge(
+    merged = session.merge(
         Bill(
             id=bill_id,
             title=title,
@@ -1804,6 +1847,7 @@ def upsert_bill(
         )
     )
     session.flush()
+    record_bill_events(session, merged)
 
 
 def refresh_bill_status(session, bill_id):
@@ -1817,6 +1861,8 @@ def refresh_bill_status(session, bill_id):
         origin_chamber=origin_chamber_from_bill_id(bill_id),
         roll_calls=roll_calls,
     )
+    session.flush()
+    record_bill_events(session, bill)
     return bill.status
 
 
@@ -2441,7 +2487,7 @@ def sync_bill_votes(
             session.close()
 
 
-def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
+def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True, since=None):
     """Fetch recent bills, upsert them, and optionally ingest roll-call votes."""
     _require_api_key()
     ensure_schema()
@@ -2465,7 +2511,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True):
 
     try:
         official_ids = load_official_ids(session)
-        bills = fetch_recent_bills(limit=limit, congress=congress)
+        bills = fetch_recent_bills(limit=limit, congress=congress, since=since)
         stats["bills_fetched"] = len(bills)
         print(f"Fetched {len(bills)} bills from Congress.gov.")
 
@@ -2781,6 +2827,12 @@ def main():
         action="store_true",
         help="When syncing bills, do not fetch roll-call votes.",
     )
+    parser.add_argument(
+        "--since-hours",
+        type=float,
+        help="When syncing bills, fetch every bill updated in the last N hours "
+        "(capped by --limit) instead of only the newest --limit.",
+    )
     parser.add_argument("--bill-type", help="Bill type for the votes command, e.g. hr.")
     parser.add_argument("--bill-number", help="Bill number for the votes command, e.g. 1.")
     args = parser.parse_args()
@@ -2849,6 +2901,11 @@ def main():
         limit=args.limit,
         congress=args.congress,
         sync_votes=not args.skip_votes,
+        since=(
+            datetime.now(timezone.utc) - timedelta(hours=args.since_hours)
+            if args.since_hours
+            else None
+        ),
     )
     _print_bill_stats(bill_stats)
 
