@@ -2,7 +2,7 @@ from datetime import date as Date, datetime
 import re
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -27,6 +27,8 @@ class OfficialOut(BaseModel):
     phone: Optional[str] = None
     office_address: Optional[str] = None
     website_url: Optional[str] = None
+    photo_url: Optional[str] = None
+    photo_attribution: Optional[str] = None
     level: str = "federal"
     openstates_id: Optional[str] = None
     # Stated-positions worker status and saved count; None when not attempted.
@@ -146,6 +148,177 @@ class OfficialDetailOut(OfficialOut):
     alignments: list[VoteAlignmentOut] = Field(default_factory=list)
 
 
+class FinanceSizeBucketOut(BaseModel):
+    # Lower bound in dollars: 0 ($200 and under), 200, 500, 1000, 2000 (and up).
+    size: int
+    total: float
+    count: Optional[int] = None
+
+
+class FinanceStateOut(BaseModel):
+    state: str
+    total: float
+    count: Optional[int] = None
+
+
+class FundingMixItemOut(BaseModel):
+    key: str
+    label: str
+    amount: float
+    share: Optional[float] = None
+
+
+class OutsideSpenderOut(BaseModel):
+    committee_id: Optional[str] = None
+    name: Optional[str] = None
+    total: float
+
+
+class OutsideSpendingOut(BaseModel):
+    """Independent expenditures (Schedule E) other groups made for or against."""
+
+    support_total: float = 0
+    oppose_total: float = 0
+    support_count: int = 0
+    oppose_count: int = 0
+    top_support: list[OutsideSpenderOut] = Field(default_factory=list)
+    top_oppose: list[OutsideSpenderOut] = Field(default_factory=list)
+
+
+class PeerMetricOut(BaseModel):
+    key: str
+    label: str
+    value: Optional[float] = None
+    # Share of the comparison group below this official (0.82 = "more than 82%").
+    chamber_percentile: Optional[float] = None
+    chamber_count: int = 0
+    party_percentile: Optional[float] = None
+    party_count: int = 0
+
+
+class PeerComparisonOut(BaseModel):
+    """Latest finished election compared with the rest of the chamber."""
+
+    election_year: int
+    fec_candidate_id: str
+    chamber: str
+    chamber_label: str
+    party: Optional[str] = None
+    metrics: list[PeerMetricOut] = Field(default_factory=list)
+
+
+class FinanceElectionOut(BaseModel):
+    """OpenFEC totals for one candidate ID and election."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fec_candidate_id: str
+    election_year: int
+    coverage_start_date: Optional[Date] = None
+    coverage_end_date: Optional[Date] = None
+    receipts: Optional[float] = None
+    contributions: Optional[float] = None
+    individual_contributions: Optional[float] = None
+    individual_itemized: Optional[float] = None
+    individual_unitemized: Optional[float] = None
+    pac_contributions: Optional[float] = None
+    party_contributions: Optional[float] = None
+    candidate_contributions: Optional[float] = None
+    candidate_loans: Optional[float] = None
+    joint_fundraising_transfers: Optional[float] = None
+    disbursements: Optional[float] = None
+    cash_on_hand: Optional[float] = None
+    debts: Optional[float] = None
+    size_breakdown: Optional[list[FinanceSizeBucketOut]] = None
+    # Share of individual giving in the $200-and-under bucket (per gift).
+    small_dollar_share: Optional[float] = None
+    # Share of individual money from donors whose gifts totaled $200 or less.
+    small_donor_share: Optional[float] = None
+    pac_share: Optional[float] = None
+    funding_mix: Optional[list[FundingMixItemOut]] = None
+    # Itemized individual giving only.
+    home_state: Optional[str] = None
+    in_state_share: Optional[float] = None
+    top_states: Optional[list[FinanceStateOut]] = None
+    outside_spending: Optional[OutsideSpendingOut] = None
+    fetched_at: Optional[datetime] = None
+
+    @computed_field
+    @property
+    def fec_url(self) -> str:
+        return f"https://www.fec.gov/data/candidate/{self.fec_candidate_id}/"
+
+
+class OfficialFinanceOut(BaseModel):
+    official_id: str
+    fec_candidate_ids: list[str] = Field(default_factory=list)
+    opensecrets_id: Optional[str] = None
+    opensecrets_url: Optional[str] = None
+    source: str = "Federal Election Commission (OpenFEC)"
+    # Newest election first.
+    elections: list[FinanceElectionOut] = Field(default_factory=list)
+    peer_comparison: Optional[PeerComparisonOut] = None
+
+
+class PacCategoryOut(BaseModel):
+    key: str
+    label: str
+    total: float
+    share: Optional[float] = None
+    pac_count: int
+    gift_count: int
+
+
+class PacOut(BaseModel):
+    """All of one PAC's gifts to the official in one election, combined."""
+
+    # contributor committee ID, or the name when FEC has no ID; pass it back
+    # to /finance/pacs/gifts.
+    pac_key: str
+    committee_id: Optional[str] = None
+    name: Optional[str] = None
+    category: str
+    category_label: str
+    total: float
+    gift_count: int
+    first_date: Optional[Date] = None
+    last_date: Optional[Date] = None
+
+
+class PacSummaryOut(BaseModel):
+    official_id: str
+    fec_candidate_id: str
+    election_year: int
+    total: float = 0
+    # FEC's reported PAC total for the election, to check the itemized sum.
+    reported_total: Optional[float] = None
+    # Newest itemized gift; FEC processes itemized data weeks after totals.
+    itemized_through: Optional[Date] = None
+    reported_through: Optional[Date] = None
+    gift_count: int = 0
+    pac_count: int = 0
+    categories: list[PacCategoryOut] = Field(default_factory=list)
+    top_pacs: list[PacOut] = Field(default_factory=list)
+    # False until fec_client.py pacs has fetched this official.
+    synced: bool = False
+    last_fetched_at: Optional[datetime] = None
+
+
+class PacListOut(BaseModel):
+    total_count: int
+    items: list[PacOut] = Field(default_factory=list)
+
+
+class PacGiftOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sub_id: str
+    receipt_date: Optional[Date] = None
+    amount: float
+    two_year_period: int
+    pdf_url: Optional[str] = None
+
+
 class PositionsProgressItemOut(BaseModel):
     official_id: str
     name: Optional[str] = None
@@ -227,6 +400,30 @@ class BillDetailOut(BillOut):
 class BillPageOut(BaseModel):
     items: list[BillDetailOut]
     total: int
+
+
+class FeedItemOut(BaseModel):
+    id: int
+    # bill_introduced | bill_status_changed | vote_held | official_seated | official_departed
+    kind: str
+    occurred_at: Date
+    detected_at: datetime
+    headline: str
+    subline: Optional[str] = None
+    level: str = "federal"
+    state: Optional[str] = None
+    bill: Optional[BillOut] = None
+    official: Optional[OfficialOut] = None
+    roll_call: Optional[RollCallOut] = None
+    # Positions on roll_call by party, e.g. {"Republican": {"Yes": 50, "No": 2}}.
+    tally_by_party: Optional[dict[str, dict[str, int]]] = None
+    payload: Optional[dict] = None
+
+
+class FeedPageOut(BaseModel):
+    items: list[FeedItemOut]
+    # Opaque; pass back as ?cursor= for the next (older) page. None at the end.
+    next_cursor: Optional[str] = None
 
 
 class BillVoterOut(BaseModel):
@@ -379,3 +576,7 @@ class VoterInfoErrorOut(CamelModel):
     upstream_status: str
     detail: str
 
+
+
+class UpcomingElectionsOut(CamelModel):
+    elections: list[ElectionOut]

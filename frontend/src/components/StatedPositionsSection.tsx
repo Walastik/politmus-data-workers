@@ -25,6 +25,7 @@ export default function StatedPositionsSection({
 }) {
   const [showAll, setShowAll] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
+  const [open, setOpen] = useState(false)
 
   // Display order, so "Show fewer" cuts at the same place the list reads.
   const ordered = useMemo(
@@ -50,15 +51,23 @@ export default function StatedPositionsSection({
       aria-labelledby="stated-positions-title"
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-purple-400" aria-hidden="true" />
-          <h3
-            id="stated-positions-title"
-            className="text-xs font-semibold uppercase tracking-wider text-purple-300"
+        <h3 id="stated-positions-title">
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            aria-controls="stated-positions-body"
+            className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-purple-300 transition hover:text-purple-200"
           >
+            {open ? (
+              <ChevronDown className="h-4 w-4 text-purple-400" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-purple-400" aria-hidden="true" />
+            )}
+            <Sparkles className="h-4 w-4 text-purple-400" aria-hidden="true" />
             Stated Positions (AI)
-          </h3>
-        </div>
+          </button>
+        </h3>
         {models.length > 0 ? (
           <span className="rounded bg-purple-900/50 px-1.5 py-0.5 text-[10px] font-mono font-medium text-purple-300">
             {models.join(', ')}
@@ -66,59 +75,63 @@ export default function StatedPositionsSection({
         ) : null}
       </div>
 
-      <p
-        className={`mt-2 text-xs ${sync?.status === 'failed' ? 'text-rose-300' : 'text-slate-400'}`}
-        title={sync?.status === 'failed' ? (sync.last_error ?? undefined) : undefined}
-      >
-        {statusMessage}
-      </p>
+      {open ? (
+        <div id="stated-positions-body">
+          <p
+            className={`mt-2 text-xs ${sync?.status === 'failed' ? 'text-rose-300' : 'text-slate-400'}`}
+            title={sync?.status === 'failed' ? (sync.last_error ?? undefined) : undefined}
+          >
+            {statusMessage}
+          </p>
 
-      {ordered.length > 0 ? (
-        <div className="mt-3 space-y-4">
-          {visibleGroups.map((group) => (
-            <div key={group.area}>
-              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                {group.area}
-              </h4>
-              <div className="mt-2 space-y-2.5">
-                {group.blocks.map((block, idx) =>
-                  block.positions.length > 1 ? (
-                    <SharedEvidenceBlock key={idx} positions={block.positions} />
-                  ) : (
-                    <ul key={idx}>
-                      <PositionItem position={block.positions[0]} />
-                    </ul>
-                  ),
-                )}
+          {ordered.length > 0 ? (
+            <div className="mt-3 space-y-4">
+              {visibleGroups.map((group) => (
+                <div key={group.area}>
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    {group.area}
+                  </h4>
+                  <div className="mt-2 space-y-2.5">
+                    {group.blocks.map((block, idx) =>
+                      block.positions.length > 1 ? (
+                        <SharedEvidenceBlock key={idx} positions={block.positions} />
+                      ) : (
+                        <ul key={idx}>
+                          <PositionItem position={block.positions[0]} />
+                        </ul>
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {ordered.length > INITIAL_POSITIONS_SHOWN ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(!showAll)}
+                  className="text-xs font-medium text-purple-300 hover:text-purple-200"
+                >
+                  {showAll ? 'Show fewer' : `Show all ${ordered.length}`}
+                </button>
+              ) : null}
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowRaw(!showRaw)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-400 transition hover:text-purple-300"
+                >
+                  {showRaw ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  {showRaw ? 'Hide raw JSON' : 'View raw JSON'}
+                </button>
+                {showRaw ? (
+                  <pre className="mt-2 max-h-52 overflow-auto rounded border border-slate-800 bg-slate-950 p-2 font-mono text-[11px] text-purple-200">
+                    {JSON.stringify({ positions_sync: sync, stated_positions: positions }, null, 2)}
+                  </pre>
+                ) : null}
               </div>
             </div>
-          ))}
-
-          {ordered.length > INITIAL_POSITIONS_SHOWN ? (
-            <button
-              type="button"
-              onClick={() => setShowAll(!showAll)}
-              className="text-xs font-medium text-purple-300 hover:text-purple-200"
-            >
-              {showAll ? 'Show fewer' : `Show all ${ordered.length}`}
-            </button>
           ) : null}
-
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowRaw(!showRaw)}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-400 transition hover:text-purple-300"
-            >
-              {showRaw ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              {showRaw ? 'Hide raw JSON' : 'View raw JSON'}
-            </button>
-            {showRaw ? (
-              <pre className="mt-2 max-h-52 overflow-auto rounded border border-slate-800 bg-slate-950 p-2 font-mono text-[11px] text-purple-200">
-                {JSON.stringify({ positions_sync: sync, stated_positions: positions }, null, 2)}
-              </pre>
-            ) : null}
-          </div>
         </div>
       ) : null}
     </section>

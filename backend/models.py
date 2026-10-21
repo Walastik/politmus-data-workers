@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, Index, LargeBinary, String, Integer, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -25,8 +25,19 @@ class Official(Base):
     phone = Column(String, nullable=True)
     office_address = Column(String, nullable=True)
     website_url = Column(String, nullable=True)
+    # Official portrait from Congress.gov member detail (depiction.imageUrl),
+    # hotlinked by the frontend. attribution is the credit line, when given.
+    photo_url = Column(String, nullable=True)
+    photo_attribution = Column(String, nullable=True)
     level = Column(String, nullable=False, default='federal', server_default='federal')
     openstates_id = Column(String, nullable=True, unique=True)
+    # From unitedstates/congress-legislators (fec_client.py crosswalk). A member
+    # who ran for the House and the Senate has one FEC candidate ID per race.
+    fec_candidate_ids = Column(JSONB, nullable=True)
+    opensecrets_id = Column(String, nullable=True)
+    # Campaign committees per FEC candidate ID, for Schedule A lookups:
+    # {"S6MN00267": [{"committee_id", "designation", "cycles"}]}.
+    fec_committees = Column(JSONB, nullable=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 
@@ -460,3 +471,122 @@ class StateSyncLog(Base):
 
     state_code = Column(String, primary_key=True)
     last_synced_at = Column(DateTime, nullable=True)
+
+
+class OfficialFinanceTotal(Base):
+    """OpenFEC campaign totals for one candidate ID and one election.
+
+    election_year is FEC's candidate_election_year: amounts cover the whole
+    election period (2 years for the House, 6 for the Senate). size_breakdown
+    and state_breakdown come from Schedule A aggregates and are only fetched
+    for the most recent elections (see fec_client.py).
+    """
+    __tablename__ = "official_finance_totals"
+
+    official_id = Column(String, ForeignKey("officials.id"), primary_key=True)
+    fec_candidate_id = Column(String, primary_key=True)
+    election_year = Column(Integer, primary_key=True)
+    coverage_start_date = Column(Date, nullable=True)
+    coverage_end_date = Column(Date, nullable=True)
+    receipts = Column(Numeric(14, 2), nullable=True)
+    contributions = Column(Numeric(14, 2), nullable=True)
+    individual_contributions = Column(Numeric(14, 2), nullable=True)
+    individual_itemized = Column(Numeric(14, 2), nullable=True)
+    individual_unitemized = Column(Numeric(14, 2), nullable=True)
+    pac_contributions = Column(Numeric(14, 2), nullable=True)
+    party_contributions = Column(Numeric(14, 2), nullable=True)
+    candidate_contributions = Column(Numeric(14, 2), nullable=True)
+    candidate_loans = Column(Numeric(14, 2), nullable=True)
+    # Transfers from joint fundraising committees: mostly individual donors'
+    # money raised together with other candidates or the party.
+    joint_fundraising_transfers = Column(Numeric(14, 2), nullable=True)
+    disbursements = Column(Numeric(14, 2), nullable=True)
+    cash_on_hand = Column(Numeric(14, 2), nullable=True)
+    debts = Column(Numeric(14, 2), nullable=True)
+    # [{"size": 0, "total": ..., "count": ...}, ...]; size is the bucket's lower
+    # bound in dollars (0 = $200 and under, which includes unitemized gifts).
+    size_breakdown = Column(JSONB, nullable=True)
+    # Itemized individual contributions only: {"home_state", "in_state",
+    # "out_of_state", "total", "top_states": [{"state", "total", "count"}]}.
+    state_breakdown = Column(JSONB, nullable=True)
+    # coverage_end_date the breakdowns were fetched at; equal means up to date.
+    breakdown_coverage_end_date = Column(Date, nullable=True)
+    # Schedule E independent expenditures for/against this candidate:
+    # {"support_total", "oppose_total", "support_count", "oppose_count",
+    #  "top_support": [{"committee_id", "name", "total"}], "top_oppose": [...]}.
+    outside_spending = Column(JSONB, nullable=True)
+    outside_spending_fetched_at = Column(DateTime, nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
+
+    official = relationship("Official")
+
+
+class PacContribution(Base):
+    """One itemized gift from a PAC or other political committee (Form 3 line 11C).
+
+    sub_id is FEC's unique ID for the Schedule A line, so re-fetching a
+    period replaces rows instead of duplicating them.
+    """
+    __tablename__ = "pac_contributions"
+
+    sub_id = Column(String, primary_key=True)
+    official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
+    fec_candidate_id = Column(String, nullable=False)
+    # The official's campaign committee that received the gift.
+    committee_id = Column(String, nullable=False)
+    two_year_period = Column(Integer, nullable=False)
+    contributor_committee_id = Column(String, nullable=True, index=True)
+    contributor_name = Column(String, nullable=True)
+    amount = Column(Numeric(14, 2), nullable=False)
+    receipt_date = Column(Date, nullable=True, index=True)
+    # services/finance_insights.pac_category of the three FEC codes below.
+    category = Column(String, nullable=False)
+    committee_type = Column(String, nullable=True)
+    organization_type = Column(String, nullable=True)
+    designation = Column(String, nullable=True)
+    pdf_url = Column(String, nullable=True)
+
+
+class PacContributionSync(Base):
+    """When one committee's PAC gifts for one two-year period were last fetched."""
+    __tablename__ = "pac_contribution_sync"
+
+    official_id = Column(String, ForeignKey("officials.id"), primary_key=True)
+    committee_id = Column(String, primary_key=True)
+    two_year_period = Column(Integer, primary_key=True)
+    # The election's coverage_end_date at fetch time; a change means new filings.
+    coverage_end_date = Column(Date, nullable=True)
+    # Newest gift fetched; FEC's itemized data lags the totals by weeks.
+    latest_receipt_date = Column(Date, nullable=True)
+    row_count = Column(Integer, nullable=False, default=0)
+    fetched_at = Column(DateTime, nullable=False)
+
+
+class FeedEvent(Base):
+    """Something feed-worthy that ingest noticed: a new bill, a status change, a vote.
+
+    Rows are appended by the ingest workers (services/feed_events.py) and never
+    rewritten. `dedupe_key` makes recording idempotent, so workers can call the
+    recorders on every upsert and re-runs add nothing.
+    """
+    __tablename__ = "feed_events"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_feed_events_dedupe_key"),
+        Index("ix_feed_events_occurred", "occurred_at", "id"),
+        Index("ix_feed_events_state_occurred", "state", "occurred_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # bill_introduced | bill_status_changed | vote_held | official_seated | official_departed
+    kind = Column(String, nullable=False, index=True)
+    # When it happened in the real world (source date, or detection day if the source has none).
+    occurred_at = Column(Date, nullable=False)
+    detected_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    official_id = Column(String, ForeignKey("officials.id"), nullable=True, index=True)
+    bill_id = Column(String, ForeignKey("bills.id"), nullable=True, index=True)
+    roll_call_id = Column(Integer, ForeignKey("roll_calls.id"), nullable=True)
+    state = Column(String, nullable=True)
+    level = Column(String, nullable=False, default="federal", server_default="federal")
+    # Small snapshot of what changed, e.g. {"from": "Passed House", "to": "Became Law"}.
+    payload = Column(JSONB, nullable=True)
+    dedupe_key = Column(String, nullable=False)

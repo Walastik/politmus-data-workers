@@ -1,4 +1,5 @@
-import { Landmark, MapPin, MapPinHouse, ScrollText, Search, Sparkles, Users } from 'lucide-react'
+import { Landmark, MapPin, MapPinHouse, Rss, ScrollText, Search, Sparkles, Users } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useEffect, useState, type ReactNode } from 'react'
 import { SignInButton, UserButton, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 
@@ -171,6 +172,15 @@ export default function Explorer() {
                 label="Bills"
                 onClick={() => setTab('bills')}
               />
+              <SignedIn>
+                <Link
+                  to="/feed"
+                  className="inline-flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300 transition hover:bg-slate-700"
+                >
+                  <Rss className="h-3.5 w-3.5" />
+                  Feed
+                </Link>
+              </SignedIn>
             </nav>
             <SignedIn>
               <UserButton>

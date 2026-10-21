@@ -53,12 +53,40 @@ def ensure_schema():
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS website_url VARCHAR"
         ))
         conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS photo_url VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS photo_attribution VARCHAR"
+        ))
+        conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS level VARCHAR "
             "NOT NULL DEFAULT 'federal'"
         ))
         conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS openstates_id VARCHAR"
         ))
+        # Filled by `fec_client.py crosswalk`.
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_candidate_ids JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS opensecrets_id VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_committees JSONB"
+        ))
+        conn.execute(text(
+            "ALTER TABLE pac_contribution_sync ADD COLUMN IF NOT EXISTS latest_receipt_date DATE"
+        ))
+        for column_sql in (
+            "joint_fundraising_transfers NUMERIC(14, 2)",
+            "outside_spending JSONB",
+            "outside_spending_fetched_at TIMESTAMP",
+        ):
+            conn.execute(text(
+                "ALTER TABLE official_finance_totals "
+                f"ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
         # Filled by `congress_client.py members` / `backfill-name-parts` and
         # the OpenStates sync.
         for column in (

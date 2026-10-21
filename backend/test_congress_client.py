@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault(
@@ -22,6 +22,7 @@ from congress_client import (
     senate_vote_menu_url,
     senate_vote_url,
     _house_roll_call_metadata,
+    fetch_recent_bills,
     _positions_from_senate_members,
     senator_lookup_key,
 )
@@ -366,6 +367,78 @@ class NamePartsTests(unittest.TestCase):
         self.assertEqual(garcia.display_name, 'Jesús G. "Chuy" García')
         self.assertIsNone(gone.last_name)
         session.commit.assert_called_once()
+
+
+class MemberPhotoTests(unittest.TestCase):
+    def test_reads_depiction_url_and_attribution(self):
+        from congress_client import official_from_member
+
+        official = official_from_member({
+            "bioguideId": "S000033",
+            "depiction": {
+                "imageUrl": "https://www.congress.gov/img/member/s000033_200.jpg",
+                "attribution": "Image courtesy of the Member",
+            },
+        })
+        self.assertEqual(
+            official.photo_url, "https://www.congress.gov/img/member/s000033_200.jpg"
+        )
+        self.assertEqual(official.photo_attribution, "Image courtesy of the Member")
+
+    def test_protocol_relative_url_becomes_https(self):
+        from congress_client import _photo_from_member
+
+        url, attribution = _photo_from_member(
+            {"depiction": {"imageUrl": "//www.congress.gov/img/member/a000370_200.jpg"}}
+        )
+        self.assertEqual(url, "https://www.congress.gov/img/member/a000370_200.jpg")
+        self.assertIsNone(attribution)
+
+    def test_attribution_html_is_reduced_to_text(self):
+        from congress_client import _photo_from_member
+
+        _, attribution = _photo_from_member({"depiction": {
+            "imageUrl": "https://www.congress.gov/img/member/s000033_200.jpg",
+            "attribution": '<a href="http://www.senate.gov/x.htm">Courtesy U.S. Senate Historical Office</a>',
+        }})
+        self.assertEqual(attribution, "Courtesy U.S. Senate Historical Office")
+
+    def test_missing_or_empty_depiction_has_no_photo(self):
+        from congress_client import _photo_from_member
+
+        self.assertEqual(_photo_from_member({}), (None, None))
+        self.assertEqual(_photo_from_member({"depiction": None}), (None, None))
+        self.assertEqual(
+            _photo_from_member({"depiction": {"imageUrl": "", "attribution": "x"}}),
+            (None, None),
+        )
+
+    def test_upsert_keeps_stored_photo_when_incoming_has_none(self):
+        from congress_client import upsert_official
+        from models import Official
+
+        existing = Official(id="A000370", name="Adams, Alma S.",
+                            photo_url="https://example.test/a.jpg", photo_attribution="Credit")
+        session = MagicMock()
+        session.get.return_value = existing
+        upsert_official(session, Official(id="A000370", name="Adams, Alma S."))
+        self.assertEqual(existing.photo_url, "https://example.test/a.jpg")
+        self.assertEqual(existing.photo_attribution, "Credit")
+
+    def test_upsert_replaces_photo_and_credit_together(self):
+        from congress_client import upsert_official
+        from models import Official
+
+        existing = Official(id="A000370", name="Adams, Alma S.",
+                            photo_url="https://example.test/a.jpg", photo_attribution="Credit")
+        session = MagicMock()
+        session.get.return_value = existing
+        upsert_official(
+            session,
+            Official(id="A000370", name="Adams, Alma S.", photo_url="https://example.test/b.jpg"),
+        )
+        self.assertEqual(existing.photo_url, "https://example.test/b.jpg")
+        self.assertIsNone(existing.photo_attribution)
 
 
 class PositionAndDateTests(unittest.TestCase):
@@ -848,6 +921,39 @@ class SyncHouseVotesTests(unittest.TestCase):
         self.assertEqual(roll_calls[0].source_roll_call_id, "house-119-1-00017")
         self.assertEqual({vote.official_id for vote in votes}, {"A000055", "B000001"})
         self.assertTrue(all(vote.roll_call_id == 3 for vote in votes))
+
+
+class FetchRecentBillsTests(unittest.TestCase):
+    def test_sorts_by_update_and_follows_pagination_until_limit(self):
+        pages = [
+            {"bills": [{"number": 1}, {"number": 2}], "pagination": {"next": "https://next/1"}},
+            {"bills": [{"number": 3}, {"number": 4}], "pagination": {"next": "https://next/2"}},
+        ]
+        with patch("congress_client.congress_get", side_effect=pages) as get:
+            bills = fetch_recent_bills(
+                limit=3,
+                congress=119,
+                since=datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual([bill["number"] for bill in bills], [1, 2, 3])
+        self.assertEqual(get.call_count, 2)
+        first_params = get.call_args_list[0].kwargs["params"]
+        self.assertEqual(first_params["sort"], "updateDate desc")
+        self.assertEqual(first_params["fromDateTime"], "2026-10-19T12:00:00Z")
+        self.assertEqual(get.call_args_list[1].args[0], "https://next/1")
+        self.assertIsNone(get.call_args_list[1].kwargs["params"])
+
+    def test_stops_when_no_next_page(self):
+        with patch(
+            "congress_client.congress_get",
+            return_value={"bills": [{"number": 1}], "pagination": {}},
+        ) as get:
+            bills = fetch_recent_bills(limit=50, congress=119)
+
+        self.assertEqual(len(bills), 1)
+        self.assertEqual(get.call_count, 1)
+        self.assertNotIn("fromDateTime", get.call_args.kwargs["params"])
 
 
 if __name__ == "__main__":

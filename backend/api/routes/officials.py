@@ -1,17 +1,25 @@
+from collections import defaultdict
+from datetime import date
 from typing import Optional
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, desc, func, nulls_last, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.schemas import (
     AccountabilityScoreOut,
+    FinanceElectionOut,
+    FinanceStateOut,
+    FundingMixItemOut,
     OfficialDetailOut,
+    OfficialFinanceOut,
     OfficialOut,
     OfficialStanceOut,
     OfficialVoteOut,
+    OutsideSpendingOut,
+    PeerComparisonOut,
     PositionsSyncOut,
     VoteAlignmentOut,
 )
@@ -19,6 +27,7 @@ from database import get_db
 from models import (
     Bill,
     Official,
+    OfficialFinanceTotal,
     OfficialPositionSync,
     OfficialScore,
     OfficialStance,
@@ -26,6 +35,7 @@ from models import (
     Vote,
     VoteAlignment,
 )
+from services import finance_insights
 
 router = APIRouter()
 
@@ -118,6 +128,106 @@ def _score_fields(score: Optional[OfficialScore]) -> dict:
     }
 
 
+def _finance_election_out(row):
+    sizes = row.size_breakdown or []
+    states = row.state_breakdown or {}
+    small = next((bucket["total"] for bucket in sizes if bucket["size"] == 0), None)
+    mix = finance_insights.funding_mix(row)
+    return FinanceElectionOut.model_validate(row).model_copy(
+        update={
+            "small_dollar_share": finance_insights.share(
+                small, sum(bucket["total"] for bucket in sizes)
+            ),
+            "small_donor_share": finance_insights.small_donor_share(row),
+            "pac_share": finance_insights.pac_share(row),
+            "funding_mix": [FundingMixItemOut(**item) for item in mix] if mix else None,
+            "home_state": states.get("home_state"),
+            "in_state_share": finance_insights.in_state_share(row),
+            "top_states": [FinanceStateOut(**state) for state in states.get("top_states") or []]
+            or None,
+            "outside_spending": (
+                OutsideSpendingOut(**row.outside_spending) if row.outside_spending else None
+            ),
+        }
+    )
+
+
+def _peer_comparison(db, official):
+    """Compare with current federal members' finished elections."""
+    if not official.current_member or (official.level or "federal") != "federal":
+        return None
+    today = date.today()
+    peers = (
+        db.query(Official)
+        .filter(Official.current_member.is_(True), Official.level == "federal")
+        .options(load_only(Official.id, Official.office, Official.party))
+        .all()
+    )
+    rows = (
+        db.query(OfficialFinanceTotal)
+        .join(Official, Official.id == OfficialFinanceTotal.official_id)
+        .filter(
+            Official.current_member.is_(True),
+            Official.level == "federal",
+            OfficialFinanceTotal.election_year < today.year,
+        )
+        .options(
+            load_only(
+                OfficialFinanceTotal.official_id,
+                OfficialFinanceTotal.fec_candidate_id,
+                OfficialFinanceTotal.election_year,
+                OfficialFinanceTotal.receipts,
+                OfficialFinanceTotal.individual_contributions,
+                OfficialFinanceTotal.individual_unitemized,
+                OfficialFinanceTotal.pac_contributions,
+                OfficialFinanceTotal.state_breakdown,
+            )
+        )
+        .all()
+    )
+    rows_by_official = defaultdict(list)
+    for row in rows:
+        rows_by_official[row.official_id].append(row)
+    comparison = finance_insights.peer_comparison(
+        official,
+        rows_by_official,
+        {peer.id: peer for peer in peers},
+        today=today,
+    )
+    return PeerComparisonOut(**comparison) if comparison else None
+
+
+# Registered before get_official: its {official_id:path} would swallow /finance.
+@router.get("/{official_id:path}/finance", response_model=OfficialFinanceOut)
+def get_official_finance(official_id: str, db: Session = Depends(get_db)):
+    official_id = unquote(official_id)
+    official = db.get(Official, official_id)
+    if not official:
+        raise HTTPException(status_code=404, detail="Official not found")
+
+    rows = (
+        db.query(OfficialFinanceTotal)
+        .filter(OfficialFinanceTotal.official_id == official_id)
+        .order_by(
+            desc(OfficialFinanceTotal.election_year),
+            OfficialFinanceTotal.fec_candidate_id,
+        )
+        .all()
+    )
+    return OfficialFinanceOut(
+        official_id=official.id,
+        fec_candidate_ids=official.fec_candidate_ids or [],
+        opensecrets_id=official.opensecrets_id,
+        opensecrets_url=(
+            f"https://www.opensecrets.org/members-of-congress/summary?cid={official.opensecrets_id}"
+            if official.opensecrets_id
+            else None
+        ),
+        elections=[_finance_election_out(row) for row in rows],
+        peer_comparison=_peer_comparison(db, official),
+    )
+
+
 @router.get("/{official_id:path}", response_model=OfficialDetailOut)
 def get_official(official_id: str, db: Session = Depends(get_db)):
     official_id = unquote(official_id)
@@ -176,6 +286,8 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         phone=official.phone,
         office_address=official.office_address,
         website_url=official.website_url,
+        photo_url=official.photo_url,
+        photo_attribution=official.photo_attribution,
         level=official.level or "federal",
         openstates_id=official.openstates_id,
         votes=[

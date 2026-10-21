@@ -45,7 +45,28 @@ const okSync: PositionsSync = {
   extractor_version: 'v1',
 }
 
+// The section starts collapsed; click its header to show the positions.
+function expand() {
+  fireEvent.click(screen.getByRole('button', { name: 'Stated Positions (AI)' }))
+}
+
 describe('StatedPositionsSection', () => {
+  it('starts collapsed, showing only the header and model', () => {
+    render(<StatedPositionsSection sync={okSync} positions={[stance()]} />)
+
+    const toggle = screen.getByRole('button', { name: 'Stated Positions (AI)' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('qwen3.6:27b')).toBeInTheDocument()
+    expect(screen.queryByText('Medicaid')).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Medicaid')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(screen.queryByText('Medicaid')).not.toBeInTheDocument()
+  })
+
   it('groups positions by policy area with the quote and source link', () => {
     render(
       <StatedPositionsSection
@@ -64,6 +85,7 @@ describe('StatedPositionsSection', () => {
         ]}
       />,
     )
+    expand()
 
     expect(screen.getByText('Stated Positions (AI)')).toBeInTheDocument()
     expect(screen.getByText('qwen3.6:27b')).toBeInTheDocument()
@@ -91,6 +113,7 @@ describe('StatedPositionsSection', () => {
       stance({ target_name: `Target ${i + 1}`, policy_area: i % 2 ? 'Health' : 'Taxation' }),
     )
     render(<StatedPositionsSection sync={okSync} positions={positions} />)
+    expand()
 
     expect(screen.getAllByRole('listitem')).toHaveLength(10)
     fireEvent.click(screen.getByRole('button', { name: 'Show all 13' }))
@@ -115,6 +138,7 @@ describe('StatedPositionsSection', () => {
         ]}
       />,
     )
+    expand()
 
     expect(screen.getAllByText('“I will fight every cut to Medicaid.”')).toHaveLength(1)
     expect(screen.getByText('Supports 3 positions')).toBeInTheDocument()
@@ -125,6 +149,7 @@ describe('StatedPositionsSection', () => {
 
   it('toggles the raw JSON', () => {
     render(<StatedPositionsSection sync={okSync} positions={[stance()]} />)
+    expand()
     fireEvent.click(screen.getByRole('button', { name: 'View raw JSON' }))
     expect(screen.getByText(/"stated_positions"/)).toBeInTheDocument()
   })
@@ -137,6 +162,7 @@ describe('StatedPositionsSection', () => {
         positions={[]}
       />,
     )
+    expand()
     const line = screen.getByText(/^Last attempt failed: ollama timed out x+…$/)
     expect(line).toHaveAttribute('title', error)
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
@@ -204,11 +230,16 @@ describe('MemberDrawer stated positions', () => {
   }
 
   beforeEach(() => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(detail), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+    // The drawer also loads campaign finance; each call needs its own Response.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      new Response(
+        JSON.stringify(
+          String(input).endsWith('/finance')
+            ? { official_id: official.id, fec_candidate_ids: [], source: 'FEC', elections: [] }
+            : detail,
+        ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
     )
   })
 
@@ -228,6 +259,8 @@ describe('MemberDrawer stated positions', () => {
       />,
     )
     expect(await screen.findByText('Stated Positions (AI)')).toBeInTheDocument()
+    expect(screen.queryByText('Medicaid')).not.toBeInTheDocument()
+    expand()
     expect(screen.getByText('Medicaid')).toBeInTheDocument()
   })
 

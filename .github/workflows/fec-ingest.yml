@@ -1,0 +1,53 @@
+name: FEC Campaign Finance Ingestion
+
+on:
+  schedule:
+    # Weekly, Monday 07:30 UTC, clear of the Congress (00/12), OpenStates
+    # (03/15) and Senate (:45) jobs. Most FEC filings are quarterly, and
+    # re-runs only re-fetch breakdowns whose coverage date moved.
+    - cron: '30 7 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: fec-ingest
+  cancel-in-progress: false
+
+jobs:
+  sync_fec_data:
+    runs-on: ubuntu-latest
+    # A first full run is about 2 hours at the 1,000 requests/hour key limit;
+    # later runs are about one request per member (~30 minutes).
+    timeout-minutes: 240
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Scripts run on the API machine so they use Fly's private DATABASE_URL
+      # and FEC_API_KEY. Do not add the FEC key as a GitHub secret.
+      # -C execs the binary directly (no shell), so use an absolute python path.
+      - name: Load FEC and OpenSecrets IDs onto officials
+        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/fec_client.py crosswalk"
+
+      - name: Fetch campaign totals and breakdowns
+        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/fec_client.py totals"
+
+  # Every itemized PAC gift. The first load is roughly 5,000 requests (about
+  # 5 hours at 1,000/hour), so each run stops starting new members after 300
+  # minutes and the next run continues with the least recently synced ones.
+  # After that, only the current period re-fetches, and only after new filings.
+  sync_fec_pacs:
+    needs: sync_fec_data
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Fetch PAC contributions
+        run: flyctl ssh console -a "$FLY_API_APP" -C "/usr/local/bin/python /app/fec_client.py pacs --max-minutes 300"

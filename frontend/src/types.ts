@@ -17,6 +17,9 @@ export interface Official {
   phone: string | null
   office_address: string | null
   website_url: string | null
+  // Congress.gov portrait (federal members only) and its credit line.
+  photo_url?: string | null
+  photo_attribution?: string | null
   level?: string | null
   openstates_id?: string | null
   positions_status?: PositionsStatus | null
@@ -162,6 +165,153 @@ export interface OfficialDetail extends Official {
   positions_sync: PositionsSync | null
   accountability?: AccountabilityScore | null
   alignments?: VoteAlignment[]
+}
+
+export interface FinanceSizeBucket {
+  // Lower bound in dollars: 0 ($200 and under), 200, 500, 1000, 2000 (and up).
+  size: number
+  total: number
+  count?: number | null
+}
+
+export interface FinanceState {
+  state: string
+  total: number
+  count?: number | null
+}
+
+export interface FundingMixItem {
+  key: string
+  label: string
+  amount: number
+  share?: number | null
+}
+
+export interface OutsideSpender {
+  committee_id?: string | null
+  name?: string | null
+  total: number
+}
+
+export interface OutsideSpending {
+  support_total: number
+  oppose_total: number
+  support_count: number
+  oppose_count: number
+  top_support: OutsideSpender[]
+  top_oppose: OutsideSpender[]
+}
+
+export interface PeerMetric {
+  key: string
+  label: string
+  value?: number | null
+  // Share of the group below this official (0.82 = "more than 82%").
+  chamber_percentile?: number | null
+  chamber_count: number
+  party_percentile?: number | null
+  party_count: number
+}
+
+export interface PeerComparison {
+  election_year: number
+  fec_candidate_id: string
+  chamber: string
+  chamber_label: string
+  party?: string | null
+  metrics: PeerMetric[]
+}
+
+export interface FinanceElection {
+  fec_candidate_id: string
+  election_year: number
+  coverage_start_date?: string | null
+  coverage_end_date?: string | null
+  receipts?: number | null
+  contributions?: number | null
+  individual_contributions?: number | null
+  individual_itemized?: number | null
+  individual_unitemized?: number | null
+  pac_contributions?: number | null
+  party_contributions?: number | null
+  candidate_contributions?: number | null
+  candidate_loans?: number | null
+  joint_fundraising_transfers?: number | null
+  disbursements?: number | null
+  cash_on_hand?: number | null
+  debts?: number | null
+  size_breakdown?: FinanceSizeBucket[] | null
+  small_dollar_share?: number | null
+  small_donor_share?: number | null
+  pac_share?: number | null
+  funding_mix?: FundingMixItem[] | null
+  home_state?: string | null
+  in_state_share?: number | null
+  top_states?: FinanceState[] | null
+  outside_spending?: OutsideSpending | null
+  fetched_at?: string | null
+  fec_url: string
+}
+
+export interface OfficialFinance {
+  official_id: string
+  fec_candidate_ids: string[]
+  opensecrets_id?: string | null
+  opensecrets_url?: string | null
+  source: string
+  elections: FinanceElection[]
+  peer_comparison?: PeerComparison | null
+}
+
+export interface PacCategory {
+  key: string
+  label: string
+  total: number
+  share?: number | null
+  pac_count: number
+  gift_count: number
+}
+
+export interface Pac {
+  // Pass back to /finance/pacs/gifts.
+  pac_key: string
+  committee_id?: string | null
+  name?: string | null
+  category: string
+  category_label: string
+  total: number
+  gift_count: number
+  first_date?: string | null
+  last_date?: string | null
+}
+
+export interface PacSummary {
+  official_id: string
+  fec_candidate_id: string
+  election_year: number
+  total: number
+  reported_total?: number | null
+  itemized_through?: string | null
+  reported_through?: string | null
+  gift_count: number
+  pac_count: number
+  categories: PacCategory[]
+  top_pacs: Pac[]
+  synced: boolean
+  last_fetched_at?: string | null
+}
+
+export interface PacList {
+  total_count: number
+  items: Pac[]
+}
+
+export interface PacGift {
+  sub_id: string
+  receipt_date?: string | null
+  amount: number
+  two_year_period: number
+  pdf_url?: string | null
 }
 
 export interface ChamberVoteSummary {
@@ -379,6 +529,15 @@ export function partyBadgeClass(party: string) {
     return 'bg-red-900/60 text-red-300'
   }
   return 'bg-emerald-900/60 text-emerald-300'
+}
+
+// Handles both "Alma S. Adams" and Congress.gov's inverted "Adams, Alma S.".
+export function initials(name: string) {
+  const [last, rest] = name.includes(',') ? name.split(',', 2) : [null, name]
+  const words = (rest ?? '').trim().split(/\s+/).filter(Boolean)
+  const first = words[0]?.[0] ?? ''
+  const final = (last ?? words[words.length - 1] ?? '').trim()[0] ?? ''
+  return (words.length > 1 || last ? first + final : first).toUpperCase() || '?'
 }
 
 export function partyShort(party: string) {
@@ -797,6 +956,7 @@ export function civicRepresentativeToOfficial(
     phone: rep.phones[0] ?? null,
     office_address: formatCivicAddress(rep.addresses[0]) ?? null,
     website_url: rep.urls[0] ?? null,
+    photo_url: rep.photo_url ?? null,
     level: isCivicStateLevel(rep) ? 'state' : 'federal',
     openstates_id: isCivicStateLevel(rep) ? rep.id : null,
   }
@@ -1423,4 +1583,39 @@ export function positionsStatusLabel(status: string | null | undefined) {
     return null
   }
   return POSITIONS_STATUS_LABELS[status as PositionsStatus] ?? status
+}
+
+export type FeedKind =
+  | 'bill_introduced'
+  | 'bill_status_changed'
+  | 'vote_held'
+  | 'official_seated'
+  | 'official_departed'
+
+export interface FeedItem {
+  id: number
+  kind: FeedKind
+  occurred_at: string
+  detected_at: string
+  headline: string
+  subline: string | null
+  level: string
+  state: string | null
+  bill: Omit<Bill, 'votes_summary' | 'votes_by_party' | 'roll_calls'> | null
+  official: Official | null
+  roll_call: BillRollCall | null
+  // Positions on roll_call by party, e.g. { Republican: { Yes: 50, No: 2 } }.
+  tally_by_party: Record<string, ChamberVoteSummary> | null
+  payload: Record<string, string | null> | null
+}
+
+export interface FeedPage {
+  items: FeedItem[]
+  next_cursor: string | null
+}
+
+export interface UpcomingElection {
+  id: string
+  name: string
+  date: string | null
 }
