@@ -860,6 +860,21 @@ def _website_url_from_member(member):
     return url
 
 
+def _photo_from_member(member):
+    """(imageUrl, plain-text attribution) from depiction. Only the member detail payload has it."""
+    depiction = member.get("depiction")
+    if not isinstance(depiction, dict):
+        return None, None
+    url = _text_or_none(depiction.get("imageUrl"))
+    if not url:
+        return None, None
+    if url.startswith("//"):
+        url = f"https:{url}"
+    # Some credits are an <a> tag, e.g. the Senate Historical Office's; keep the text.
+    attribution = _text_or_none(re.sub(r"<[^>]+>", "", depiction.get("attribution") or ""))
+    return url, attribution
+
+
 def _combine_member_payloads(listing, detail):
     """Prefer detail fields, but keep list identity when detail omits them."""
     if not isinstance(detail, dict) or not detail:
@@ -877,6 +892,7 @@ def official_from_member(member, bioguide_id=None, current_member=None):
         return None
     if current_member is None:
         current_member = _current_member_flag(member, default=False)
+    photo_url, photo_attribution = _photo_from_member(member)
     return Official(
         id=bioguide_id,
         name=_name_from_member(member),
@@ -889,6 +905,8 @@ def official_from_member(member, bioguide_id=None, current_member=None):
         phone=_phone_from_member(member),
         office_address=_office_address_from_member(member),
         website_url=_website_url_from_member(member),
+        photo_url=photo_url,
+        photo_attribution=photo_attribution,
         level="federal",
     )
 
@@ -896,7 +914,8 @@ def official_from_member(member, bioguide_id=None, current_member=None):
 def upsert_official(session, incoming):
     """Insert or update an official without wiping stored contact fields.
 
-    List-level member payloads omit phone/address/website and the name parts.
+    List-level member payloads omit phone/address/website, the photo and the
+    name parts.
     SQLAlchemy merge would null those columns, so blank incoming values are
     left unchanged.
     """
@@ -923,6 +942,10 @@ def upsert_official(session, incoming):
         existing.office_address = incoming.office_address
     if incoming.website_url:
         existing.website_url = incoming.website_url
+    # URL and credit move together, like the name parts.
+    if incoming.photo_url:
+        existing.photo_url = incoming.photo_url
+        existing.photo_attribution = incoming.photo_attribution
     return existing
 
 

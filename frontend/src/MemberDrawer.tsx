@@ -6,6 +6,7 @@ import { apiUrl } from './api'
 import BillDrawer from './BillDrawer'
 import CampaignFinanceSection from './components/CampaignFinanceSection'
 import CopyLinkButton from './components/CopyLinkButton'
+import OfficialPhoto from './components/OfficialPhoto'
 import StatedPositionsSection from './components/StatedPositionsSection'
 import {
   billStub,
@@ -142,29 +143,40 @@ export default function MemberDrawer({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5" onScroll={onScroll}>
-          <div className="mb-5 border-b border-slate-800 pb-5">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="mb-5 flex items-center gap-4 border-b border-slate-800 pb-5">
+            {view.photo_url ? (
+              <OfficialPhoto
+                url={view.photo_url}
+                name={officialName(view)}
+                party={view.party}
+                attribution={view.photo_attribution}
+                size="lg"
+              />
+            ) : null}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                {view.party ? (
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
+                  >
+                    {partyShort(view.party)}
+                  </span>
+                ) : null}
+                <h2 ref={titleRef} id="member-drawer-title" className="text-xl font-semibold">
+                  {officialName(view) || (loading ? 'Loading…' : official.id)}
+                </h2>
+                {view.party ? (
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    {rosterStatusLabel(view)}
+                  </span>
+                ) : null}
+              </div>
               {view.party ? (
-                <span
-                  className={`text-xs px-2 py-0.5 rounded font-bold ${partyBadgeClass(view.party)}`}
-                >
-                  {partyShort(view.party)}
-                </span>
-              ) : null}
-              <h2 ref={titleRef} id="member-drawer-title" className="text-xl font-semibold">
-                {officialName(view) || (loading ? 'Loading…' : official.id)}
-              </h2>
-              {view.party ? (
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  {rosterStatusLabel(view)}
-                </span>
+                <p className="mt-1 text-sm text-slate-400">
+                  {[stateNameFromAbbr(view.state), officeLine(view)].filter(Boolean).join(' · ')}
+                </p>
               ) : null}
             </div>
-            {view.party ? (
-              <p className="mt-1 text-sm text-slate-400">
-                {[stateNameFromAbbr(view.state), officeLine(view)].filter(Boolean).join(' · ')}
-              </p>
-            ) : null}
           </div>
 
           <ContactSection official={view} />

@@ -27,6 +27,8 @@ class OfficialOut(BaseModel):
     phone: Optional[str] = None
     office_address: Optional[str] = None
     website_url: Optional[str] = None
+    photo_url: Optional[str] = None
+    photo_attribution: Optional[str] = None
     level: str = "federal"
     openstates_id: Optional[str] = None
     # Stated-positions worker status and saved count; None when not attempted.

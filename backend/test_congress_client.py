@@ -368,6 +368,78 @@ class NamePartsTests(unittest.TestCase):
         session.commit.assert_called_once()
 
 
+class MemberPhotoTests(unittest.TestCase):
+    def test_reads_depiction_url_and_attribution(self):
+        from congress_client import official_from_member
+
+        official = official_from_member({
+            "bioguideId": "S000033",
+            "depiction": {
+                "imageUrl": "https://www.congress.gov/img/member/s000033_200.jpg",
+                "attribution": "Image courtesy of the Member",
+            },
+        })
+        self.assertEqual(
+            official.photo_url, "https://www.congress.gov/img/member/s000033_200.jpg"
+        )
+        self.assertEqual(official.photo_attribution, "Image courtesy of the Member")
+
+    def test_protocol_relative_url_becomes_https(self):
+        from congress_client import _photo_from_member
+
+        url, attribution = _photo_from_member(
+            {"depiction": {"imageUrl": "//www.congress.gov/img/member/a000370_200.jpg"}}
+        )
+        self.assertEqual(url, "https://www.congress.gov/img/member/a000370_200.jpg")
+        self.assertIsNone(attribution)
+
+    def test_attribution_html_is_reduced_to_text(self):
+        from congress_client import _photo_from_member
+
+        _, attribution = _photo_from_member({"depiction": {
+            "imageUrl": "https://www.congress.gov/img/member/s000033_200.jpg",
+            "attribution": '<a href="http://www.senate.gov/x.htm">Courtesy U.S. Senate Historical Office</a>',
+        }})
+        self.assertEqual(attribution, "Courtesy U.S. Senate Historical Office")
+
+    def test_missing_or_empty_depiction_has_no_photo(self):
+        from congress_client import _photo_from_member
+
+        self.assertEqual(_photo_from_member({}), (None, None))
+        self.assertEqual(_photo_from_member({"depiction": None}), (None, None))
+        self.assertEqual(
+            _photo_from_member({"depiction": {"imageUrl": "", "attribution": "x"}}),
+            (None, None),
+        )
+
+    def test_upsert_keeps_stored_photo_when_incoming_has_none(self):
+        from congress_client import upsert_official
+        from models import Official
+
+        existing = Official(id="A000370", name="Adams, Alma S.",
+                            photo_url="https://example.test/a.jpg", photo_attribution="Credit")
+        session = MagicMock()
+        session.get.return_value = existing
+        upsert_official(session, Official(id="A000370", name="Adams, Alma S."))
+        self.assertEqual(existing.photo_url, "https://example.test/a.jpg")
+        self.assertEqual(existing.photo_attribution, "Credit")
+
+    def test_upsert_replaces_photo_and_credit_together(self):
+        from congress_client import upsert_official
+        from models import Official
+
+        existing = Official(id="A000370", name="Adams, Alma S.",
+                            photo_url="https://example.test/a.jpg", photo_attribution="Credit")
+        session = MagicMock()
+        session.get.return_value = existing
+        upsert_official(
+            session,
+            Official(id="A000370", name="Adams, Alma S.", photo_url="https://example.test/b.jpg"),
+        )
+        self.assertEqual(existing.photo_url, "https://example.test/b.jpg")
+        self.assertIsNone(existing.photo_attribution)
+
+
 class PositionAndDateTests(unittest.TestCase):
     def test_normalizes_senate_vote_cast(self):
         self.assertEqual(normalize_position("Yea"), "Yes")

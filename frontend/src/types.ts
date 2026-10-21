@@ -17,6 +17,9 @@ export interface Official {
   phone: string | null
   office_address: string | null
   website_url: string | null
+  // Congress.gov portrait (federal members only) and its credit line.
+  photo_url?: string | null
+  photo_attribution?: string | null
   level?: string | null
   openstates_id?: string | null
   positions_status?: PositionsStatus | null
@@ -471,6 +474,15 @@ export function partyBadgeClass(party: string) {
   return 'bg-emerald-900/60 text-emerald-300'
 }
 
+// Handles both "Alma S. Adams" and Congress.gov's inverted "Adams, Alma S.".
+export function initials(name: string) {
+  const [last, rest] = name.includes(',') ? name.split(',', 2) : [null, name]
+  const words = (rest ?? '').trim().split(/\s+/).filter(Boolean)
+  const first = words[0]?.[0] ?? ''
+  const final = (last ?? words[words.length - 1] ?? '').trim()[0] ?? ''
+  return (words.length > 1 || last ? first + final : first).toUpperCase() || '?'
+}
+
 export function partyShort(party: string) {
   if (party === 'Democratic') return 'D'
   if (party === 'Republican') return 'R'
@@ -887,6 +899,7 @@ export function civicRepresentativeToOfficial(
     phone: rep.phones[0] ?? null,
     office_address: formatCivicAddress(rep.addresses[0]) ?? null,
     website_url: rep.urls[0] ?? null,
+    photo_url: rep.photo_url ?? null,
     level: isCivicStateLevel(rep) ? 'state' : 'federal',
     openstates_id: isCivicStateLevel(rep) ? rep.id : null,
   }
