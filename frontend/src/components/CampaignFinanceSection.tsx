@@ -12,9 +12,18 @@ import {
   formatCompactMoney,
   formatMoney,
   formatShare,
+  partyBarClass,
   peerLines,
 } from '../campaignFinance'
-import type { FinanceElection, OfficialFinance, OutsideSpender, PeerComparison } from '../types'
+import {
+  partyShort,
+  raceTitle,
+  type FinanceElection,
+  type OfficialFinance,
+  type OutsideSpender,
+  type PeerComparison,
+  type Race,
+} from '../types'
 import { Explainer, LegendSwatch, StackedBar, SubHeading } from './financeParts'
 import PacContributionsSection from './PacContributionsSection'
 
@@ -74,6 +83,8 @@ export default function CampaignFinanceSection({ officialId }: { officialId: str
       ? comparison
       : null
   const sharesYear = (year: number) => elections.filter((e) => e.election_year === year).length > 1
+  const race = finance?.race_comparison ?? null
+  const raced = selected && race && race.election_year === selected.election_year ? race : null
 
   return (
     <section
@@ -108,7 +119,9 @@ export default function CampaignFinanceSection({ officialId }: { officialId: str
             <p className="mt-2 text-xs text-slate-400">
               {finance.fec_candidate_ids.length === 0
                 ? 'No FEC candidate ID. Run fec_client.py crosswalk.'
-                : `No totals loaded yet. Run fec_client.py totals --official-id ${officialId}.`}
+                : race
+                  ? 'No totals loaded yet. Run fec_client.py totals --candidates.'
+                  : `No totals loaded yet. Run fec_client.py totals --official-id ${officialId}.`}
             </p>
           ) : (
             <>
@@ -133,7 +146,12 @@ export default function CampaignFinanceSection({ officialId }: { officialId: str
                   )
                 })}
               </div>
-              <ElectionView officialId={officialId} election={selected} comparison={compared} />
+              <ElectionView
+                officialId={officialId}
+                election={selected}
+                comparison={compared}
+                race={raced}
+              />
             </>
           )}
 
@@ -180,10 +198,12 @@ function ElectionView({
   officialId,
   election,
   comparison,
+  race,
 }: {
   officialId: string
   election: FinanceElection
   comparison: PeerComparison | null
+  race: Race | null
 }) {
   const peers = (key: string) =>
     comparison
@@ -228,7 +248,7 @@ function ElectionView({
         </div>
         {comparison ? (
           <Explainer label="How are these compared?">{EXPLAINERS.peers}</Explainer>
-        ) : (
+        ) : race ? null : (
           <p className="mt-2 text-[11px] text-slate-500">
             {inProgress
               ? 'Comparisons with other members use finished elections; pick an earlier year to see them.'
@@ -237,11 +257,67 @@ function ElectionView({
         )}
       </div>
 
+      {race ? <RaceComparison race={race} officialId={officialId} /> : null}
       <FundingMix election={election} />
       <PacContributionsSection officialId={officialId} election={election} />
       <HomeState election={election} />
       <OutsideSpendingView election={election} />
       <SpendingAndSizes election={election} />
+    </div>
+  )
+}
+
+function RaceComparison({ race, officialId }: { race: Race; officialId: string }) {
+  const top = Math.max(...race.candidates.map((candidate) => candidate.receipts ?? 0), 1)
+  return (
+    <div>
+      <SubHeading>The race · {raceTitle(race)}</SubHeading>
+      <ul className="mt-2 space-y-1.5">
+        {race.candidates.map((candidate) => {
+          const self = candidate.official_id === officialId
+          const outside =
+            candidate.outside_support || candidate.outside_oppose
+              ? `Outside +${formatCompactMoney(candidate.outside_support ?? 0)} / −${formatCompactMoney(candidate.outside_oppose ?? 0)}`
+              : null
+          return (
+            <li
+              key={candidate.fec_candidate_id}
+              aria-current={self ? 'true' : undefined}
+              className={`rounded p-2 ${self ? 'border border-emerald-500/40 bg-emerald-500/5' : 'bg-slate-950/30'}`}
+            >
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="min-w-0 truncate font-medium text-slate-100">
+                  {candidate.name}
+                  {candidate.party ? (
+                    <span className="ml-1 text-slate-400">({partyShort(candidate.party)})</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 tabular-nums text-slate-200">
+                  {formatCompactMoney(candidate.receipts)}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded bg-slate-900" aria-hidden="true">
+                <div
+                  className={`h-full ${partyBarClass(candidate.party)}`}
+                  style={{ width: `${((candidate.receipts ?? 0) / top) * 100}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-slate-400">
+                {[
+                  `Cash ${formatCompactMoney(candidate.cash_on_hand)}`,
+                  candidate.small_donor_share != null
+                    ? `Small donors ${formatShare(candidate.small_donor_share)}`
+                    : null,
+                  outside,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            </li>
+          )
+        })}
+      </ul>
+      <Explainer label="What's in this comparison?">{EXPLAINERS.race}</Explainer>
     </div>
   )
 }

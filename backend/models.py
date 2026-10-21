@@ -38,6 +38,12 @@ class Official(Base):
     # Campaign committees per FEC candidate ID, for Schedule A lookups:
     # {"S6MN00267": [{"committee_id", "designation", "cycles"}]}.
     fec_committees = Column(JSONB, nullable=True)
+    # From Wikidata (wikidata_client.py), matched on FEC candidate ID.
+    wikidata_id = Column(String, nullable=True)
+    wikipedia_url = Column(String, nullable=True)
+    # {"description", "birth_date", "occupations": [...], "education": [...],
+    #  "positions_held": [...]}.
+    bio = Column(JSONB, nullable=True)
 
     bills = relationship("Bill", back_populates="sponsor")
 
@@ -480,3 +486,42 @@ class FeedEvent(Base):
     # Small snapshot of what changed, e.g. {"from": "Passed House", "to": "Became Law"}.
     payload = Column(JSONB, nullable=True)
     dedupe_key = Column(String, nullable=False)
+
+
+class Candidacy(Base):
+    """One FEC candidate ID running in one federal election (fec_client.py candidates).
+
+    official_id is the sitting member's bioguide row when FEC lists one of
+    their candidate IDs, and otherwise a level='candidate' official whose id
+    is the FEC candidate ID. The totals are a snapshot from /candidates/totals/
+    for ranking races; official_finance_totals holds the full detail.
+    """
+    __tablename__ = "candidacies"
+    __table_args__ = (
+        Index("ix_candidacies_race", "election_year", "state", "office", "district"),
+    )
+
+    fec_candidate_id = Column(String, primary_key=True)
+    election_year = Column(Integer, primary_key=True)
+    official_id = Column(String, ForeignKey("officials.id"), nullable=False, index=True)
+    # Postal abbreviation, S or H, and the House district (0 for Senate and at-large).
+    state = Column(String, nullable=False)
+    office = Column(String, nullable=False)
+    district = Column(Integer, nullable=False, default=0)
+    party = Column(String, nullable=True)
+    # I (incumbent), C (challenger) or O (open seat).
+    incumbent_challenge = Column(String, nullable=True)
+    candidate_status = Column(String, nullable=True)
+    receipts = Column(Numeric(14, 2), nullable=True)
+    disbursements = Column(Numeric(14, 2), nullable=True)
+    cash_on_hand = Column(Numeric(14, 2), nullable=True)
+    coverage_end_date = Column(Date, nullable=True)
+    # True once their campaign files a pre-general (12G) report, which only
+    # candidates on the general-election ballot file. FEC records no primary
+    # results, so this is how primary losers drop out of a race.
+    in_general_election = Column(Boolean, nullable=False, default=False, server_default="false")
+    fetched_at = Column(DateTime, nullable=True)
+    # Last `totals --candidates` sync; oldest go first.
+    detail_fetched_at = Column(DateTime, nullable=True)
+
+    official = relationship("Official")

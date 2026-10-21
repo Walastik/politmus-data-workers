@@ -269,3 +269,93 @@ describe('Explorer My Representatives', () => {
     expect(lookups).toHaveLength(1)
   })
 })
+
+describe('Explorer candidates tab', () => {
+  const paxton = {
+    ...official('S6TX00388', 'Paxton, Warren Kenneth Jr.', {
+      display_name: 'Ken Paxton',
+      state: 'Texas',
+      party: 'Republican',
+      office: 'Senate candidate',
+      district: null,
+      current_member: false,
+      level: 'candidate',
+      website_url: 'http://kenpaxton.com/',
+    }),
+    votes: [],
+    stated_positions: [],
+    positions_sync: null,
+    wikipedia_url: 'https://en.wikipedia.org/wiki/Ken_Paxton',
+    bio: {
+      description: 'Candidate for US Senate',
+      birth_date: '1962-12-23',
+      occupations: ['lawyer'],
+      education: ['Baylor University'],
+      positions_held: ['Texas Attorney General'],
+    },
+    candidacies: [
+      {
+        fec_candidate_id: 'S6TX00388',
+        election_year: 2026,
+        state: 'TX',
+        office: 'S',
+        district: 0,
+        race_label: 'U.S. Senate',
+        election_date: '2026-11-03',
+        party: 'Republican',
+        incumbent_challenge: 'C',
+        in_general_election: true,
+        receipts: 19_497_809,
+        cash_on_hand: 4_925_105,
+        coverage_end_date: '2026-09-30',
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date('2026-10-21T12:00:00') })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/candidates/races')) {
+        return jsonResponse({ total_count: 0, items: [], source: 'Federal Election Commission (OpenFEC)' })
+      }
+      if (url.includes('/finance')) {
+        return jsonResponse({ official_id: 'S6TX00388', fec_candidate_ids: [], source: 'FEC', elections: [] })
+      }
+      return jsonResponse(paxton)
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('switches to the candidates tab', async () => {
+    renderExplorer()
+    fireEvent.click(screen.getByRole('button', { name: 'Candidates' }))
+    expect(await screen.findByText('No races match this filter.')).toBeInTheDocument()
+    expect(currentSearch).toBe('?tab=candidates')
+  })
+
+  it("shows a candidate's race and background instead of votes", async () => {
+    renderExplorer('?tab=candidates&official=S6TX00388')
+    const drawer = await screen.findByRole('dialog')
+    expect(await within(drawer).findByText('Running for U.S. Senate · Texas')).toBeInTheDocument()
+    expect(
+      within(drawer).getByText('General election Nov 3, 2026 · Challenger · On the November ballot'),
+    ).toBeInTheDocument()
+    expect(within(drawer).getByText('Texas Attorney General')).toBeInTheDocument()
+    expect(within(drawer).getByRole('link', { name: /Wikipedia/ })).toHaveAttribute(
+      'href',
+      'https://en.wikipedia.org/wiki/Ken_Paxton',
+    )
+    expect(within(drawer).getByLabelText(/Campaign website, kenpaxton.com/)).toBeInTheDocument()
+    expect(within(drawer).getByText('Candidate')).toBeInTheDocument()
+    expect(within(drawer).getByText('Texas · Running for U.S. Senate · Statewide')).toBeInTheDocument()
+    expect(within(drawer).queryByText('Recorded votes')).not.toBeInTheDocument()
+    expect(
+      within(drawer).getByRole('button', { name: 'Campaign Finance (preview)' }),
+    ).toBeInTheDocument()
+  })
+})

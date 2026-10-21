@@ -8,10 +8,13 @@ from sqlalchemy import case, desc, func, nulls_last, or_
 from sqlalchemy.orm import Session, load_only
 
 from api.filters import name_search_pattern, normalize_party, normalize_state
+from api.routes.candidates import race_for
 from api.schemas import (
+    CandidacyOut,
     FinanceElectionOut,
     FinanceStateOut,
     FundingMixItemOut,
+    OfficialBioOut,
     OfficialDetailOut,
     OfficialFinanceOut,
     OfficialOut,
@@ -24,6 +27,7 @@ from api.schemas import (
 from database import get_db
 from models import (
     Bill,
+    Candidacy,
     Official,
     OfficialFinanceTotal,
     OfficialPositionSync,
@@ -31,7 +35,8 @@ from models import (
     RollCall,
     Vote,
 )
-from services import finance_insights
+from services import candidate_races, finance_insights
+from services.candidate_races import CANDIDATE_LEVEL, current_cycle
 
 router = APIRouter()
 
@@ -203,6 +208,27 @@ def get_official_finance(official_id: str, db: Session = Depends(get_db)):
         ),
         elections=[_finance_election_out(row) for row in rows],
         peer_comparison=_peer_comparison(db, official),
+        race_comparison=_race_comparison(db, official),
+    )
+
+
+def _race_comparison(db, official):
+    """This cycle's race, preferring one the official is on the ballot for."""
+    candidacies = (
+        db.query(Candidacy)
+        .filter(Candidacy.official_id == official.id, Candidacy.election_year == current_cycle())
+        .order_by(Candidacy.in_general_election.desc(), Candidacy.receipts.desc().nulls_last())
+        .all()
+    )
+    return race_for(db, candidacies[0]) if candidacies else None
+
+
+def _candidacy_out(candidacy):
+    return CandidacyOut.model_validate(candidacy).model_copy(
+        update={
+            "race_label": candidate_races.race_label(candidacy.office, candidacy.district),
+            "election_date": candidate_races.general_election_date(candidacy.election_year),
+        }
     )
 
 
@@ -213,7 +239,8 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
     if not official:
         raise HTTPException(status_code=404, detail="Official not found")
 
-    vote_rows = (
+    # Candidates have no voting record to look up.
+    vote_rows = [] if official.level == CANDIDATE_LEVEL else (
         db.query(Vote, Bill, RollCall)
         .join(RollCall, RollCall.id == Vote.roll_call_id)
         .join(Bill, Bill.id == RollCall.bill_id)
@@ -233,6 +260,12 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         .all()
     )
     sync = db.get(OfficialPositionSync, official_id)
+    candidacies = (
+        db.query(Candidacy)
+        .filter(Candidacy.official_id == official_id)
+        .order_by(desc(Candidacy.election_year), Candidacy.in_general_election.desc())
+        .all()
+    )
 
     return OfficialDetailOut(
         id=official.id,
@@ -273,4 +306,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         ],
         stated_positions=[OfficialStanceOut.model_validate(s) for s in stances],
         positions_sync=PositionsSyncOut.model_validate(sync) if sync else None,
+        wikipedia_url=official.wikipedia_url,
+        bio=OfficialBioOut(**official.bio) if official.bio else None,
+        candidacies=[_candidacy_out(candidacy) for candidacy in candidacies],
     )

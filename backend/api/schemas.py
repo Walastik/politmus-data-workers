@@ -86,10 +86,92 @@ class PositionsSyncOut(BaseModel):
     extractor_version: Optional[str] = None
 
 
+class OfficialBioOut(BaseModel):
+    """From Wikidata; lists are as Wikidata labels them."""
+
+    description: Optional[str] = None
+    birth_date: Optional[Date] = None
+    occupations: list[str] = Field(default_factory=list)
+    education: list[str] = Field(default_factory=list)
+    positions_held: list[str] = Field(default_factory=list)
+
+
+class CandidacyOut(BaseModel):
+    """One race the official is running in (FEC)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fec_candidate_id: str
+    election_year: int
+    state: str
+    office: str
+    district: int = 0
+    # services.candidate_races, filled in by the route.
+    race_label: str = ""
+    election_date: Optional[Date] = None
+    party: Optional[str] = None
+    # I (incumbent), C (challenger) or O (open seat).
+    incumbent_challenge: Optional[str] = None
+    in_general_election: bool = False
+    receipts: Optional[float] = None
+    cash_on_hand: Optional[float] = None
+    coverage_end_date: Optional[Date] = None
+
+
 class OfficialDetailOut(OfficialOut):
     votes: list[OfficialVoteOut] = Field(default_factory=list)
     stated_positions: list[OfficialStanceOut] = Field(default_factory=list)
     positions_sync: Optional[PositionsSyncOut] = None
+    wikipedia_url: Optional[str] = None
+    bio: Optional[OfficialBioOut] = None
+    # Newest election first.
+    candidacies: list[CandidacyOut] = Field(default_factory=list)
+
+
+class RaceCandidateOut(BaseModel):
+    official_id: str
+    fec_candidate_id: str
+    name: Optional[str] = None
+    party: Optional[str] = None
+    photo_url: Optional[str] = None
+    website_url: Optional[str] = None
+    incumbent_challenge: Optional[str] = None
+    # True when official_id is a member's bioguide row (opens the roster drawer).
+    is_member: bool = False
+    current_member: bool = False
+    in_general_election: bool = False
+    receipts: Optional[float] = None
+    disbursements: Optional[float] = None
+    cash_on_hand: Optional[float] = None
+    coverage_end_date: Optional[Date] = None
+    positions_count: Optional[int] = None
+    # From the detail sync (official_finance_totals), when it has run.
+    small_donor_share: Optional[float] = None
+    outside_support: Optional[float] = None
+    outside_oppose: Optional[float] = None
+
+
+class RaceOut(BaseModel):
+    key: str
+    election_year: int
+    election_date: Date
+    state: str
+    state_name: str
+    office: str
+    district: int = 0
+    label: str
+    total_receipts: float = 0
+    # True when the race only shows campaigns that filed a pre-general report.
+    ballot_filtered: bool = False
+    # Filers the default view leaves out (primary losers, tiny campaigns).
+    hidden_count: int = 0
+    candidates: list[RaceCandidateOut] = Field(default_factory=list)
+
+
+class RacesPageOut(BaseModel):
+    total_count: int
+    items: list[RaceOut] = Field(default_factory=list)
+    source: str = "Federal Election Commission (OpenFEC)"
 
 
 class FinanceSizeBucketOut(BaseModel):
@@ -202,6 +284,8 @@ class OfficialFinanceOut(BaseModel):
     # Newest election first.
     elections: list[FinanceElectionOut] = Field(default_factory=list)
     peer_comparison: Optional[PeerComparisonOut] = None
+    # The race the official is running in this cycle, side by side.
+    race_comparison: Optional[RaceOut] = None
 
 
 class PacCategoryOut(BaseModel):
