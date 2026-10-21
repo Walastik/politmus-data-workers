@@ -17,6 +17,7 @@ import os
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from urllib.parse import urlparse
 
 import requests
 
@@ -28,7 +29,7 @@ from init_db import ensure_schema
 from sqlalchemy import func
 
 from models import Candidacy, Official, OfficialFinanceTotal, PacContribution, PacContributionSync
-from services.candidate_races import CANDIDATE_LEVEL, current_cycle
+from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle
 from services.finance_insights import election_periods, is_completed, pac_category
 
 BASE_URL = "https://api.open.fec.gov/v1"
@@ -61,9 +62,6 @@ CAMPAIGN_COMMITTEE_DESIGNATIONS = {"P", "A"}
 OUTSIDE_SPENDING_MAX_PAGES = 5
 
 CANDIDATE_OFFICES = {"S": "Senate candidate", "H": "House candidate"}
-# Candidates below this keep their candidacy row (the "all filers" view) but
-# get no totals/PAC detail; there are a few thousand of them.
-CANDIDATE_DETAIL_MIN_RECEIPTS = Decimal("50000")
 # FEC party code -> the full name Congress.gov uses on officials.
 FEC_PARTIES = {
     "DEM": "Democratic",
@@ -77,6 +75,13 @@ FEC_PARTIES = {
     "GRE": "Green",
     "CON": "Constitution",
 }
+# Form 1 websites on these hosts are profiles or donation pages, not a site
+# with an issues page to read.
+NON_CAMPAIGN_HOSTS = (
+    "facebook.com", "instagram.com", "twitter.com", "x.com", "linktr.ee",
+    "youtube.com", "tiktok.com", "linkedin.com", "actblue.com", "winred.com",
+    "anedot.com", "secure.ngpvan.com",
+)
 NAME_PREFIXES = {"MR", "MRS", "MS", "MISS", "DR", "HON", "REV", "SEN", "REP", "GEN", "COL"}
 NAME_SUFFIXES = {"JR": "Jr.", "SR": "Sr.", "II": "II", "III": "III", "IV": "IV", "V": "V", "MD": "M.D.", "PHD": "Ph.D."}
 
@@ -408,10 +413,52 @@ def fetch_committees(fec_id):
             "committee_id": row["committee_id"],
             "designation": row.get("designation"),
             "cycles": row.get("cycles") or [],
+            # As registered on Form 1, often bare and upper-case ("KENPAXTON.COM").
+            "website": row.get("website"),
         }
         for row in payload.get("results") or []
         if row.get("designation") in CAMPAIGN_COMMITTEE_DESIGNATIONS
     ]
+
+
+def normalize_website(value):
+    """A crawlable https URL from a Form 1 website, or None."""
+    value = (value or "").strip().lower()
+    if not value or "@" in value or " " in value:
+        return None
+    if "://" not in value:
+        value = "https://" + value
+    host = urlparse(value).hostname or ""
+    if "." not in host or any(host == h or host.endswith("." + h) for h in NON_CAMPAIGN_HOSTS):
+        return None
+    return value
+
+
+def committee_website(committees):
+    """The principal campaign committee's website, else an authorized one's."""
+    ranked = sorted(committees or [], key=lambda c: c.get("designation") != "P")
+    for committee in ranked:
+        website = normalize_website(committee.get("website"))
+        if website:
+            return website
+    return None
+
+
+def refresh_candidate_website(official, fec_id):
+    """Take a candidate's campaign site from their FEC committees.
+
+    The committees are cached on the official (the PAC sync reuses them), so
+    this costs one request per candidate, once.
+    """
+    committees = dict(official.fec_committees or {})
+    # Lists cached before websites were kept have no "website" key.
+    if fec_id not in committees or any("website" not in c for c in committees[fec_id]):
+        committees[fec_id] = fetch_committees(fec_id)
+        official.fec_committees = committees
+    website = committee_website(committees[fec_id])
+    if website:
+        official.website_url = website
+    return website
 
 
 def committees_for_period(committees, period):
@@ -863,6 +910,8 @@ def run_candidate_detail(kind, cycle=None, state=None, office=None, official_id=
             try:
                 if kind == "totals":
                     stats = sync_official_finance(session, official, fec_ids=fec_ids)
+                    if official.level == CANDIDATE_LEVEL:
+                        stats["website"] = refresh_candidate_website(official, candidacy.fec_candidate_id)
                     candidacy.detail_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 else:
                     stats = sync_official_pacs(session, official, fec_ids=fec_ids)

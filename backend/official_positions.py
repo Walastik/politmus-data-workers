@@ -5,6 +5,9 @@ heading-aligned chunks, ask the local model for positions per chunk, keep only
 positions whose quote appears verbatim on the page, merge, and replace the
 official's official_site rows in official_stances.
 
+`--level candidate` reads the campaign sites of people running this cycle
+(fec_client.py candidates) and stores their stances as campaign_site.
+
 Idempotent: officials whose pages and extractor version are unchanged are
 skipped without calling the model. Runs are round-robin by last attempt.
 """
@@ -27,11 +30,16 @@ from dotenv import load_dotenv
 
 from database import SessionLocal
 from init_db import ensure_schema
-from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
+from sqlalchemy import or_
+
+from models import Candidacy, Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 from services import llm_runtime
+from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle
 from services.llm_runtime import TruncatedOutputError, load_local_module, required_strings
 from services.official_positions import (
     DEFAULT_CHUNK_CHARS,
+    SOURCE_CAMPAIGN_SITE,
+    SOURCE_OFFICIAL_SITE,
     SourceText,
     StatedPositionsOutput,
     build_position_messages,
@@ -98,6 +106,8 @@ class OfficialSnapshot:
     district: int | None
     office: str | None
     website_url: str | None
+    # candidate stances are stored as campaign_site.
+    level: str | None = None
 
     @classmethod
     def of(cls, official) -> "OfficialSnapshot":
@@ -109,6 +119,7 @@ class OfficialSnapshot:
             official.district,
             official.office,
             official.website_url,
+            official.level,
         )
 
 
@@ -184,10 +195,25 @@ def select_officials(
         return query.filter(Official.id == official_id).all()
     query = query.filter(
         Official.level == level,
-        Official.current_member.is_(True),
         Official.website_url.isnot(None),
         Official.website_url != "",
     )
+    if level == CANDIDATE_LEVEL:
+        # Candidates hold no seat: take everyone running this cycle who is on
+        # the ballot or has real money behind them.
+        query = query.filter(
+            Official.id.in_(
+                session.query(Candidacy.official_id).filter(
+                    Candidacy.election_year == current_cycle(now.date()),
+                    or_(
+                        Candidacy.in_general_election.is_(True),
+                        Candidacy.receipts >= CANDIDATE_DETAIL_MIN_RECEIPTS,
+                    ),
+                )
+            )
+        )
+    else:
+        query = query.filter(Official.current_member.is_(True))
     if require_pages:
         query = query.filter(
             Official.id.in_(
@@ -602,6 +628,9 @@ def _process_official(
             model=model_name,
             extracted_at=now,
             page_ids=page_ids,
+            source_type=(
+                SOURCE_CAMPAIGN_SITE if official.level == CANDIDATE_LEVEL else SOURCE_OFFICIAL_SITE
+            ),
         )
         if saved:
             status = "ok"
@@ -712,7 +741,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--limit", type=int, default=5, help="Maximum officials this run (default 5). 0 for all due.")
     parser.add_argument("--official-id", help="Process one official by id (e.g. O000172). Ignores due checks.")
-    parser.add_argument("--level", default="federal", help="Official level to select (default federal).")
+    parser.add_argument(
+        "--level", default="federal",
+        help="Official level to select (default federal; candidate reads this cycle's campaign sites).",
+    )
     parser.add_argument("--force", action="store_true", help="Re-extract even when pages and version are unchanged.")
     parser.add_argument("--dry-run", action="store_true", help="Crawl and call the model but write nothing; print positions.")
     parser.add_argument("--crawl-only", action="store_true", help="Discover and store pages without calling the model.")

@@ -78,6 +78,41 @@ class NameParsingTests(unittest.TestCase):
         self.assertEqual(candidacy_values(totals_row("S8ZZ00001", "DOE, JANE", 1, district=3))["district"], 0)
         self.assertIsNone(candidacy_values(totals_row("P8ZZ00001", "DOE, JANE", 1, office="P")))
 
+    def test_committee_websites(self):
+        from fec_client import committee_website, normalize_website
+
+        self.assertEqual(normalize_website("WWW.KENPAXTON.COM"), "https://www.kenpaxton.com")
+        self.assertEqual(normalize_website(" HTTPS://WWW.DANFORUSA.COM/ "), "https://www.danforusa.com/")
+        for value in (None, "", "N/A", "JOHN@EXAMPLE.COM", "FACEBOOK.COM/JANEDOE", "secure.actblue.com/donate/x"):
+            self.assertIsNone(normalize_website(value), value)
+        self.assertEqual(
+            committee_website([
+                {"designation": "A", "website": "joint-fund.com"},
+                {"designation": "P", "website": None},
+                {"designation": "P", "website": "JANEFORCONGRESS.COM"},
+            ]),
+            "https://janeforcongress.com",
+        )
+        self.assertIsNone(committee_website([]))
+
+    def test_refresh_candidate_website_caches_committees(self):
+        official = SimpleNamespace(fec_committees=None, website_url="http://old-wikidata-site.com/")
+        committees = [{"committee_id": "C1", "designation": "P", "cycles": [2026], "website": "KENPAXTON.COM"}]
+        with patch.object(fec_client, "fetch_committees", return_value=committees) as fetch:
+            self.assertEqual(fec_client.refresh_candidate_website(official, "S6TX00388"), "https://kenpaxton.com")
+            fec_client.refresh_candidate_website(official, "S6TX00388")
+        fetch.assert_called_once_with("S6TX00388")
+        # FEC registration wins over Wikidata.
+        self.assertEqual(official.website_url, "https://kenpaxton.com")
+        self.assertEqual(official.fec_committees, {"S6TX00388": committees})
+
+        stale = SimpleNamespace(fec_committees={"S6TX00388": [{"committee_id": "C1", "designation": "P"}]},
+                                website_url=None)
+        with patch.object(fec_client, "fetch_committees", return_value=committees) as fetch:
+            fec_client.refresh_candidate_website(stale, "S6TX00388")
+        fetch.assert_called_once_with("S6TX00388")
+        self.assertEqual(stale.website_url, "https://kenpaxton.com")
+
     def test_candidate_offices_pick_their_fec_ids(self):
         self.assertEqual(fec_ids_for_office(["S8ZZ00001"], "Senate candidate"), ["S8ZZ00001"])
         self.assertEqual(fec_ids_for_office(["H8ZZ01001"], "House candidate"), ["H8ZZ01001"])

@@ -36,6 +36,13 @@ from services.bill_effects import (
 # is re-extracted on the next run.
 SCHEMA_VERSION = "positions-v3"
 SOURCE_OFFICIAL_SITE = "official_site"
+# A candidate's campaign site (level='candidate' officials).
+SOURCE_CAMPAIGN_SITE = "campaign_site"
+# How the prompt names a candidate's office; their site is a campaign site.
+CANDIDATE_OFFICE_DESCRIPTIONS = {
+    "Senate candidate": "candidate for U.S. Senate (not in office; this is their campaign website)",
+    "House candidate": "candidate for U.S. House (not in office; this is their campaign website)",
+}
 
 DEFAULT_CHUNK_CHARS = 10_000
 # A chunk whose answer is cut off is halved and retried, down to this size.
@@ -313,7 +320,7 @@ def describe_official(official) -> str:
     if detail:
         parts.append(f"({detail})")
     if official.office:
-        parts.append(f"- {official.office}")
+        parts.append(f"- {CANDIDATE_OFFICE_DESCRIPTIONS.get(official.office, official.office)}")
     return " ".join(parts)
 
 
