@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, String, Integer, ForeignKey, Numeric, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, String, Integer, ForeignKey, Index, Numeric, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from database import Base
@@ -450,3 +450,33 @@ class PacContributionSync(Base):
     latest_receipt_date = Column(Date, nullable=True)
     row_count = Column(Integer, nullable=False, default=0)
     fetched_at = Column(DateTime, nullable=False)
+
+
+class FeedEvent(Base):
+    """Something feed-worthy that ingest noticed: a new bill, a status change, a vote.
+
+    Rows are appended by the ingest workers (services/feed_events.py) and never
+    rewritten. `dedupe_key` makes recording idempotent, so workers can call the
+    recorders on every upsert and re-runs add nothing.
+    """
+    __tablename__ = "feed_events"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_feed_events_dedupe_key"),
+        Index("ix_feed_events_occurred", "occurred_at", "id"),
+        Index("ix_feed_events_state_occurred", "state", "occurred_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # bill_introduced | bill_status_changed | vote_held | official_seated | official_departed
+    kind = Column(String, nullable=False, index=True)
+    # When it happened in the real world (source date, or detection day if the source has none).
+    occurred_at = Column(Date, nullable=False)
+    detected_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    official_id = Column(String, ForeignKey("officials.id"), nullable=True, index=True)
+    bill_id = Column(String, ForeignKey("bills.id"), nullable=True, index=True)
+    roll_call_id = Column(Integer, ForeignKey("roll_calls.id"), nullable=True)
+    state = Column(String, nullable=True)
+    level = Column(String, nullable=False, default="federal", server_default="federal")
+    # Small snapshot of what changed, e.g. {"from": "Passed House", "to": "Became Law"}.
+    payload = Column(JSONB, nullable=True)
+    dedupe_key = Column(String, nullable=False)
