@@ -53,6 +53,12 @@ def ensure_schema():
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS website_url VARCHAR"
         ))
         conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS photo_url VARCHAR"
+        ))
+        conn.execute(text(
+            "ALTER TABLE officials ADD COLUMN IF NOT EXISTS photo_attribution VARCHAR"
+        ))
+        conn.execute(text(
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS level VARCHAR "
             "NOT NULL DEFAULT 'federal'"
         ))

@@ -11,7 +11,7 @@ os.environ.setdefault(
 
 from api.census import _legislative_district, _match_from_payload, _parse_sld_code
 from api.filters import STATE_NAME_BY_ABBR
-from api.routes.lookup import _office_roles
+from api.routes.lookup import _office_roles, _representative_from_official
 from openstates_client import (
     CURRENT_LEGISLATIVE_CLASSIFICATION,
     EXCLUDED_JURISDICTIONS,
@@ -358,6 +358,18 @@ class LookupRoleTests(unittest.TestCase):
             _office_roles("State Representative", "state"),
             (["administrativeArea1"], ["legislatorLowerBody"]),
         )
+
+    def test_representative_carries_photo_url(self):
+        from models import Official
+
+        official = Official(
+            id="S000033", name="Sanders, Bernard", office="Senator", level="federal",
+            photo_url="https://www.congress.gov/img/member/s000033_200.jpg",
+        )
+        rep = _representative_from_official(
+            official, division_id="ocd-division/country:us/state:vt", division_name="Vermont"
+        )
+        self.assertEqual(rep.photo_url, "https://www.congress.gov/img/member/s000033_200.jpg")
 
 
 class TargetStatesTests(unittest.TestCase):

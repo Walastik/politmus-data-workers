@@ -25,6 +25,10 @@ class Official(Base):
     phone = Column(String, nullable=True)
     office_address = Column(String, nullable=True)
     website_url = Column(String, nullable=True)
+    # Official portrait from Congress.gov member detail (depiction.imageUrl),
+    # hotlinked by the frontend. attribution is the credit line, when given.
+    photo_url = Column(String, nullable=True)
+    photo_attribution = Column(String, nullable=True)
     level = Column(String, nullable=False, default='federal', server_default='federal')
     openstates_id = Column(String, nullable=True, unique=True)
     # From unitedstates/congress-legislators (fec_client.py crosswalk). A member
