@@ -1,4 +1,4 @@
-import { Scale } from 'lucide-react'
+import { ChevronDown, ChevronRight, Scale } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import {
@@ -26,6 +26,7 @@ export default function AccountabilitySection({
   onSelectBill?: (alignment: VoteAlignment) => void
 }) {
   const [showAll, setShowAll] = useState(false)
+  const [open, setOpen] = useState(false)
   const areas = useMemo(
     () =>
       Object.entries(score.by_policy_area ?? {}).sort(
@@ -41,53 +42,66 @@ export default function AccountabilitySection({
       className="mb-6 rounded-xl border border-slate-700 bg-slate-800/40 p-4"
       aria-labelledby="accountability-title"
     >
-      <div className="flex items-center gap-2">
-        <Scale className="h-4 w-4 text-slate-300" aria-hidden="true" />
-        <h3
-          id="accountability-title"
-          className="text-xs font-semibold uppercase tracking-wider text-slate-300"
-        >
-          Says vs. votes
-        </h3>
-      </div>
-      <p className="mt-2 text-xs text-slate-400">
-        {score.aligned + score.conflicting === 0
-          ? 'None of their passage votes touch what they say they want yet.'
-          : `${plural(score.aligned, 'vote')} matched and ${score.conflicting} contradicted their stated positions, across ${plural(score.bills_scored, 'bill')}.`}
-      </p>
-
-      {areas.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Score by policy area">
-          {areas.map(([area, totals]) => (
-            <li
-              key={area}
-              className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300"
-            >
-              {area}{' '}
-              <span className={`font-semibold ${pointsToneClass(totals.points)}`}>
-                {formatPoints(totals.points)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {votes.length > 0 ? (
-        <ul className="mt-4 space-y-2.5">
-          {visible.map((vote) => (
-            <VoteItem key={vote.key} vote={vote} onSelectBill={onSelectBill} />
-          ))}
-        </ul>
-      ) : null}
-
-      {votes.length > INITIAL_ALIGNMENTS_SHOWN ? (
+      <h3 id="accountability-title">
         <button
           type="button"
-          onClick={() => setShowAll(!showAll)}
-          className="mt-3 text-xs font-medium text-slate-300 hover:text-white"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-controls="accountability-body"
+          className="flex w-full items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300 transition hover:text-white"
         >
-          {showAll ? 'Show fewer' : `Show all ${votes.length}`}
+          {open ? (
+            <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden="true" />
+          )}
+          <Scale className="h-4 w-4 text-slate-300" aria-hidden="true" />
+          Says vs. votes
         </button>
+      </h3>
+
+      {open ? (
+        <div id="accountability-body">
+          <p className="mt-2 text-xs text-slate-400">
+            {score.aligned + score.conflicting === 0
+              ? 'None of their passage votes touch what they say they want yet.'
+              : `${plural(score.aligned, 'vote')} matched and ${score.conflicting} contradicted their stated positions, across ${plural(score.bills_scored, 'bill')}.`}
+          </p>
+
+          {areas.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Score by policy area">
+              {areas.map(([area, totals]) => (
+                <li
+                  key={area}
+                  className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300"
+                >
+                  {area}{' '}
+                  <span className={`font-semibold ${pointsToneClass(totals.points)}`}>
+                    {formatPoints(totals.points)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {votes.length > 0 ? (
+            <ul className="mt-4 space-y-2.5">
+              {visible.map((vote) => (
+                <VoteItem key={vote.key} vote={vote} onSelectBill={onSelectBill} />
+              ))}
+            </ul>
+          ) : null}
+
+          {votes.length > INITIAL_ALIGNMENTS_SHOWN ? (
+            <button
+              type="button"
+              onClick={() => setShowAll(!showAll)}
+              className="mt-3 text-xs font-medium text-slate-300 hover:text-white"
+            >
+              {showAll ? 'Show fewer' : `Show all ${votes.length}`}
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   )

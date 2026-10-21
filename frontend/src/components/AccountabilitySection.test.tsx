@@ -89,7 +89,24 @@ describe('ScoreHeadline', () => {
   })
 })
 
+// The section starts collapsed; click its header to show the votes.
+function expand() {
+  fireEvent.click(screen.getByRole('button', { name: 'Says vs. votes' }))
+}
+
 describe('AccountabilitySection', () => {
+  it('starts collapsed, showing only the header', () => {
+    render(<AccountabilitySection score={score} alignments={[alignment()]} />)
+
+    const toggle = screen.getByRole('button', { name: 'Says vs. votes' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(/increases Medicaid funding/)).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/increases Medicaid funding/)).toBeInTheDocument()
+  })
+
   it('scores a vote once and explains matches that do not count', () => {
     render(
       <AccountabilitySection
@@ -118,6 +135,7 @@ describe('AccountabilitySection', () => {
         ]}
       />,
     )
+    expand()
     // +1 and -1 counted on one vote: one card, mixed.
     expect(screen.getAllByRole('button', { name: 'Open details for NDAA' })).toHaveLength(1)
     expect(screen.getByLabelText('Mixed, no points')).toHaveTextContent('0')
@@ -141,6 +159,7 @@ describe('AccountabilitySection', () => {
         onSelectBill={vi.fn()}
       />,
     )
+    expand()
     expect(screen.getByText(/increases Voter Registration funding/)).toHaveTextContent(
       'wants it increased (their position is on Automatic Voter Registration).',
     )
@@ -162,6 +181,7 @@ describe('AccountabilitySection', () => {
         onSelectBill={vi.fn()}
       />,
     )
+    expand()
     expect(screen.getByText(/increases Voter Registration Requirements/)).toHaveTextContent(
       '(their position is on Automatic Voter Registration, which moves the opposite way).',
     )
@@ -186,6 +206,7 @@ describe('AccountabilitySection', () => {
         onSelectBill={onSelectBill}
       />,
     )
+    expand()
     expect(screen.getByText(/6 votes matched and 2 contradicted/)).toBeInTheDocument()
     expect(screen.getByText(/increases Medicaid funding/)).toHaveTextContent('consistent: wants it increased')
     expect(screen.getByText(/increases Border Patrol funding/)).toHaveTextContent('contradicts: wants it cut')
@@ -202,6 +223,7 @@ describe('AccountabilitySection', () => {
       alignment({ roll_call_id: i + 1, bill_title: `Bill ${i + 1}` }),
     )
     render(<AccountabilitySection score={score} alignments={many} />)
+    expand()
     expect(screen.queryByText('Bill 11')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Show all 12' }))
     expect(screen.getByText('Bill 11')).toBeInTheDocument()
