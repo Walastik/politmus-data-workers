@@ -1,9 +1,10 @@
 """Bios, portraits and websites from Wikidata, matched on FEC candidate ID (P1839).
 
 Fills wikidata_id, wikipedia_url and bio for every official with FEC IDs.
-Candidates (level='candidate') also take their name, portrait and campaign
-website from Wikidata, since FEC only has their legal name. Members keep the
-Congress.gov portrait and .gov website.
+Candidates (level='candidate') also take their name and portrait from
+Wikidata, since FEC only has their legal name, and its website when their
+FEC committees list none. Members keep the Congress.gov portrait and .gov
+website.
 
 Few challengers have P1839 yet, so candidates who raised real money and were
 not matched get a second pass: a name search, kept only when exactly one hit
@@ -20,10 +21,10 @@ from urllib.parse import quote, unquote, urlparse
 import requests
 
 from database import SessionLocal
-from fec_client import CANDIDATE_DETAIL_MIN_RECEIPTS, NAME_SUFFIXES
+from fec_client import NAME_SUFFIXES
 from init_db import ensure_schema
 from models import Candidacy, Official
-from services.candidate_races import CANDIDATE_LEVEL
+from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 SEARCH_URL = "https://www.wikidata.org/w/api.php"
@@ -202,8 +203,10 @@ def apply_person(official, person):
     if person["portrait_url"]:
         official.photo_url = person["portrait_url"]
         official.photo_attribution = "Wikimedia Commons"
+    # FEC registration (fec_client.py) is the campaign's own current site;
+    # Wikidata only fills in when there isn't one.
     website = campaign_website(person["websites"])
-    if website:
+    if website and not official.website_url:
         official.website_url = website
 
 
