@@ -1,0 +1,31 @@
+name: Wikidata Candidates Ingestion
+
+on:
+  schedule:
+    # Daily 11:00 UTC, after FEC Ingestion has loaded the day's candidates.
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+# Wikidata, not FEC, so it doesn't wait for the FEC key.
+concurrency:
+  group: wikidata-ingest
+  cancel-in-progress: false
+
+jobs:
+  match_candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Names, portraits, campaign sites and bios. Unmatched candidates get a
+      # name search at most every 30 days, up to 300 a run.
+      - name: Match candidates on Wikidata
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/wikidata_client.py --level candidate --max-names 300"

@@ -1,0 +1,41 @@
+name: FEC Finance Detail
+
+on:
+  schedule:
+    # Every 3 hours at :15. Each run syncs only what is due (new filings,
+    # stale outside spending, members not running once a week) and stops at
+    # its request budget; the next run continues. A first load of everyone
+    # takes about two days of runs, after which most runs finish in minutes.
+    - cron: '15 */3 * * *'
+  workflow_dispatch:
+
+# Shared with FEC Ingestion: one job at a time on the FEC key's 1,000
+# requests an hour. GitHub keeps one pending run per group, which is fine:
+# every run picks up where the last stopped.
+concurrency:
+  group: fec-ingest
+  cancel-in-progress: false
+
+jobs:
+  sync_finance:
+    runs-on: ubuntu-latest
+    # 800 requests at 3.6s apiece is about an hour.
+    timeout-minutes: 120
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Members and this cycle's candidacies with $50k+ raised: totals,
+      # outside spending, size and state breakdowns, and campaign websites.
+      - name: Fetch campaign totals and breakdowns
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/fec_client.py totals --all --max-requests 500 --max-minutes 50"
+
+      # Itemized PAC gifts, least recently synced first; needs totals.
+      - name: Fetch PAC contributions
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/fec_client.py pacs --all --max-requests 300 --max-minutes 35"
