@@ -579,6 +579,13 @@ def sync_official_pacs(session, official, today=None, fec_ids=None):
                 PacContribution.committee_id == committee_id,
                 PacContribution.two_year_period == period,
             ).delete(synchronize_session=False)
+            # sub_id is unique across all of FEC, so a gift stored earlier under
+            # another official, committee or period moves to this one.
+            sub_ids = sorted({value["sub_id"] for value in values})
+            if sub_ids:
+                session.query(PacContribution).filter(
+                    PacContribution.sub_id.in_(sub_ids)
+                ).delete(synchronize_session=False)
             seen = set()
             latest = None
             for value in values:

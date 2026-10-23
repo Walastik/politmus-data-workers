@@ -468,6 +468,27 @@ class FinanceSyncTests(unittest.TestCase):
         self.assertEqual(stats, {"periods": 0, "skipped": 4, "gifts": 0})
         self.assertEqual(second.call_count, 0)
 
+    def test_pac_sync_moves_gift_stored_under_another_committee(self):
+        from models import PacContribution
+
+        self._sync()
+        session = self.SessionLocal()
+        session.add(
+            PacContribution(
+                sub_id="3", official_id=self.OFFICIAL_ID, fec_candidate_id="S4VT00033",
+                committee_id="C_OLD", two_year_period=2016, amount=1, category="other",
+            )
+        )
+        session.commit()
+        session.close()
+
+        stats, _ = self._sync_pacs()
+        self.assertEqual(stats["gifts"], 5)
+        session = self.SessionLocal()
+        gift = session.get(PacContribution, "3")
+        session.close()
+        self.assertEqual((gift.committee_id, gift.two_year_period), ("C00411330", 2024))
+
     def test_pac_endpoints(self):
         self._sync()
         self._sync_pacs()
