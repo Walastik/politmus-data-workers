@@ -76,7 +76,9 @@ def ensure_schema():
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_committees JSONB"
         ))
         # Filled by `wikidata_client.py`.
-        for column_sql in ("wikidata_id VARCHAR", "wikipedia_url VARCHAR", "bio JSONB"):
+        for column_sql in (
+            "wikidata_id VARCHAR", "wikipedia_url VARCHAR", "bio JSONB", "wikidata_searched_at TIMESTAMP",
+        ):
             conn.execute(text(
                 f"ALTER TABLE officials ADD COLUMN IF NOT EXISTS {column_sql}"
             ))

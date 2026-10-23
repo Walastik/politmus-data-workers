@@ -41,6 +41,8 @@ class Official(Base):
     # From Wikidata (wikidata_client.py), matched on FEC candidate ID.
     wikidata_id = Column(String, nullable=True)
     wikipedia_url = Column(String, nullable=True)
+    # Last name search for an unmatched candidate; searched again after 30 days.
+    wikidata_searched_at = Column(DateTime, nullable=True)
     # {"description", "birth_date", "occupations": [...], "education": [...],
     #  "positions_held": [...]}.
     bio = Column(JSONB, nullable=True)

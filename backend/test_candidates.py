@@ -17,7 +17,7 @@ import wikidata_client
 from api.main import app
 from fec_client import candidacy_values, fec_ids_for_office, fec_party, parse_fec_name
 from services import candidate_races
-from wikidata_client import campaign_website, label_name_parts, names_state, portrait_url
+from wikidata_client import campaign_website, label_name_parts, names_state, portrait_url, search_names
 
 
 def totals_row(candidate_id, name, receipts, office="S", state="ZZ", district=0, party="DEM",
@@ -188,6 +188,50 @@ class WikidataParsingTests(unittest.TestCase):
         self.assertTrue(names_state(person, "Texas"))
         self.assertFalse(names_state(person, "Ohio"))
 
+    def test_search_names_try_short_names_first(self):
+        official = SimpleNamespace(
+            first_name="Warren", middle_name="Kenneth", last_name="Paxton", suffix_name="Jr.",
+            nickname="Ken", display_name="Warren Kenneth Paxton Jr.",
+        )
+        self.assertEqual(
+            search_names(official), ["Ken Paxton", "Warren Paxton", "Warren Kenneth Paxton Jr."]
+        )
+        official = SimpleNamespace(first_name=None, last_name=None, nickname=None, display_name="Doe, Jane")
+        self.assertEqual(search_names(official), ["Doe, Jane"])
+
+    def test_find_person_moves_to_the_next_name_until_one_fits(self):
+        official = SimpleNamespace(
+            first_name="Seth", last_name="Harp", nickname=None, display_name="Seth Allan Harp",
+            state="Tennessee",
+        )
+        harp = {"wikidata_id": "Q1", "bio": {"positions_held": [], "description": "Tennessee politician"},
+                "districts": []}
+        hits = {"Seth Harp": ["Q1"], "Seth Allan Harp": []}
+        with patch.object(wikidata_client, "search_items", side_effect=hits.get) as search, \
+                patch.object(wikidata_client, "people_by_item", return_value={"Q1": harp}):
+            self.assertIs(wikidata_client.find_person(official), harp)
+        self.assertEqual(search.call_count, 1)
+
+    def _response(self, status, headers=None, body=None):
+        return SimpleNamespace(
+            status_code=status, headers=headers or {}, json=lambda: body,
+            raise_for_status=lambda: None,
+        )
+
+    def test_wikidata_get_waits_out_429(self):
+        responses = [self._response(429, {"Retry-After": "7"}), self._response(200, body={"search": []})]
+        with patch.object(wikidata_client.requests, "get", side_effect=responses), \
+                patch.object(wikidata_client.time, "sleep") as sleep:
+            self.assertEqual(wikidata_client.wikidata_get("https://example.test", {}), {"search": []})
+        self.assertIn(7.0, [call.args[0] for call in sleep.call_args_list])
+
+    def test_wikidata_get_stops_on_long_block(self):
+        with patch.object(wikidata_client.requests, "get",
+                          return_value=self._response(429, {"Retry-After": "3600"})), \
+                patch.object(wikidata_client.time, "sleep"):
+            with self.assertRaises(wikidata_client.RateLimited):
+                wikidata_client.wikidata_get("https://example.test", {})
+
 
 def _test_database_available() -> bool:
     url = os.environ.get("DATABASE_URL", "")
@@ -319,6 +363,26 @@ class CandidateSyncTests(unittest.TestCase):
             official = session.get(Official, "S8ZZ00002")
             self.assertEqual(official.display_name, "Ken Paxton")
             self.assertEqual(official.website_url, "http://kenpaxton.com/")
+        finally:
+            session.close()
+
+    def test_name_search_skips_recent_misses(self):
+        from models import Official
+
+        self._load_race()
+        session = self.SessionLocal()
+        try:
+            # Jane Doe raised too little to search; the cap leaves Paxton for later.
+            with patch.object(wikidata_client, "find_person", return_value=None) as find:
+                self.assertEqual(wikidata_client.match_by_name(session, list(self.IDS), max_names=1), 0)
+                self.assertEqual([c.args[0].id for c in find.call_args_list], ["S8ZZ00001"])
+                wikidata_client.match_by_name(session, list(self.IDS))
+                self.assertEqual(find.call_args_list[-1].args[0].id, "S8ZZ00002")
+                self.assertEqual(find.call_count, 2)
+                wikidata_client.match_by_name(session, list(self.IDS))
+                self.assertEqual(find.call_count, 2)
+            self.assertIsNotNone(session.get(Official, "S8ZZ00001").wikidata_searched_at)
+            self.assertIsNone(session.get(Official, "H8ZZ01001").wikidata_searched_at)
         finally:
             session.close()
 
