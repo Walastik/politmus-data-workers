@@ -782,6 +782,59 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         session.close()
         return sync
 
+    def test_candidates_are_selected_by_candidacy_and_saved_as_campaign_site(self):
+        from decimal import Decimal
+
+        from models import Candidacy, Official, OfficialStance
+        from official_positions import select_officials
+
+        session = self.SessionLocal()
+        session.query(Official).filter(Official.id == self.OFFICIAL_ID).update(
+            {"level": "candidate", "current_member": False, "office": "House candidate"}
+        )
+        session.add(Candidacy(
+            fec_candidate_id="H6ZZ99001", election_year=2026, official_id=self.OFFICIAL_ID,
+            state="NY", office="H", district=99, receipts=Decimal("75000"),
+        ))
+        session.commit()
+        try:
+            def selected(**kwargs):
+                rows = select_officials(
+                    session, version="v", now=self.clock[0], limit=None, level="candidate", **kwargs
+                )
+                return self.OFFICIAL_ID in [official.id for official, _ in rows]
+
+            self.assertTrue(selected())
+            # Too little money and not on the ballot: skipped.
+            session.query(Candidacy).filter_by(fec_candidate_id="H6ZZ99001").update({"receipts": Decimal("1000")})
+            self.assertFalse(selected())
+            session.query(Candidacy).filter_by(fec_candidate_id="H6ZZ99001").update({"in_general_election": True})
+            self.assertTrue(selected())
+            # A past cycle's candidacy doesn't count.
+            session.query(Candidacy).filter_by(fec_candidate_id="H6ZZ99001").update({"election_year": 2024})
+            self.assertFalse(selected())
+            self.assertFalse(
+                self.OFFICIAL_ID in [o.id for o, _ in select_officials(
+                    session, version="v", now=self.clock[0], limit=None, level="federal"
+                )]
+            )
+            session.commit()
+
+            stats = self._run()
+            self.assertEqual(stats["stances_saved"], 2)
+            sources = {
+                row.source_type
+                for row in session.query(OfficialStance).filter_by(official_id=self.OFFICIAL_ID)
+            }
+            self.assertEqual(sources, {"campaign_site"})
+            prompt = self.calls[0][-1]["content"]
+            self.assertIn("candidate for U.S. House (not in office", prompt)
+        finally:
+            session.rollback()
+            session.query(Candidacy).filter_by(fec_candidate_id="H6ZZ99001").delete()
+            session.commit()
+            session.close()
+
     def test_first_run_saves_verified_stances_and_second_run_skips_model(self):
         stats = self._run()
         self.assertEqual(stats["extracted"], 1)

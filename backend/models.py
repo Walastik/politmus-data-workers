@@ -41,6 +41,8 @@ class Official(Base):
     # From Wikidata (wikidata_client.py), matched on FEC candidate ID.
     wikidata_id = Column(String, nullable=True)
     wikipedia_url = Column(String, nullable=True)
+    # Last name search for an unmatched candidate; searched again after 30 days.
+    wikidata_searched_at = Column(DateTime, nullable=True)
     # {"description", "birth_date", "occupations": [...], "education": [...],
     #  "positions_held": [...]}.
     bio = Column(JSONB, nullable=True)
@@ -699,7 +701,10 @@ class Candidacy(Base):
     # results, so this is how primary losers drop out of a race.
     in_general_election = Column(Boolean, nullable=False, default=False, server_default="false")
     fetched_at = Column(DateTime, nullable=True)
-    # Last `totals --candidates` sync; oldest go first.
+    # Last totals sync; oldest go first.
     detail_fetched_at = Column(DateTime, nullable=True)
+    # coverage_end_date as of that sync. When the daily load moves
+    # coverage_end_date past it, the candidacy has new filings to fetch.
+    detail_coverage_end_date = Column(Date, nullable=True)
 
     official = relationship("Official")

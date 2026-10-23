@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,7 +17,7 @@ import wikidata_client
 from api.main import app
 from fec_client import candidacy_values, fec_ids_for_office, fec_party, parse_fec_name
 from services import candidate_races
-from wikidata_client import campaign_website, label_name_parts, names_state, portrait_url
+from wikidata_client import campaign_website, label_name_parts, names_state, portrait_url, search_names
 
 
 def totals_row(candidate_id, name, receipts, office="S", state="ZZ", district=0, party="DEM",
@@ -78,6 +78,41 @@ class NameParsingTests(unittest.TestCase):
         self.assertEqual(candidacy_values(totals_row("S8ZZ00001", "DOE, JANE", 1, district=3))["district"], 0)
         self.assertIsNone(candidacy_values(totals_row("P8ZZ00001", "DOE, JANE", 1, office="P")))
 
+    def test_committee_websites(self):
+        from fec_client import committee_website, normalize_website
+
+        self.assertEqual(normalize_website("WWW.KENPAXTON.COM"), "https://www.kenpaxton.com")
+        self.assertEqual(normalize_website(" HTTPS://WWW.DANFORUSA.COM/ "), "https://www.danforusa.com/")
+        for value in (None, "", "N/A", "JOHN@EXAMPLE.COM", "FACEBOOK.COM/JANEDOE", "secure.actblue.com/donate/x"):
+            self.assertIsNone(normalize_website(value), value)
+        self.assertEqual(
+            committee_website([
+                {"designation": "A", "website": "joint-fund.com"},
+                {"designation": "P", "website": None},
+                {"designation": "P", "website": "JANEFORCONGRESS.COM"},
+            ]),
+            "https://janeforcongress.com",
+        )
+        self.assertIsNone(committee_website([]))
+
+    def test_refresh_candidate_website_caches_committees(self):
+        official = SimpleNamespace(fec_committees=None, website_url="http://old-wikidata-site.com/")
+        committees = [{"committee_id": "C1", "designation": "P", "cycles": [2026], "website": "KENPAXTON.COM"}]
+        with patch.object(fec_client, "fetch_committees", return_value=committees) as fetch:
+            self.assertEqual(fec_client.refresh_candidate_website(official, "S6TX00388"), "https://kenpaxton.com")
+            fec_client.refresh_candidate_website(official, "S6TX00388")
+        fetch.assert_called_once_with("S6TX00388")
+        # FEC registration wins over Wikidata.
+        self.assertEqual(official.website_url, "https://kenpaxton.com")
+        self.assertEqual(official.fec_committees, {"S6TX00388": committees})
+
+        stale = SimpleNamespace(fec_committees={"S6TX00388": [{"committee_id": "C1", "designation": "P"}]},
+                                website_url=None)
+        with patch.object(fec_client, "fetch_committees", return_value=committees) as fetch:
+            fec_client.refresh_candidate_website(stale, "S6TX00388")
+        fetch.assert_called_once_with("S6TX00388")
+        self.assertEqual(stale.website_url, "https://kenpaxton.com")
+
     def test_candidate_offices_pick_their_fec_ids(self):
         self.assertEqual(fec_ids_for_office(["S8ZZ00001"], "Senate candidate"), ["S8ZZ00001"])
         self.assertEqual(fec_ids_for_office(["H8ZZ01001"], "House candidate"), ["H8ZZ01001"])
@@ -121,6 +156,77 @@ class RaceRuleTests(unittest.TestCase):
         self.assertEqual(candidate_races.race_label("H", 21), "U.S. House · District 21")
 
 
+class FinanceQueueRuleTests(unittest.TestCase):
+    TODAY = date(2026, 10, 22)
+
+    def _candidacy(self, **values):
+        defaults = {
+            "election_year": 2026,
+            "in_general_election": False,
+            "coverage_end_date": date(2026, 9, 30),
+            "detail_coverage_end_date": date(2026, 9, 30),
+            "detail_fetched_at": datetime(2026, 10, 21, 9),
+        }
+        return fec_client.FinanceTarget(None, ["H6ZZ01001"], SimpleNamespace(**{**defaults, **values}))
+
+    def test_candidacies_are_due_on_new_filings(self):
+        due = fec_client.totals_due
+        self.assertFalse(due(self._candidacy(), None, self.TODAY))
+        self.assertTrue(due(self._candidacy(detail_fetched_at=None), None, self.TODAY))
+        self.assertTrue(due(self._candidacy(coverage_end_date=date(2026, 10, 14)), None, self.TODAY))
+
+    def test_outside_spending_refresh(self):
+        due = fec_client.totals_due
+        two_days = datetime(2026, 10, 20, 9)
+        # On the general ballot in the final weeks: every two days.
+        self.assertTrue(due(self._candidacy(detail_fetched_at=two_days, in_general_election=True), None, self.TODAY))
+        # Otherwise weekly.
+        self.assertFalse(due(self._candidacy(detail_fetched_at=two_days), None, self.TODAY))
+        self.assertTrue(due(self._candidacy(detail_fetched_at=datetime(2026, 10, 15)), None, self.TODAY))
+        # A finished race only re-syncs on new filings.
+        self.assertFalse(due(self._candidacy(detail_fetched_at=datetime(2026, 10, 1)), None, date(2027, 1, 5)))
+
+    def test_members_not_running_refresh_weekly(self):
+        member = fec_client.FinanceTarget(None, ["S4ZZ00001"])
+        due = fec_client.totals_due
+        self.assertTrue(due(member, None, self.TODAY))
+        self.assertFalse(due(member, datetime(2026, 10, 16, 7), self.TODAY))
+        self.assertTrue(due(member, datetime(2026, 10, 15, 7), self.TODAY))
+
+    def test_request_budget_stops_fec_get(self):
+        response = SimpleNamespace(status_code=200, json=lambda: {"results": []}, raise_for_status=lambda: None)
+        fec_client.set_request_budget(2)
+        try:
+            with patch.object(fec_client.requests, "get", return_value=response) as get, \
+                    patch.object(fec_client.time, "sleep"):
+                fec_client.fec_get("/x/")
+                fec_client.fec_get("/x/")
+                with self.assertRaises(fec_client.BudgetSpent):
+                    fec_client.fec_get("/x/")
+            self.assertEqual(get.call_count, 2)
+            self.assertEqual(fec_client.requests_left(), 0)
+        finally:
+            fec_client.set_request_budget(None)
+
+
+def fake_detail_fec_get(path, params=None):
+    """One 2098 election per candidate ID, with nothing else to report."""
+    if path.startswith("/candidate/") and path.endswith("/totals/"):
+        return {"results": [{
+            "candidate_election_year": 2098,
+            "coverage_start_date": "2097-01-01T00:00:00",
+            "coverage_end_date": "2098-09-30T00:00:00",
+            "receipts": 100000.0,
+        }]}
+    if path.endswith("/committees/"):
+        return {"results": []}
+    if "schedule_e" in path:
+        return {"results": [], "pagination": {"pages": 1}}
+    if "by_size" in path or "by_state" in path:
+        return {"results": []}
+    raise AssertionError(path)
+
+
 class WikidataParsingTests(unittest.TestCase):
     def test_label_name_parts(self):
         self.assertEqual(
@@ -153,6 +259,50 @@ class WikidataParsingTests(unittest.TestCase):
         self.assertTrue(names_state(person, "Texas"))
         self.assertFalse(names_state(person, "Ohio"))
 
+    def test_search_names_try_short_names_first(self):
+        official = SimpleNamespace(
+            first_name="Warren", middle_name="Kenneth", last_name="Paxton", suffix_name="Jr.",
+            nickname="Ken", display_name="Warren Kenneth Paxton Jr.",
+        )
+        self.assertEqual(
+            search_names(official), ["Ken Paxton", "Warren Paxton", "Warren Kenneth Paxton Jr."]
+        )
+        official = SimpleNamespace(first_name=None, last_name=None, nickname=None, display_name="Doe, Jane")
+        self.assertEqual(search_names(official), ["Doe, Jane"])
+
+    def test_find_person_moves_to_the_next_name_until_one_fits(self):
+        official = SimpleNamespace(
+            first_name="Seth", last_name="Harp", nickname=None, display_name="Seth Allan Harp",
+            state="Tennessee",
+        )
+        harp = {"wikidata_id": "Q1", "bio": {"positions_held": [], "description": "Tennessee politician"},
+                "districts": []}
+        hits = {"Seth Harp": ["Q1"], "Seth Allan Harp": []}
+        with patch.object(wikidata_client, "search_items", side_effect=hits.get) as search, \
+                patch.object(wikidata_client, "people_by_item", return_value={"Q1": harp}):
+            self.assertIs(wikidata_client.find_person(official), harp)
+        self.assertEqual(search.call_count, 1)
+
+    def _response(self, status, headers=None, body=None):
+        return SimpleNamespace(
+            status_code=status, headers=headers or {}, json=lambda: body,
+            raise_for_status=lambda: None,
+        )
+
+    def test_wikidata_get_waits_out_429(self):
+        responses = [self._response(429, {"Retry-After": "7"}), self._response(200, body={"search": []})]
+        with patch.object(wikidata_client.requests, "get", side_effect=responses), \
+                patch.object(wikidata_client.time, "sleep") as sleep:
+            self.assertEqual(wikidata_client.wikidata_get("https://example.test", {}), {"search": []})
+        self.assertIn(7.0, [call.args[0] for call in sleep.call_args_list])
+
+    def test_wikidata_get_stops_on_long_block(self):
+        with patch.object(wikidata_client.requests, "get",
+                          return_value=self._response(429, {"Retry-After": "3600"})), \
+                patch.object(wikidata_client.time, "sleep"):
+            with self.assertRaises(wikidata_client.RateLimited):
+                wikidata_client.wikidata_get("https://example.test", {})
+
 
 def _test_database_available() -> bool:
     url = os.environ.get("DATABASE_URL", "")
@@ -171,7 +321,7 @@ def _test_database_available() -> bool:
 class CandidateSyncTests(unittest.TestCase):
     CYCLE = 2098
     MEMBER_ID = "ZZCAND01"
-    IDS = ("ZZCAND01", "S8ZZ00001", "S8ZZ00002", "S8ZZ00003", "H8ZZ01001")
+    IDS = ("ZZCAND01", "ZZCAND02", "S8ZZ00001", "S8ZZ00002", "S8ZZ00003", "H8ZZ01001")
 
     @classmethod
     def setUpClass(cls):
@@ -199,6 +349,18 @@ class CandidateSyncTests(unittest.TestCase):
                 current_member=True,
                 level="federal",
                 fec_candidate_ids=["S8ZZ00003"],
+            )
+        )
+        # Not on this cycle's ballot.
+        session.add(
+            Official(
+                id="ZZCAND02",
+                name="Member, Resting",
+                state="Texas",
+                office="Representative",
+                current_member=True,
+                level="federal",
+                fec_candidate_ids=["S8ZZ09999", "H8ZZ02002"],
             )
         )
         session.commit()
@@ -286,6 +448,93 @@ class CandidateSyncTests(unittest.TestCase):
             self.assertEqual(official.website_url, "http://kenpaxton.com/")
         finally:
             session.close()
+
+    def test_name_search_skips_recent_misses(self):
+        from models import Official
+
+        self._load_race()
+        session = self.SessionLocal()
+        try:
+            # Jane Doe raised too little to search; the cap leaves Paxton for later.
+            with patch.object(wikidata_client, "find_person", return_value=None) as find:
+                self.assertEqual(wikidata_client.match_by_name(session, list(self.IDS), max_names=1), 0)
+                self.assertEqual([c.args[0].id for c in find.call_args_list], ["S8ZZ00001"])
+                wikidata_client.match_by_name(session, list(self.IDS))
+                self.assertEqual(find.call_args_list[-1].args[0].id, "S8ZZ00002")
+                self.assertEqual(find.call_count, 2)
+                wikidata_client.match_by_name(session, list(self.IDS))
+                self.assertEqual(find.call_count, 2)
+            self.assertIsNotNone(session.get(Official, "S8ZZ00001").wikidata_searched_at)
+            self.assertIsNone(session.get(Official, "H8ZZ01001").wikidata_searched_at)
+        finally:
+            session.close()
+
+    def test_finance_targets_merge_members_and_candidacies(self):
+        self._load_race()
+        session = self.SessionLocal()
+        try:
+            targets = fec_client.finance_targets(session, {"candidates", "members"}, cycle=self.CYCLE)
+            ours = {t.official.id: (t.fec_ids, t.candidacy is not None) for t in targets if t.official.id in self.IDS}
+        finally:
+            session.close()
+        # The $1,000 filer is left out; the running member goes through their
+        # candidacy (and Senate seat) only; the resting member by their House ID.
+        self.assertEqual(ours, {
+            "S8ZZ00001": (["S8ZZ00001"], True),
+            "S8ZZ00002": (["S8ZZ00002"], True),
+            self.MEMBER_ID: (["S8ZZ00003"], True),
+            "ZZCAND02": (["H8ZZ02002"], False),
+        })
+
+    def _run_totals(self, **kwargs):
+        def get(url, params=None, timeout=None):
+            body = fake_detail_fec_get(url.removeprefix(fec_client.BASE_URL), params)
+            return SimpleNamespace(status_code=200, json=lambda: body, raise_for_status=lambda: None)
+
+        # Patch the HTTP call rather than fec_get, so the request budget counts.
+        with patch.object(fec_client.requests, "get", side_effect=get) as http, \
+                patch.object(fec_client.time, "sleep"):
+            fec_client.run_finance("totals", {"candidates"}, cycle=self.CYCLE, state="TX", **kwargs)
+        return http.call_count
+
+    def test_totals_sync_only_new_filings(self):
+        from models import Candidacy
+
+        self._load_race()
+        # Three candidacies: totals, outside spending and both breakdowns,
+        # plus committees once for the two who are only candidates.
+        self.assertEqual(self._run_totals(), 14)
+        self.assertEqual(self._run_totals(), 0)
+
+        session = self.SessionLocal()
+        candidacy = session.get(Candidacy, ("S8ZZ00002", self.CYCLE))
+        self.assertEqual(candidacy.detail_coverage_end_date, date(2098, 9, 30))
+        candidacy.coverage_end_date = date(2098, 10, 15)
+        session.commit()
+        session.close()
+        # Paxton filed again: committees are cached, and the breakdowns are
+        # current with the totals row FEC returns.
+        self.assertEqual(self._run_totals(), 2)
+
+    def test_pacs_wait_for_totals(self):
+        def pac_due():
+            session = self.SessionLocal()
+            try:
+                targets = fec_client.finance_targets(session, {"candidates"}, cycle=self.CYCLE, state="TX")
+                return [t.official.id for t in fec_client.due_targets(session, "pacs", targets, date.today())]
+            finally:
+                session.close()
+
+        self._load_race()
+        self.assertEqual(pac_due(), [])
+        self._run_totals()
+        self.assertEqual(sorted(pac_due()), sorted(["S8ZZ00001", "S8ZZ00002", self.MEMBER_ID]))
+
+    def test_totals_stop_at_request_budget(self):
+        self._load_race()
+        # The reserve leaves room for one candidacy, not two.
+        self.assertEqual(self._run_totals(max_requests=fec_client.TARGET_REQUEST_RESERVE + 2), 5)
+        fec_client.set_request_budget(None)
 
     def test_candidates_stay_off_the_roster(self):
         self._load_race()

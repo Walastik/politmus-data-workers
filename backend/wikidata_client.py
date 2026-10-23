@@ -1,29 +1,36 @@
 """Bios, portraits and websites from Wikidata, matched on FEC candidate ID (P1839).
 
 Fills wikidata_id, wikipedia_url and bio for every official with FEC IDs.
-Candidates (level='candidate') also take their name, portrait and campaign
-website from Wikidata, since FEC only has their legal name. Members keep the
-Congress.gov portrait and .gov website.
+Candidates (level='candidate') also take their name and portrait from
+Wikidata, since FEC only has their legal name, and its website when their
+FEC committees list none. Members keep the Congress.gov portrait and .gov
+website.
 
 Few challengers have P1839 yet, so candidates who raised real money and were
 not matched get a second pass: a name search, kept only when exactly one hit
-is a person whose offices, districts or description name their state.
+is a person whose offices, districts or description name their state. Each
+candidate is searched at most once every SEARCH_RECHECK_DAYS, and a run
+searches at most --max-names of them, least recently searched first.
 
-    python wikidata_client.py [--level candidate] [--limit N]
+    python wikidata_client.py [--level candidate] [--limit N] [--max-names N]
 """
 
 import argparse
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, unquote, urlparse
 
 import requests
 
+from sqlalchemy import or_
+
+from congress_client import _retry_wait_seconds
 from database import SessionLocal
-from fec_client import CANDIDATE_DETAIL_MIN_RECEIPTS, NAME_SUFFIXES
+from fec_client import NAME_SUFFIXES
 from init_db import ensure_schema
 from models import Candidacy, Official
-from services.candidate_races import CANDIDATE_LEVEL
+from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 SEARCH_URL = "https://www.wikidata.org/w/api.php"
@@ -37,6 +44,15 @@ USER_AGENT = os.getenv(
 # GROUP BY, so batches stay small enough to finish within the 60s query limit.
 BATCH_SIZE = 50
 REQUEST_PAUSE_SECONDS = 1.0
+# Wikidata answers bursts with 429 and a Retry-After; wait that long a few
+# times, but end the run rather than sit out a long block.
+MAX_RETRIES = 4
+RATE_LIMIT_BACKOFF_SECONDS = 10.0
+MAX_RATE_LIMIT_WAIT_SECONDS = 300.0
+# An unmatched candidate is searched again after this long, in case someone
+# has since written their Wikidata entry.
+SEARCH_RECHECK_DAYS = 30
+MAX_NAME_SEARCHES = 300
 PORTRAIT_WIDTH = 400
 SEPARATOR = "|"
 
@@ -66,15 +82,36 @@ GROUP BY ?fec ?item ?label ?description ?birth ?article
 """
 
 
+class RateLimited(RuntimeError):
+    """Wikidata kept answering 429, or asked us to wait too long."""
+
+
+def wikidata_get(url, params, headers=None, timeout=30):
+    """GET JSON from Wikidata, paced, waiting out 429 and 503 answers."""
+    headers = {"User-Agent": USER_AGENT, **(headers or {})}
+    delay = RATE_LIMIT_BACKOFF_SECONDS
+    for attempt in range(1, MAX_RETRIES + 1):
+        time.sleep(REQUEST_PAUSE_SECONDS)
+        response = requests.get(url, params=params, headers=headers, timeout=timeout)
+        if response.status_code not in (429, 503):
+            response.raise_for_status()
+            return response.json()
+        wait = _retry_wait_seconds(response, delay)
+        if attempt == MAX_RETRIES or wait > MAX_RATE_LIMIT_WAIT_SECONDS:
+            raise RateLimited(f"Wikidata answered {response.status_code} (Retry-After {wait:.0f}s)")
+        print(f"  Wikidata answered {response.status_code}; waiting {wait:.0f}s (attempt {attempt}/{MAX_RETRIES})")
+        time.sleep(wait)
+        delay *= 2
+
+
 def sparql(match):
-    response = requests.get(
+    payload = wikidata_get(
         SPARQL_URL,
-        params={"query": QUERY % match},
-        headers={"Accept": "application/sparql-results+json", "User-Agent": USER_AGENT},
+        {"query": QUERY % match},
+        headers={"Accept": "application/sparql-results+json"},
         timeout=90,
     )
-    response.raise_for_status()
-    return response.json()["results"]["bindings"]
+    return payload["results"]["bindings"]
 
 
 def people_by_fec_id(fec_ids):
@@ -95,9 +132,9 @@ def people_by_item(item_ids):
 
 
 def search_items(name):
-    response = requests.get(
+    payload = wikidata_get(
         SEARCH_URL,
-        params={
+        {
             "action": "wbsearchentities",
             "search": name,
             "language": "en",
@@ -105,11 +142,39 @@ def search_items(name):
             "limit": SEARCH_HITS,
             "format": "json",
         },
-        headers={"User-Agent": USER_AGENT},
-        timeout=30,
     )
-    response.raise_for_status()
-    return [hit["id"] for hit in response.json().get("search") or []]
+    return [hit["id"] for hit in payload.get("search") or []]
+
+
+def search_names(official):
+    """Names to search, most likely label first: "Ken Paxton" before
+    "Warren Kenneth Paxton Jr.", since labels rarely carry middle names."""
+    names = []
+    if official.last_name:
+        for given in (official.nickname, official.first_name):
+            if given:
+                names.append(f"{given} {official.last_name}")
+    names.append(official.display_name)
+    return list(dict.fromkeys(name for name in names if name))
+
+
+def find_person(official):
+    """The one person a name search finds for this candidate, or None."""
+    for name in search_names(official):
+        items = search_items(name)
+        if not items:
+            continue
+        people = people_by_item(items)
+        fits = [
+            people[item] for item in items
+            if item in people and names_state(people[item], official.state or "")
+        ]
+        if len(fits) == 1:
+            return fits[0]
+        if fits:
+            # Two people of that name in the state: too close to call.
+            return None
+    return None
 
 
 def names_state(person, state_name):
@@ -202,12 +267,14 @@ def apply_person(official, person):
     if person["portrait_url"]:
         official.photo_url = person["portrait_url"]
         official.photo_attribution = "Wikimedia Commons"
+    # FEC registration (fec_client.py) is the campaign's own current site;
+    # Wikidata only fills in when there isn't one.
     website = campaign_website(person["websites"])
-    if website:
+    if website and not official.website_url:
         official.website_url = website
 
 
-def run(level=None, limit=None):
+def run(level=None, limit=None, max_names=MAX_NAME_SEARCHES):
     ensure_schema()
     session = SessionLocal()
     try:
@@ -226,6 +293,9 @@ def run(level=None, limit=None):
             batch = fec_ids[start:start + BATCH_SIZE]
             try:
                 people = people_by_fec_id(batch)
+            except RateLimited as exc:
+                print(f"  {exc}. Stopping; the next run starts over.")
+                return
             except requests.RequestException as exc:
                 print(f"  Batch {start // BATCH_SIZE + 1} failed: {exc}")
                 continue
@@ -238,46 +308,63 @@ def run(level=None, limit=None):
                 matched.add(official.id)
             session.commit()
             print(f"  {min(start + BATCH_SIZE, len(fec_ids))}/{len(fec_ids)} FEC IDs, {len(matched)} matched")
-            time.sleep(REQUEST_PAUSE_SECONDS)
         print(f"Done: {len(matched)} of {len(officials)} officials matched on FEC ID.")
         if level in (None, CANDIDATE_LEVEL):
-            searched = match_by_name(session, [o for o in officials if o.id not in matched])
+            unmatched = [o.id for o in officials if o.id not in matched]
+            searched = match_by_name(session, unmatched, max_names)
             print(f"Done: {searched} more candidates matched by name.")
     finally:
         session.close()
 
 
-def match_by_name(session, officials):
-    """Second pass for unmatched candidates who raised real money; returns matches."""
-    funded = {
-        official_id
-        for (official_id,) in session.query(Candidacy.official_id)
+def name_search_due(session, official_ids, now=None):
+    """Unmatched candidates who raised real money, least recently searched first."""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    funded = (
+        session.query(Candidacy.official_id)
         .filter(Candidacy.receipts >= CANDIDATE_DETAIL_MIN_RECEIPTS)
         .distinct()
-    }
-    candidates = [
-        o for o in officials if o.level == CANDIDATE_LEVEL and not o.wikidata_id and o.id in funded
-    ]
+    )
+    return (
+        session.query(Official)
+        .filter(
+            Official.id.in_(official_ids),
+            Official.id.in_(funded),
+            Official.level == CANDIDATE_LEVEL,
+            Official.wikidata_id.is_(None),
+            or_(
+                Official.wikidata_searched_at.is_(None),
+                Official.wikidata_searched_at < now - timedelta(days=SEARCH_RECHECK_DAYS),
+            ),
+        )
+        .order_by(Official.wikidata_searched_at.asc().nulls_first(), Official.id)
+        .all()
+    )
+
+
+def match_by_name(session, official_ids, max_names=MAX_NAME_SEARCHES):
+    """Second pass for unmatched candidates who raised real money; returns matches."""
+    due = name_search_due(session, official_ids)
+    candidates = due[:max_names]
     matches = 0
-    for start in range(0, len(candidates), BATCH_SIZE):
-        batch = candidates[start:start + BATCH_SIZE]
+    for index, official in enumerate(candidates, start=1):
         try:
-            hits = {official.id: search_items(official.display_name) for official in batch}
-            people = people_by_item(sorted({item for items in hits.values() for item in items}))
+            person = find_person(official)
+        except RateLimited as exc:
+            print(f"  {exc}. Stopping; the next run continues from here.")
+            break
         except requests.RequestException as exc:
-            print(f"  Name batch {start // BATCH_SIZE + 1} failed: {exc}")
+            print(f"  {official.id} {official.display_name}: search failed ({exc})")
             continue
-        for official in batch:
-            fits = [
-                people[item] for item in hits[official.id]
-                if item in people and names_state(people[item], official.state or "")
-            ]
-            if len(fits) == 1:
-                apply_person(official, fits[0])
-                matches += 1
+        if person:
+            apply_person(official, person)
+            matches += 1
+        official.wikidata_searched_at = datetime.now(timezone.utc).replace(tzinfo=None)
         session.commit()
-        print(f"  {min(start + BATCH_SIZE, len(candidates))}/{len(candidates)} searched, {matches} matched")
-        time.sleep(REQUEST_PAUSE_SECONDS)
+        if index % 50 == 0 or index == len(candidates):
+            print(f"  {index}/{len(candidates)} searched, {matches} matched")
+    if len(due) > len(candidates):
+        print(f"  {len(due) - len(candidates)} left for the next run (--max-names {max_names}).")
     return matches
 
 
@@ -285,8 +372,12 @@ def main():
     parser = argparse.ArgumentParser(description="Bios and portraits from Wikidata.")
     parser.add_argument("--level", help="Only officials at this level (e.g. candidate).")
     parser.add_argument("--limit", type=int, help="Stop after this many officials.")
+    parser.add_argument(
+        "--max-names", type=int, default=MAX_NAME_SEARCHES,
+        help=f"Name-search at most this many candidates (default {MAX_NAME_SEARCHES}).",
+    )
     args = parser.parse_args()
-    run(level=args.level, limit=args.limit)
+    run(level=args.level, limit=args.limit, max_names=args.max_names)
 
 
 if __name__ == "__main__":

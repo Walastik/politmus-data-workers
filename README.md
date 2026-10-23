@@ -261,6 +261,12 @@ Officials that failed are retried by later runs after a 6-hour backoff (`--force
 15 2 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --limit 40 >> /tmp/official_positions.log 2>&1
 ```
 
+**Candidates.** `--level candidate` reads the campaign sites of people running this cycle (see Candidates below): anyone with a candidacy this cycle who is on the general-election ballot or raised at least $50,000, and has a website. Their stances are saved with `source_type='campaign_site'` and the prompt describes them as candidates, not office holders. Members running again keep their `official_site` positions. A separate nightly line keeps them apart from the member run:
+
+```
+45 3 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --level candidate --limit 40 >> /tmp/candidate_positions.log 2>&1
+```
+
 **Prompts are local, not in the repo.** Like `backend/scripts/llm_config.py` for the bill classifier, the worker reads `POSITIONS_SYSTEM_PROMPT` and `LINK_SELECTION_PROMPT` from `backend/scripts/positions_llm_config.py`, which is gitignored. Create it on the machine that runs the worker:
 
 ```bash
@@ -362,16 +368,25 @@ Campaign finance for current members of Congress from the [OpenFEC API](https://
 
 **Crosswalk** — downloads `legislators-current.json` from [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) (CC0) and sets `officials.fec_candidate_ids` and `opensecrets_id` by bioguide ID. One request; re-run after `congress_client.py members` picks up new members.
 
-**Totals** — for each current federal official, fetches `/candidate/{id}/totals/` for the FEC IDs matching their seat (S… for senators, H… otherwise) and upserts one `official_finance_totals` row per election: receipts, individual (itemized/unitemized), PAC, party and self-funding, spending, cash on hand and debts. The two most recent elections also get donation-size (`by_size`) and donor-state (`by_state`, itemized only) breakdowns from Schedule A, plus outside spending (Schedule E independent expenditures for and against the candidate, with the top spenders on each side). Breakdowns are only re-fetched when FEC's `coverage_end_date` moves. Outside spending for a race still under way is re-fetched on every run, since groups can spend at any time; a finished race's is fetched once. A weekly re-run costs about two requests per member. Requests are paced at `FEC_REQUEST_PAUSE_SECONDS` (default 3.6s, under the 1,000/hour key limit); a first full run takes about 2 hours. If the key runs out (Retry-After over 10 minutes), the run stops; re-running is cheap for members already synced.
+**Totals** — for each current federal official, fetches `/candidate/{id}/totals/` for the FEC IDs matching their seat (S… for senators, H… otherwise) and upserts one `official_finance_totals` row per election: receipts, individual (itemized/unitemized), PAC, party and self-funding, spending, cash on hand and debts. The two most recent elections also get donation-size (`by_size`) and donor-state (`by_state`, itemized only) breakdowns from Schedule A, plus outside spending (Schedule E independent expenditures for and against the candidate, with the top spenders on each side). Breakdowns are only re-fetched when FEC's `coverage_end_date` moves. Outside spending for a race still under way is re-fetched whenever the official is synced, since groups can spend at any time; a finished race's is fetched once. Requests are paced at `FEC_REQUEST_PAUSE_SECONDS` (default 3.6s, under the 1,000/hour key limit). If the key runs out (Retry-After over 10 minutes), the run stops; the next run continues.
 
-**PACs** — after `totals`, fetches every itemized gift from a PAC or other political committee (Schedule A, Form 3 line 11C) for the same two most recent elections into `pac_contributions`. Each PAC is categorized from its FEC codes (`services/finance_insights.pac_category`): corporate, labor, trade, membership or cooperative by its sponsor type; leadership PACs and other candidates' campaigns as politicians; sponsor-less PACs as ideological/issue; anything FEC doesn't classify as other. Gifts are fetched per campaign committee and two-year period (`pac_contribution_sync`): a finished period once after it closes, the current period again only when the election's `coverage_end_date` moves. A first load is roughly 5,000 requests, so `--max-minutes` stops starting new members after a time budget and the next run continues with the least recently synced. The itemized sum matches FEC's reported PAC total (checked for Klobuchar 2024: $1,368,278 both ways).
+**PACs** — after `totals`, fetches every itemized gift from a PAC or other political committee (Schedule A, Form 3 line 11C) for the same two most recent elections into `pac_contributions`. Each PAC is categorized from its FEC codes (`services/finance_insights.pac_category`): corporate, labor, trade, membership or cooperative by its sponsor type; leadership PACs and other candidates' campaigns as politicians; sponsor-less PACs as ideological/issue; anything FEC doesn't classify as other. Gifts are fetched per campaign committee and two-year period (`pac_contribution_sync`): a finished period once after it closes, the current period again only when the election's `coverage_end_date` moves. A period whose gifts lag the filing (FEC is still processing them) is checked again once a day for up to 90 days. Officials go least recently synced first, and only after their totals have synced. The itemized sum matches FEC's reported PAC total (checked for Klobuchar 2024: $1,368,278 both ways).
+
+**Who is due** — `totals` and `pacs` work through current members (default), this cycle's candidacies with at least $50,000 raised (`--candidates`), or both (`--all`). A sitting member who is running is synced once, through their candidacy, with their other IDs for the seat they hold. `totals` skips anyone with nothing new:
+
+- a candidacy is due when `candidates` (run daily) moves its `coverage_end_date` past `candidacies.detail_coverage_end_date`, the one last synced, or when its outside spending is stale: every 2 days for candidates on the general-election ballot in a race's last 60 days, weekly otherwise;
+- a member not on this cycle's ballot is due weekly;
+- `--official-id` syncs that official regardless.
+
+`--max-requests` caps a run's OpenFEC calls and `--max-minutes` its time; either way the run stops starting new officials and the next run continues. The **FEC Finance Detail** workflow runs `totals --all` and `pacs --all` every 3 hours with 800 requests between them, so a first load of everyone takes about two days of runs and later runs mostly finish in minutes.
 
 ```bash
 python fec_client.py crosswalk
-python fec_client.py totals
+python fec_client.py totals                          # members due
+python fec_client.py totals --all --max-requests 500 # members and candidacies due
 python fec_client.py totals --official-id S000033
 python fec_client.py totals --limit 10
-python fec_client.py pacs --max-minutes 300
+python fec_client.py pacs --all --max-requests 300
 python fec_client.py pacs --official-id K000367
 ```
 
@@ -379,16 +394,16 @@ python fec_client.py pacs --official-id K000367
 
 ### Candidates (`fec_client.py candidates`, `wikidata_client.py`)
 
-Everyone running for the House or Senate in the current cycle, including challengers who hold no office. `candidates` sweeps OpenFEC `/candidates/totals/` (candidates with money raised, about 50 requests) into `candidacies`, one row per FEC candidate ID and election with the race (state, office, district), party, incumbent/challenger/open seat and a totals snapshot. A candidate ID held by a member (from the crosswalk) links to that member's row; anyone else gets an `officials` row with `level='candidate'` and the FEC ID as its id, so every finance table, endpoint and the member drawer work for them unchanged, while the roster, lookup, peer comparisons and positions worker (all scoped by level) never see them. FEC records no primary results, so the sweep also flags candidacies whose campaign filed a pre-general (12G) report: once that deadline has passed, races show only those, the candidates on the general-election ballot. Before then a race shows everyone who raised at least $5,000.
+Everyone running for the House or Senate in the current cycle, including challengers who hold no office. `candidates` sweeps OpenFEC `/candidates/totals/` (candidates with money raised, about 50 requests) into `candidacies`, one row per FEC candidate ID and election with the race (state, office, district), party, incumbent/challenger/open seat and a totals snapshot. A candidate ID held by a member (from the crosswalk) links to that member's row; anyone else gets an `officials` row with `level='candidate'` and the FEC ID as its id, so every finance table, endpoint and the member drawer work for them unchanged, while the roster, lookup and peer comparisons (all scoped by level) never see them; the positions worker reads their campaign sites only when run with `--level candidate`. FEC records no primary results, so the sweep also flags candidacies whose campaign filed a pre-general (12G) report: once that deadline has passed, races show only those, the candidates on the general-election ballot. Before then a race shows everyone who raised at least $5,000.
 
-`totals --candidates` and `pacs --candidates` fetch the same detail as for members for candidacies with at least $50,000 raised, least recently synced first, within `--max-minutes`. `wikidata_client.py` matches officials on FEC ID (Wikidata P1839) for a bio (description, birth date, occupations, education, offices held) and Wikipedia link; candidates also take their name, portrait and campaign website from it. Few challengers have P1839, so funded candidates without a match get a name search, accepted only when exactly one hit is a person whose offices, districts or description name their state. The **FEC Candidates Ingestion** workflow runs all four daily.
+`totals --candidates` and `pacs --candidates` (or `--all`, with members) fetch the same detail as for members for candidacies with at least $50,000 raised, when due (see above). `totals` also takes each candidate's campaign website from the committee registration (Form 1) on `/candidate/{id}/committees/`, one cached request per candidate; social profiles and donation pages are skipped, and Wikidata's website is used only when FEC has none. `wikidata_client.py` matches officials on FEC ID (Wikidata P1839) for a bio (description, birth date, occupations, education, offices held) and Wikipedia link; candidates also take their name and portrait from it. Few challengers have P1839, so funded candidates without a match get a name search ("Nickname Last", then "First Last", then the full legal name), accepted only when exactly one hit is a person whose offices, districts or description name their state. A candidate is searched at most once every 30 days (`officials.wikidata_searched_at`), and a run searches at most `--max-names` (default 300), least recently searched first. Requests are paced at 1 second and wait out Wikidata's 429s; a long block ends the run. **FEC Ingestion** runs `crosswalk` and `candidates` daily, **FEC Finance Detail** the finance detail every 3 hours, and **Wikidata Candidates Ingestion** the Wikidata match daily.
 
 ```bash
 python fec_client.py candidates                     # this cycle, House and Senate
 python fec_client.py candidates --state TX --office S
-python fec_client.py totals --candidates --state TX --max-minutes 30
-python fec_client.py pacs --candidates --max-minutes 60
-python wikidata_client.py --level candidate
+python fec_client.py totals --candidates --state TX --max-requests 200
+python fec_client.py pacs --candidates --max-requests 200
+python wikidata_client.py --level candidate --max-names 100
 ```
 
 `GET /api/candidates/races` lists races with their candidates, richest first (`state`, `office=S|H`, `district`, `party`, `q`, `all=true` for every filer, `limit`/`offset`). A state lists the Senate race and then districts in order; nationwide lists the most expensive races first. `GET /api/officials/{id}` adds `candidacies`, `bio` and `wikipedia_url`, and `/finance` adds `race_comparison`, the official's race this cycle.
@@ -441,7 +456,7 @@ Use an org or personal token, not a deploy-only token (`fly ssh` rejects those).
 fly secrets set OPENSTATES_API_KEY=your_key_here GOOGLE_CIVIC_API_KEY=your_civic_key FEC_API_KEY=your_fec_key -a politmus-api
 ```
 
-Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, **Senate Votes Ingestion**, or **FEC Campaign Finance Ingestion** from the Actions tab, or load data once by hand:
+Then run **Congress Data Ingestion**, **OpenStates Data Ingestion**, **Senate Votes Ingestion**, **FEC Ingestion**, **FEC Finance Detail** or **Wikidata Candidates Ingestion** from the Actions tab, or load data once by hand:
 
 ```bash
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py members"
@@ -452,6 +467,7 @@ fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.p
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py context --limit 200"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py crosswalk"
-fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py totals"
-fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py pacs --max-minutes 300"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py candidates"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py totals --all --max-requests 500"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py pacs --all --max-requests 300"
 ```

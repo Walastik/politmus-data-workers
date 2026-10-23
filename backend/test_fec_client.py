@@ -241,6 +241,11 @@ class PacParsingTests(unittest.TestCase):
         # FEC still processing: gifts stop at June while totals run to September.
         lagging = SimpleNamespace(**{**vars(current), "latest_receipt_date": date(2026, 6, 30)})
         self.assertTrue(pac_sync_due(lagging, 2026, date(2026, 9, 30), today))
+        # ...once a day, however many runs there are.
+        checked_today = SimpleNamespace(**{**vars(lagging), "fetched_at": datetime(2026, 10, 19, 6)})
+        self.assertFalse(pac_sync_due(checked_today, 2026, date(2026, 9, 30), today))
+        # A new filing is due right away.
+        self.assertTrue(pac_sync_due(checked_today, 2026, date(2026, 12, 31), today))
         # ...but not forever: 90 days on, no more gifts are coming.
         self.assertFalse(pac_sync_due(lagging, 2026, date(2026, 9, 30), date(2026, 12, 30)))
 
@@ -467,6 +472,27 @@ class FinanceSyncTests(unittest.TestCase):
         stats, second = self._sync_pacs()
         self.assertEqual(stats, {"periods": 0, "skipped": 4, "gifts": 0})
         self.assertEqual(second.call_count, 0)
+
+    def test_pac_sync_moves_gift_stored_under_another_committee(self):
+        from models import PacContribution
+
+        self._sync()
+        session = self.SessionLocal()
+        session.add(
+            PacContribution(
+                sub_id="3", official_id=self.OFFICIAL_ID, fec_candidate_id="S4VT00033",
+                committee_id="C_OLD", two_year_period=2016, amount=1, category="other",
+            )
+        )
+        session.commit()
+        session.close()
+
+        stats, _ = self._sync_pacs()
+        self.assertEqual(stats["gifts"], 5)
+        session = self.SessionLocal()
+        gift = session.get(PacContribution, "3")
+        session.close()
+        self.assertEqual((gift.committee_id, gift.two_year_period), ("C00411330", 2024))
 
     def test_pac_endpoints(self):
         self._sync()

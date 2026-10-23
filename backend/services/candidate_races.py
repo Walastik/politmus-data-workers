@@ -15,6 +15,9 @@ from api.filters import STATE_NAME_BY_ABBR
 # candidate ID as their id.
 CANDIDATE_LEVEL = "candidate"
 LIST_MIN_RECEIPTS = Decimal("5000")
+# Candidates below this keep their candidacy row (the "all filers" view) but
+# get no finance detail or positions; there are a few thousand of them.
+CANDIDATE_DETAIL_MIN_RECEIPTS = Decimal("50000")
 PRE_GENERAL_DAYS_BEFORE = 12
 # Late and amended pre-general reports keep arriving for a few days.
 PRE_GENERAL_GRACE_DAYS = 5

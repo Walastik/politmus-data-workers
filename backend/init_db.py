@@ -20,6 +20,13 @@ def _votes_use_legacy_bill_id(conn):
     )).scalar() is not None
 
 
+def _column_exists(conn, table, column):
+    return conn.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = :table AND column_name = :column"
+    ), {"table": table, "column": column}).first() is not None
+
+
 def ensure_schema():
     """Create tables and add columns that create_all will not alter in place."""
     with engine.begin() as conn:
@@ -76,13 +83,29 @@ def ensure_schema():
             "ALTER TABLE officials ADD COLUMN IF NOT EXISTS fec_committees JSONB"
         ))
         # Filled by `wikidata_client.py`.
-        for column_sql in ("wikidata_id VARCHAR", "wikipedia_url VARCHAR", "bio JSONB"):
+        for column_sql in (
+            "wikidata_id VARCHAR", "wikipedia_url VARCHAR", "bio JSONB", "wikidata_searched_at TIMESTAMP",
+        ):
             conn.execute(text(
                 f"ALTER TABLE officials ADD COLUMN IF NOT EXISTS {column_sql}"
             ))
         conn.execute(text(
             "ALTER TABLE pac_contribution_sync ADD COLUMN IF NOT EXISTS latest_receipt_date DATE"
         ))
+        if not _column_exists(conn, "candidacies", "detail_coverage_end_date"):
+            conn.execute(text(
+                "ALTER TABLE candidacies ADD COLUMN detail_coverage_end_date DATE"
+            ))
+            # Candidacies synced before the column existed count as caught up
+            # with their coverage date; stale outside spending re-syncs them
+            # within days. Runs once, so it never hides a later filing.
+            conn.execute(text(
+                """
+                UPDATE candidacies
+                SET detail_coverage_end_date = coverage_end_date
+                WHERE detail_fetched_at IS NOT NULL
+                """
+            ))
         for column_sql in (
             "joint_fundraising_transfers NUMERIC(14, 2)",
             "outside_spending JSONB",
