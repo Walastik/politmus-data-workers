@@ -241,6 +241,11 @@ class PacParsingTests(unittest.TestCase):
         # FEC still processing: gifts stop at June while totals run to September.
         lagging = SimpleNamespace(**{**vars(current), "latest_receipt_date": date(2026, 6, 30)})
         self.assertTrue(pac_sync_due(lagging, 2026, date(2026, 9, 30), today))
+        # ...once a day, however many runs there are.
+        checked_today = SimpleNamespace(**{**vars(lagging), "fetched_at": datetime(2026, 10, 19, 6)})
+        self.assertFalse(pac_sync_due(checked_today, 2026, date(2026, 9, 30), today))
+        # A new filing is due right away.
+        self.assertTrue(pac_sync_due(checked_today, 2026, date(2026, 12, 31), today))
         # ...but not forever: 90 days on, no more gifts are coming.
         self.assertFalse(pac_sync_due(lagging, 2026, date(2026, 9, 30), date(2026, 12, 30)))
 

@@ -8,9 +8,17 @@ pacs: fetch every itemized PAC gift (Form 3 line 11C) for those elections.
     Needs `totals` first; time-boxed and resumable.
 candidates: load everyone running for the House or Senate in a cycle into
     candidacies, linking sitting members and adding level='candidate'
-    officials for everyone else. `totals --candidates` and `pacs --candidates`
-    then fetch their finance detail.
+    officials for everyone else.
+
+`totals` and `pacs` work through a queue of current members (default),
+this cycle's candidacies (--candidates) or both (--all). Only targets with
+something new are due: a candidacy whose coverage date (refreshed daily by
+`candidates`) moved or whose outside spending is stale, and a member not on
+this cycle's ballot once a week. --max-requests caps a run's OpenFEC calls so
+several short runs a day share the key's 1,000 requests an hour.
 """
+
+from dataclasses import dataclass
 
 import argparse
 import os
@@ -29,7 +37,9 @@ from init_db import ensure_schema
 from sqlalchemy import func
 
 from models import Candidacy, Official, OfficialFinanceTotal, PacContribution, PacContributionSync
-from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle
+from services.candidate_races import (
+    CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle, general_election_date,
+)
 from services.finance_insights import election_periods, is_completed, pac_category
 
 BASE_URL = "https://api.open.fec.gov/v1"
@@ -55,6 +65,17 @@ PAC_MAX_PAGES = 100
 # period re-fetches each run, for at most PAC_PROCESSING_DAYS.
 PAC_CAUGHT_UP_DAYS = 30
 PAC_PROCESSING_DAYS = 90
+# Outside groups spend most in a race's final weeks, so candidates on the
+# general-election ballot refresh it every couple of days then; otherwise weekly.
+OUTSIDE_SPENDING_FINAL_DAYS = 60
+OUTSIDE_SPENDING_FINAL_REFRESH_DAYS = 2
+OUTSIDE_SPENDING_REFRESH_DAYS = 7
+# Members not running this cycle have no daily coverage date to watch; they
+# file twice a year, so a weekly look is plenty.
+MEMBER_REFRESH_DAYS = 7
+# A run stops starting new targets when fewer requests than this are left,
+# so the last one is not cut off halfway.
+TARGET_REQUEST_RESERVE = 10
 # Campaign committees whose Schedule A holds the candidate's receipts.
 CAMPAIGN_COMMITTEE_DESIGNATIONS = {"P", "A"}
 # by_candidate aggregates one row per spender and side; a big race can need
@@ -107,6 +128,22 @@ class RateLimited(RuntimeError):
     """OpenFEC asked us to wait longer than MAX_RATE_LIMIT_WAIT_SECONDS."""
 
 
+class BudgetSpent(RuntimeError):
+    """This run's --max-requests are used up."""
+
+
+_request_budget = {"used": 0, "limit": None}
+
+
+def set_request_budget(limit):
+    _request_budget.update(used=0, limit=limit)
+
+
+def requests_left():
+    limit = _request_budget["limit"]
+    return None if limit is None else limit - _request_budget["used"]
+
+
 def fec_get(path, params=None):
     """GET JSON from OpenFEC with pacing and 429/5xx backoff."""
     url = BASE_URL + path
@@ -118,6 +155,9 @@ def fec_get(path, params=None):
     last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
+        if requests_left() is not None and requests_left() <= 0:
+            raise BudgetSpent(f"Request budget of {_request_budget['limit']} used")
+        _request_budget["used"] += 1
         time.sleep(REQUEST_PAUSE_SECONDS)
         try:
             response = requests.get(url, params=query, timeout=30)
@@ -520,7 +560,8 @@ def pac_sync_due(sync, period, coverage_end_date, today=None):
         return sync.fetched_at.date() <= date(period, 12, 31)
     if sync.coverage_end_date != coverage_end_date:
         return True
-    if coverage_end_date is None:
+    # Waiting on FEC's processing is a daily check, however often runs come.
+    if coverage_end_date is None or sync.fetched_at.date() >= today:
         return False
     caught_up = sync.latest_receipt_date is not None and (
         sync.latest_receipt_date >= coverage_end_date - timedelta(days=PAC_CAUGHT_UP_DAYS)
@@ -876,172 +917,188 @@ def run_candidates(cycle=None, offices=None, state=None):
         session.close()
 
 
-def candidacies_due(session, cycle=None, state=None, office=None, official_id=None):
-    """Candidacies worth a detail sync, least recently synced and richest first."""
-    query = session.query(Candidacy).filter(
-        Candidacy.election_year == (cycle or current_cycle()),
-        Candidacy.receipts >= CANDIDATE_DETAIL_MIN_RECEIPTS,
-    )
-    if state:
-        query = query.filter(Candidacy.state == state.upper())
-    if office:
-        query = query.filter(Candidacy.office == office.upper())
-    if official_id:
-        query = query.filter(Candidacy.official_id == official_id)
-    return query.order_by(
-        Candidacy.detail_fetched_at.asc().nulls_first(), Candidacy.receipts.desc()
-    ).all()
+@dataclass
+class FinanceTarget:
+    """One official to sync, with the FEC IDs to sync them for.
+
+    candidacy is set for someone running this cycle; a member not running
+    has None.
+    """
+    official: Official
+    fec_ids: list
+    candidacy: Candidacy = None
 
 
-def run_candidate_detail(kind, cycle=None, state=None, office=None, official_id=None,
-                         limit=None, max_minutes=None):
-    """`totals` or `pacs` for candidacies, within a time budget."""
-    ensure_schema()
-    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
-    session = SessionLocal()
-    try:
-        candidacies = candidacies_due(session, cycle, state, office, official_id)
-        if limit:
-            candidacies = candidacies[:limit]
-        if not candidacies:
-            print("No candidacies to sync. Run `python fec_client.py candidates` first.")
-            return
-        synced = failed = 0
-        for index, candidacy in enumerate(candidacies, start=1):
-            if deadline and time.monotonic() > deadline:
-                print(f"Time budget of {max_minutes} minutes used; stopping. Re-run to continue.")
-                break
-            official = candidacy.official
-            print(f"[{index}/{len(candidacies)}] {candidacy.fec_candidate_id} {official.display_name}")
-            fec_ids = [candidacy.fec_candidate_id]
-            try:
-                if kind == "totals":
-                    stats = sync_official_finance(session, official, fec_ids=fec_ids)
-                    if official.level == CANDIDATE_LEVEL:
-                        stats["website"] = refresh_candidate_website(official, candidacy.fec_candidate_id)
-                    candidacy.detail_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                else:
-                    stats = sync_official_pacs(session, official, fec_ids=fec_ids)
-                session.commit()
-            except RateLimited as exc:
-                session.rollback()
-                print(f"  {exc}. Stopping; re-run later to continue.")
-                break
-            except Exception as exc:
-                session.rollback()
-                failed += 1
-                print(f"  Failed: {exc}")
-                continue
-            synced += 1
-            print(f"  {stats}")
-        print(f"Done: {synced} synced, {failed} failed, {len(candidacies)} selected.")
-    finally:
-        session.close()
+def finance_targets(session, sources, cycle=None, state=None, office=None, official_id=None):
+    """Candidacies worth a detail sync and/or current members not covered by one.
 
-
-def run_pacs(official_id=None, limit=None, max_minutes=None):
-    """Sync PAC gifts, least recently synced officials first, within a time budget."""
-    ensure_schema()
-    if not FEC_API_KEY:
-        print("WARNING: FEC_API_KEY is not set; using DEMO_KEY, which allows only a handful of requests.")
-    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
-    session = SessionLocal()
-    try:
-        last_synced = (
-            session.query(
-                PacContributionSync.official_id,
-                func.max(PacContributionSync.fetched_at).label("last_synced"),
-            )
-            .group_by(PacContributionSync.official_id)
-            .subquery()
+    A sitting member running this cycle is synced through their candidacy,
+    with their other IDs for the seat they hold after it, so a House member
+    running for the Senate keeps their House history. state and office only
+    narrow the candidacies.
+    """
+    targets = []
+    covered = set()
+    if "candidates" in sources:
+        query = session.query(Candidacy).filter(
+            Candidacy.election_year == (cycle or current_cycle()),
+            Candidacy.receipts >= CANDIDATE_DETAIL_MIN_RECEIPTS,
         )
-        query = (
-            session.query(Official)
-            .outerjoin(last_synced, last_synced.c.official_id == Official.id)
-            .filter(Official.fec_candidate_ids.isnot(None))
-        )
+        if state:
+            query = query.filter(Candidacy.state == state.upper())
+        if office:
+            query = query.filter(Candidacy.office == office.upper())
         if official_id:
-            query = query.filter(Official.id == official_id)
-        else:
-            query = query.filter(
-                Official.current_member.is_(True), Official.level == "federal"
-            )
-        officials = query.order_by(last_synced.c.last_synced.asc().nulls_first(), Official.id).all()
-        if limit:
-            officials = officials[:limit]
-        if not officials:
-            print("No officials with FEC IDs. Run `python fec_client.py crosswalk` first.")
-            return
-
-        synced = failed = 0
-        for index, official in enumerate(officials, start=1):
-            if deadline and time.monotonic() > deadline:
-                print(f"Time budget of {max_minutes} minutes used; stopping. Re-run to continue.")
-                break
-            print(f"[{index}/{len(officials)}] {official.id} {official.display_name}")
-            try:
-                stats = sync_official_pacs(session, official)
-                session.commit()
-            except RateLimited as exc:
-                session.rollback()
-                print(f"  {exc}. Stopping; re-run later to continue.")
-                break
-            except Exception as exc:
-                session.rollback()
-                failed += 1
-                print(f"  Failed: {exc}")
-                continue
-            synced += 1
-            print(
-                f"  {stats['periods']} periods fetched ({stats['gifts']} gifts), "
-                f"{stats['skipped']} up to date"
-            )
-        print(f"Done: {synced} synced, {failed} failed, {len(officials)} selected.")
-    finally:
-        session.close()
-
-
-def run_totals(official_id=None, limit=None):
-    ensure_schema()
-    if not FEC_API_KEY:
-        print("WARNING: FEC_API_KEY is not set; using DEMO_KEY, which allows only a handful of requests.")
-    session = SessionLocal()
-    try:
+            query = query.filter(Candidacy.official_id == official_id)
+        for candidacy in query.order_by(Candidacy.receipts.desc()):
+            official = candidacy.official
+            fec_ids = [candidacy.fec_candidate_id]
+            if official.level != CANDIDATE_LEVEL:
+                held = fec_ids_for_office(official.fec_candidate_ids, official.office)
+                fec_ids += [fec_id for fec_id in held if fec_id not in fec_ids]
+            targets.append(FinanceTarget(official, fec_ids, candidacy))
+            covered.add(official.id)
+    if "members" in sources:
         query = session.query(Official).filter(Official.fec_candidate_ids.isnot(None))
         if official_id:
             query = query.filter(Official.id == official_id)
         else:
-            query = query.filter(
-                Official.current_member.is_(True), Official.level == "federal"
-            )
-        officials = query.order_by(Official.id).all()
-        if limit:
-            officials = officials[:limit]
-        if not officials:
-            print("No officials with FEC IDs. Run `python fec_client.py crosswalk` first.")
-            return
+            query = query.filter(Official.current_member.is_(True), Official.level == "federal")
+        for official in query.order_by(Official.id):
+            fec_ids = fec_ids_for_office(official.fec_candidate_ids, official.office)
+            if official.id not in covered and fec_ids:
+                targets.append(FinanceTarget(official, fec_ids))
+    return targets
 
-        synced = failed = 0
-        for index, official in enumerate(officials, start=1):
-            print(f"[{index}/{len(officials)}] {official.id} {official.display_name}")
+
+def outside_spending_refresh_days(candidacy, today):
+    election = general_election_date(candidacy.election_year)
+    final_weeks = timedelta(0) <= election - today <= timedelta(days=OUTSIDE_SPENDING_FINAL_DAYS)
+    if final_weeks and candidacy.in_general_election:
+        return OUTSIDE_SPENDING_FINAL_REFRESH_DAYS
+    return OUTSIDE_SPENDING_REFRESH_DAYS
+
+
+def totals_due(target, last_synced, today):
+    """New filings for a candidacy, stale outside spending, or a member's weekly look."""
+    candidacy = target.candidacy
+    if candidacy is None:
+        return last_synced is None or (today - last_synced.date()).days >= MEMBER_REFRESH_DAYS
+    if candidacy.detail_fetched_at is None:
+        return True
+    if candidacy.coverage_end_date != candidacy.detail_coverage_end_date:
+        return True
+    if is_completed(candidacy.election_year, today):
+        return False
+    age = (today - candidacy.detail_fetched_at.date()).days
+    return age >= outside_spending_refresh_days(candidacy, today)
+
+
+def _latest_by_official(session, column):
+    return dict(
+        session.query(column.class_.official_id, func.max(column))
+        .group_by(column.class_.official_id)
+        .all()
+    )
+
+
+def due_targets(session, kind, targets, today, force=False):
+    """The targets with work to do, in the order to do it."""
+    last_totals = _latest_by_official(session, OfficialFinanceTotal.fetched_at)
+    if kind == "totals":
+        def last_synced(target):
+            if target.candidacy is not None:
+                return target.candidacy.detail_fetched_at
+            return last_totals.get(target.official.id)
+
+        due = [t for t in targets if force or totals_due(t, last_synced(t), today)]
+        # Never synced first, then the longest waiting; richest first among equals.
+        return sorted(due, key=lambda t: (
+            last_synced(t) is not None,
+            last_synced(t) or datetime.min,
+            -(t.candidacy.receipts or 0) if t.candidacy is not None else 0,
+        ))
+
+    # PACs build on totals rows, so they wait for a totals sync. Which periods
+    # need fetching is pac_sync_due's call; an up-to-date official costs nothing.
+    last_pacs = _latest_by_official(session, PacContributionSync.fetched_at)
+    ready = [
+        t for t in targets
+        if (t.candidacy.detail_fetched_at is not None if t.candidacy is not None
+            else t.official.id in last_totals)
+    ]
+    return sorted(ready, key=lambda t: (
+        t.official.id in last_pacs, last_pacs.get(t.official.id) or datetime.min, t.official.id,
+    ))
+
+
+def sync_target(session, kind, target, today=None):
+    official, candidacy = target.official, target.candidacy
+    if kind == "pacs":
+        return sync_official_pacs(session, official, today, fec_ids=target.fec_ids)
+    stats = sync_official_finance(session, official, today, fec_ids=target.fec_ids)
+    if candidacy is not None:
+        if official.level == CANDIDATE_LEVEL:
+            stats["website"] = refresh_candidate_website(official, candidacy.fec_candidate_id)
+        candidacy.detail_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        candidacy.detail_coverage_end_date = candidacy.coverage_end_date
+    return stats
+
+
+def run_finance(kind, sources, cycle=None, state=None, office=None, official_id=None,
+                limit=None, max_minutes=None, max_requests=None, today=None):
+    """`totals` or `pacs` for the due targets, within time and request budgets."""
+    ensure_schema()
+    if not FEC_API_KEY:
+        print("WARNING: FEC_API_KEY is not set; using DEMO_KEY, which allows only a handful of requests.")
+    today = today or date.today()
+    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
+    set_request_budget(max_requests)
+    session = SessionLocal()
+    try:
+        targets = finance_targets(session, sources, cycle, state, office, official_id)
+        if not targets:
+            print("Nothing to sync. Run `crosswalk` (members) or `candidates` first.")
+            return
+        # Naming an official syncs them whether or not anything is due.
+        due = due_targets(session, kind, targets, today, force=bool(official_id))
+        if limit:
+            due = due[:limit]
+        print(f"{len(due)} of {len(targets)} targets due for {kind}.")
+        synced = idle = failed = 0
+        for index, target in enumerate(due, start=1):
+            if deadline and time.monotonic() > deadline:
+                print(f"Time budget of {max_minutes} minutes used; stopping. Re-run to continue.")
+                break
+            left = requests_left()
+            if left is not None and left < TARGET_REQUEST_RESERVE:
+                print(f"Request budget of {max_requests} used; stopping. Re-run to continue.")
+                break
+            official = target.official
+            label = f"[{index}/{len(due)}] {' '.join(target.fec_ids)} {official.display_name}"
+            used_before = _request_budget["used"]
             try:
-                stats = sync_official_finance(session, official)
+                stats = sync_target(session, kind, target, today)
                 session.commit()
-            except RateLimited as exc:
+            except (RateLimited, BudgetSpent) as exc:
                 session.rollback()
-                print(f"  {exc}. Stopping; re-run later to continue.")
+                print(f"{label}\n  {exc}. Stopping; re-run later to continue.")
                 break
             except Exception as exc:
                 session.rollback()
                 failed += 1
-                print(f"  Failed: {exc}")
+                print(f"{label}\n  Failed: {exc}")
+                continue
+            if _request_budget["used"] == used_before:
+                # PACs already up to date; not worth a log line each.
+                idle += 1
                 continue
             synced += 1
-            print(
-                f"  {stats['elections']} elections, {stats['breakdowns']} breakdowns and "
-                f"{stats['outside_spending']} outside-spending totals refreshed"
-            )
-        print(f"Done: {synced} synced, {failed} failed, {len(officials)} selected.")
+            print(f"{label}\n  {stats}")
+        print(
+            f"Done: {synced} synced, {idle} already up to date, {failed} failed, {len(due)} due; "
+            f"{_request_budget['used']} requests."
+        )
     finally:
         session.close()
 
@@ -1055,20 +1112,11 @@ def main():
     )
     totals = subparsers.add_parser(
         "totals",
-        help="Fetch campaign totals and breakdowns for current federal officials.",
+        help="Fetch campaign totals and breakdowns for whoever has new filings.",
     )
-    totals.add_argument("--official-id", help="Only this bioguide ID (current or not).")
-    totals.add_argument("--limit", type=int, help="Stop after this many officials.")
     pacs = subparsers.add_parser(
         "pacs",
-        help="Fetch every itemized PAC gift for current federal officials (run totals first).",
-    )
-    pacs.add_argument("--official-id", help="Only this bioguide ID (current or not).")
-    pacs.add_argument("--limit", type=int, help="Stop after this many officials.")
-    pacs.add_argument(
-        "--max-minutes",
-        type=float,
-        help="Stop starting new officials after this many minutes; the next run continues.",
+        help="Fetch every itemized PAC gift that is due (run totals first).",
     )
     candidates = subparsers.add_parser(
         "candidates",
@@ -1078,19 +1126,31 @@ def main():
     candidates.add_argument("--office", choices=sorted(CANDIDATE_OFFICES), help="Only S or H.")
     candidates.add_argument("--state", help="Only this postal abbreviation.")
     for sub in (totals, pacs):
-        sub.add_argument(
+        group = sub.add_mutually_exclusive_group()
+        group.add_argument(
             "--candidates",
             action="store_true",
-            help=f"Sync this cycle's candidacies that raised at least ${CANDIDATE_DETAIL_MIN_RECEIPTS:,.0f} instead.",
+            help=f"This cycle's candidacies that raised at least ${CANDIDATE_DETAIL_MIN_RECEIPTS:,.0f}, "
+                 "instead of current members.",
         )
-        sub.add_argument("--cycle", type=int, help="With --candidates: election year.")
-        sub.add_argument("--state", help="With --candidates: only this postal abbreviation.")
-        sub.add_argument("--office", choices=sorted(CANDIDATE_OFFICES), help="With --candidates: only S or H.")
-    totals.add_argument(
-        "--max-minutes",
-        type=float,
-        help="With --candidates: stop starting new candidates after this many minutes.",
-    )
+        group.add_argument(
+            "--all", action="store_true", help="Candidacies and the current members not running."
+        )
+        sub.add_argument("--official-id", help="Only this official, whether or not anything is due.")
+        sub.add_argument("--limit", type=int, help="Stop after this many officials.")
+        sub.add_argument("--cycle", type=int, help="Candidacies' election year.")
+        sub.add_argument("--state", help="Only candidacies in this postal abbreviation.")
+        sub.add_argument("--office", choices=sorted(CANDIDATE_OFFICES), help="Only S or H candidacies.")
+        sub.add_argument(
+            "--max-minutes",
+            type=float,
+            help="Stop starting new officials after this many minutes; the next run continues.",
+        )
+        sub.add_argument(
+            "--max-requests",
+            type=int,
+            help="Stop after this many OpenFEC requests; the next run continues.",
+        )
     args = parser.parse_args()
 
     if args.command == "crosswalk":
@@ -1099,20 +1159,22 @@ def main():
         run_candidates(
             cycle=args.cycle, offices=[args.office] if args.office else None, state=args.state
         )
-    elif args.candidates:
-        run_candidate_detail(
+    else:
+        if args.all:
+            sources = {"candidates", "members"}
+        else:
+            sources = {"candidates"} if args.candidates else {"members"}
+        run_finance(
             args.command,
+            sources,
             cycle=args.cycle,
             state=args.state,
             office=args.office,
             official_id=args.official_id,
             limit=args.limit,
             max_minutes=args.max_minutes,
+            max_requests=args.max_requests,
         )
-    elif args.command == "totals":
-        run_totals(official_id=args.official_id, limit=args.limit)
-    elif args.command == "pacs":
-        run_pacs(official_id=args.official_id, limit=args.limit, max_minutes=args.max_minutes)
 
 
 if __name__ == "__main__":

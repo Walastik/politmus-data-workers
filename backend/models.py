@@ -523,7 +523,10 @@ class Candidacy(Base):
     # results, so this is how primary losers drop out of a race.
     in_general_election = Column(Boolean, nullable=False, default=False, server_default="false")
     fetched_at = Column(DateTime, nullable=True)
-    # Last `totals --candidates` sync; oldest go first.
+    # Last totals sync; oldest go first.
     detail_fetched_at = Column(DateTime, nullable=True)
+    # coverage_end_date as of that sync. When the daily load moves
+    # coverage_end_date past it, the candidacy has new filings to fetch.
+    detail_coverage_end_date = Column(Date, nullable=True)
 
     official = relationship("Official")
