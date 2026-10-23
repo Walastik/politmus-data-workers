@@ -923,6 +923,105 @@ class SyncHouseVotesTests(unittest.TestCase):
         self.assertTrue(all(vote.roll_call_id == 3 for vote in votes))
 
 
+class SyncBillSenateVotesTests(unittest.TestCase):
+    SENATE_ACTIONS = [
+        {
+            "recordedVotes": [
+                {
+                    "chamber": "Senate",
+                    "congress": 119,
+                    "sessionNumber": 1,
+                    "rollNumber": 1,
+                    "date": "2025-01-09T19:54:00Z",
+                },
+                {
+                    "chamber": "Senate",
+                    "congress": 119,
+                    "sessionNumber": 1,
+                    "rollNumber": 7,
+                    "date": "2025-01-20T19:54:00Z",
+                },
+            ]
+        }
+    ]
+
+    def _sync(self):
+        from congress_client import sync_bill_votes
+        from models import Bill
+
+        session = MagicMock()
+        session.get.return_value = Bill(id="119-s-5", title="Laken Riley Act")
+        return sync_bill_votes(
+            119, "s", 5, session=session, official_ids=set(), ensure_bill=False
+        )
+
+    @patch("congress_client.load_senator_lookup", return_value={})
+    @patch("congress_client.load_senate_roll_calls", return_value={})
+    @patch("congress_client.sync_senate_votes")
+    @patch("congress_client.fetch_bill_actions")
+    def test_senate_gov_block_does_not_abort_bill(
+        self, mock_actions, mock_senate, _roll_calls, _lookup
+    ):
+        import requests
+
+        mock_actions.return_value = self.SENATE_ACTIONS
+        mock_senate.side_effect = [
+            requests.HTTPError("403 Client Error: Forbidden"),
+            {
+                "inserted": 100,
+                "updated": 0,
+                "unchanged": 0,
+                "skipped_unknown_officials": 0,
+                "not_found": False,
+                "skipped_no_bill": False,
+            },
+        ]
+
+        stats = self._sync()
+
+        self.assertEqual(mock_senate.call_count, 2)
+        self.assertEqual(stats["senate_roll_calls_failed"], 1)
+        self.assertEqual(stats["senate_roll_calls"], 1)
+        self.assertEqual(stats["inserted"], 100)
+
+    @patch("congress_client.load_senator_lookup", return_value={})
+    @patch("congress_client.load_senate_roll_calls")
+    @patch("congress_client.sync_senate_votes")
+    @patch("congress_client.fetch_bill_actions")
+    def test_skips_senate_roll_calls_already_ingested(
+        self, mock_actions, mock_senate, mock_roll_calls, _lookup
+    ):
+        from congress_client import SENATE_ROLL_CALL_INGESTED
+        from models import SenateRollCall
+
+        mock_actions.return_value = self.SENATE_ACTIONS
+        mock_roll_calls.return_value = {
+            (119, 1, 1): SenateRollCall(
+                congress=119, session=1, vote_number=1,
+                status=SENATE_ROLL_CALL_INGESTED,
+            ),
+            (119, 1, 7): SenateRollCall(
+                congress=119, session=1, vote_number=7, status="failed",
+            ),
+        }
+        mock_senate.return_value = {
+            "inserted": 0,
+            "updated": 0,
+            "unchanged": 100,
+            "skipped_unknown_officials": 0,
+            "not_found": False,
+            "skipped_no_bill": False,
+        }
+
+        stats = self._sync()
+
+        mock_roll_calls.assert_called_once()
+        mock_senate.assert_called_once()
+        self.assertEqual(mock_senate.call_args.args[2], 7)
+        self.assertEqual(stats["senate_roll_calls_skipped"], 1)
+        self.assertEqual(stats["senate_roll_calls"], 1)
+
+
 class SyncHouseSessionVotesTests(unittest.TestCase):
     @patch("congress_client.refresh_bill_status")
     @patch("congress_client.sync_bill_votes")

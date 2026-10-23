@@ -2537,6 +2537,7 @@ def sync_bill_votes(
         "house_roll_calls": 0,
         "senate_roll_calls": 0,
         "senate_roll_calls_skipped": 0,
+        "senate_roll_calls_failed": 0,
         "inserted": 0,
         "updated": 0,
         "unchanged": 0,
@@ -2590,6 +2591,7 @@ def sync_bill_votes(
         recorded = _recorded_votes_from_actions(actions)
         unknown_officials = set()
         senator_lookup = None
+        senate_roll_calls = {}
 
         for vote in recorded:
             session_number = vote.get("sessionNumber")
@@ -2600,22 +2602,47 @@ def sync_bill_votes(
                 if session_number is None or roll_number is None:
                     stats["senate_roll_calls_skipped"] += 1
                     continue
+                vote_congress = vote.get("congress") or congress
+                session_key = (int(vote_congress), int(session_number))
+                if session_key not in senate_roll_calls:
+                    senate_roll_calls[session_key] = load_senate_roll_calls(
+                        session, vote_congress, session_number
+                    )
+                roll_calls = senate_roll_calls[session_key]
+                tracked = roll_calls.get(
+                    senate_roll_call_key(vote_congress, session_number, roll_number)
+                )
+                # Senate roll calls are final once recorded; skip the refetch.
+                if tracked is not None and tracked.status == SENATE_ROLL_CALL_INGESTED:
+                    stats["senate_roll_calls_skipped"] += 1
+                    continue
                 if senator_lookup is None:
                     senator_lookup = load_senator_lookup(session)
-                stats["senate_roll_calls"] += 1
                 print(
                     f"  Senate roll call {roll_number} "
-                    f"(congress {vote.get('congress') or congress}, "
-                    f"session {session_number})"
+                    f"(congress {vote_congress}, session {session_number})"
                 )
-                senate_stats = sync_senate_votes(
-                    vote.get("congress") or congress,
-                    session_number,
-                    roll_number,
-                    db_session=session,
-                    senator_lookup=senator_lookup,
-                    expected_bill_id=bill_id,
-                )
+                try:
+                    senate_stats = sync_senate_votes(
+                        vote_congress,
+                        session_number,
+                        roll_number,
+                        db_session=session,
+                        senator_lookup=senator_lookup,
+                        expected_bill_id=bill_id,
+                        roll_calls=roll_calls,
+                    )
+                except requests.RequestException as exc:
+                    # Senate.gov's WAF blocks some hosts (403). The fetch runs
+                    # before any writes, and the senate-votes job retries any
+                    # roll call not yet ingested, so keep ingesting bills.
+                    print(
+                        f"  FAILED Senate roll call {roll_number}: {exc}; "
+                        "leaving it for senate-votes."
+                    )
+                    stats["senate_roll_calls_failed"] += 1
+                    continue
+                stats["senate_roll_calls"] += 1
                 stats["inserted"] += senate_stats["inserted"]
                 stats["updated"] += senate_stats["updated"]
                 stats["unchanged"] += senate_stats["unchanged"]
@@ -2690,6 +2717,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True, sinc
         "votes_skipped_unknown_officials": 0,
         "senate_roll_calls": 0,
         "senate_roll_calls_skipped": 0,
+        "senate_roll_calls_failed": 0,
         "house_roll_calls": 0,
     }
 
@@ -2791,6 +2819,9 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True, sinc
                 stats["senate_roll_calls_skipped"] += vote_stats[
                     "senate_roll_calls_skipped"
                 ]
+                stats["senate_roll_calls_failed"] += vote_stats[
+                    "senate_roll_calls_failed"
+                ]
                 stats["house_roll_calls"] += vote_stats["house_roll_calls"]
                 print(
                     f"  Votes: inserted={vote_stats['inserted']} "
@@ -2826,6 +2857,7 @@ def _print_bill_stats(stats):
     print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
     print(f"  Senate roll calls ingested: {stats.get('senate_roll_calls', 0)}")
     print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
+    print(f"  Senate roll calls failed:   {stats['senate_roll_calls_failed']}")
     print(f"  Votes inserted:             {stats['votes_inserted']}")
     print(f"  Votes updated:              {stats['votes_updated']}")
     print(f"  Votes unchanged:            {stats['votes_unchanged']}")
@@ -2840,6 +2872,7 @@ def _print_vote_stats(stats):
     print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
     print(f"  Senate roll calls ingested: {stats.get('senate_roll_calls', 0)}")
     print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
+    print(f"  Senate roll calls failed:   {stats['senate_roll_calls_failed']}")
     print(f"  Votes inserted:             {stats['inserted']}")
     print(f"  Votes updated:              {stats['updated']}")
     print(f"  Votes unchanged:            {stats['unchanged']}")
