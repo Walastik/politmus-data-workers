@@ -327,6 +327,8 @@ The lab report lists each fixture official's near misses (similar names just bel
 
 ### `lab.py` (scoring lab)
 
+For the step-by-step tuning loop and how to roll a change out afterwards, see [docs/scoring-tuning.md](docs/scoring-tuning.md).
+
 A fast loop for tuning the bill prompt, the positions prompt, and scoring on a small fixed set: one broad and one narrow bill (plus a bill for any chamber those two miss) and three officials per party, each party with at least one senator and one representative who voted on them. It runs the real workers against the `DATABASE_URL` database, so the fixture rows are updated in place.
 
 ```bash
