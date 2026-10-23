@@ -130,6 +130,19 @@ python congress_client.py senate-votes --congress 119 --session 1
 python congress_client.py enrich
 ```
 
+**House votes catch-up** — the `bills` command only sees recently updated bills, so House roll calls on bills it missed never arrived (the Senate has its own menu sweep). This compares each session's Congress.gov `house-vote` list to `roll_calls` and fetches only the missing ones, creating bills that are not stored yet. The first run backfills every House vote of the congress; later runs are two list requests per session:
+
+```bash
+python congress_client.py house-votes --congress 119 --all-sessions
+```
+
+**Bill context** (`bill_context.py`) — for voted bills, stores what explains how a bill was received: amendments filed (`bill_amendments`: sponsor, party, latest action, the start of their text), floor speeches from the Congressional Record and committee report minority / dissenting / additional views (`bill_sources`: speaker, party, text), the full action list (`bills.actions`), and links to committee reports and CBO estimates (`bills.documents`). Speeches come from Record articles headed with the bill's short title or number, on the days of its floor actions (and the days between actions up to two weeks apart); speakers are matched to officials by surname, chamber and state. A bill is re-fetched only when its latest action changes:
+
+```bash
+python congress_client.py context --limit 40
+python congress_client.py context --bill-id 119-hr-9340
+```
+
 **Extract bill effects (superseded)** — the bill classifier (`scripts/classify_bills.py`, below) now writes `bill_effects` from the same run as the drawer's intents; stop this worker's cron once the classifier has run. It sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores normalized policy facts: a growing `policy_targets` catalog (the nouns, e.g. ICE, Voting Eligibility) and one `bill_effects` row per fact (`mechanism`, `direction`, `magnitude`, `rationale`). Only bills with a summary and no effects yet are processed, unless you pass `--force`. Extraction rules live in `extraction_guidelines` so you can update the prompt in Postgres without changing worker code.
 
 Requires a running Ollama instance (default `http://localhost:11434`) and a pulled model such as `qwen2.5-coder:32b`. The worker is meant to run on the Mac Mini that hosts Ollama, pointed at the same `DATABASE_URL` as the rest of the pipeline.
@@ -192,6 +205,17 @@ caffeinate -i ./scripts/run_classifier.sh --limit 0 2>&1 | tee -a ~/bill_classif
 ```
 
 On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`, and check `ollama list` shows the model tag.
+
+**Legal force.** Each intent also has a `legal_force` (`binding`, `conditional`, `advisory`, `expresses_view`), and the request tells the model to keep it in the TLDR and ELI5, so a bill that "requires states to consider" a standard is not summarized as one that requires the standard. That rule is in the request (`services/bill_classification.py`), not the local prompts. Scoring leaves advisory and sense-of-Congress provisions out (`non_binding_provision`).
+
+### `debate_worker.py` (run as `scripts/run_debate.sh`)
+
+Writes "Where the sides disagree" in the bill drawer (`bills.debate_metadata`): one neutral sentence naming the dispute and each side's main arguments, from the floor speeches and committee views `congress_client.py context` stored, with a local Ollama model (same defaults as the classifier; `DEBATE_MODEL` overrides). The rules are in `services/bill_debate.py`, and neutrality is enforced in code: every argument must quote its source word for word or it is dropped; the speaker, party and Record link come from the stored source, not the model; sides are assigned by what members argued, not by party; both sides keep the same number of points; loaded wording outside quotes drops the point. A bill is due when its sources, the prompt, or the model change. The prompt is `DEFAULT_DEBATE_PROMPT` unless the gitignored `backend/scripts/debate_llm_config.py` defines `DEBATE_PROMPT`.
+
+```bash
+./scripts/run_debate.sh --bill-id 119-hr-9340 --dry-run
+./scripts/run_debate.sh --limit 50
+```
 
 **Prompts are local, not in the repo.** The worker reads `SYSTEM_PROMPT` (and optionally `SUMMARY_PROMPT`, for the TLDR/ELI5 call) from `backend/scripts/llm_config.py`, which is gitignored. A `ClassificationMetadata` class left in that file is ignored; the schema is in the repo. To start from scratch:
 
@@ -424,6 +448,8 @@ fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.p
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py bills"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py enrich"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py senate-votes --congress 119 --all-sessions"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py house-votes --congress 119 --all-sessions"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py context --limit 200"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py crosswalk"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py totals"

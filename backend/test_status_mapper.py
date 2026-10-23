@@ -122,6 +122,27 @@ class DeriveBillStatusTests(unittest.TestCase):
         )
         self.assertEqual(status, STATUS_PASSED_HOUSE)
 
+    def test_suspension_passage_and_procedural_senate_vote(self):
+        # 119-hr-9340: passed the House under suspension, then failed a
+        # Senate cloture vote, which is not a vote on passage.
+        status = derive_bill_status(
+            "Motion to proceed to consideration of measure withdrawn in Senate.",
+            origin_chamber="house",
+            roll_calls=[
+                {
+                    "chamber": "House",
+                    "question": "On Motion to Suspend the Rules and Pass, as Amended",
+                    "result": "Passed",
+                },
+                {
+                    "chamber": "Senate",
+                    "question": "On Cloture on the Motion to Proceed H.R. 9340",
+                    "result": "Cloture on the Motion to Proceed Rejected",
+                },
+            ],
+        )
+        self.assertEqual(status, STATUS_PASSED_HOUSE)
+
     def test_roll_calls_both_chambers_beat_one_chamber_action(self):
         status = derive_bill_status(
             "Passed/agreed to in House: On passage Passed",

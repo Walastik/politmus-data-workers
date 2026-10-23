@@ -18,6 +18,8 @@ twice is not double counted. Bills must be classified (status ok).
 
 Not every match counts (apply_rules keeps the rest, with a reason, so the
 drawer can show them):
+- non-binding provisions (legal_force advisory or expresses_view: the bill
+  asks someone to consider a change, or states a view, without making it);
 - low-emphasis positions (inferred from a slogan or value statement);
 - local positions (one district, state, facility) on a broad bill;
 - medium-emphasis positions on an unrelated add-on (relation secondary), or
@@ -49,10 +51,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from models import OfficialScore, OfficialStance, RollCall, Vote, VoteAlignment
+from services.bill_effects import NON_BINDING_FORCES
+from services.vote_questions import is_passage_question
 
 # Bump when scoring rules or the stored row shape change; every official is
 # rewritten on the next run.
-ENGINE_VERSION = "accountability-v3"
+ENGINE_VERSION = "accountability-v4"
 
 # Unreviewed target_matches pairs at least this similar count as the same
 # target; reviewed pairs follow their verdict. An exact target match always
@@ -63,6 +67,7 @@ TARGET_MATCH_THRESHOLD = float(os.getenv("TARGET_MATCH_THRESHOLD", "0.85"))
 # reconciliation): one vote on it says little about any single provision.
 BROAD_BILL_MIN_EFFECTS = 10
 
+REASON_NON_BINDING = "non_binding_provision"
 REASON_LOW_EMPHASIS = "low_emphasis"
 REASON_LOCAL_ON_BROAD = "local_on_broad_bill"
 REASON_UNRELATED_PROVISION = "unrelated_provision"
@@ -72,59 +77,6 @@ REASON_LATER_VOTE = "later_vote"
 SCORED_POSITIONS = ("Yes", "No")
 _OPPOSITES = {("increase", "decrease"), ("decrease", "increase")}
 _EMPHASIS_RANK = {"high": 0, "medium": 1, "low": 2}
-
-# Procedural motions: a Yes here is not a vote for the bill's contents.
-_PROCEDURAL = (
-    "recommit",
-    "commit",
-    "previous question",
-    "table",
-    "proceed",
-    "cloture",
-    "adjourn",
-    "reconsider",
-    "postpone",
-    "instruct",
-    "waive",
-    "point of order",
-    "quorum",
-    "consider",
-    "rule",
-)
-_PASSAGE = (
-    "passage",
-    "pass",
-    "agree to the resolution",
-    "agreeing to the resolution",
-    "the resolution",
-    "joint resolution",
-    "concurrent resolution",
-    "conference report",
-    "concur",
-    "overrid",
-    "objections of the president notwithstanding",
-)
-
-
-def is_passage_question(question: str | None) -> bool:
-    """True for votes on the bill itself: passage, suspension passage,
-    adopting the resolution or conference report, concurring in the other
-    chamber's amendment, and veto overrides. Procedural motions and votes
-    on amendments are excluded."""
-    q = " ".join((question or "").lower().split())
-    if not q:
-        return False
-    # Accepting the other chamber's amendment is the bill's final passage.
-    other_chamber = "concur" in q or "senate amendment" in q or "house amendment" in q
-    if "amendment" in q and not other_chamber:
-        return False
-    # Suspension votes pass the bill outright despite containing "rules".
-    if q.startswith("on motion to suspend the rules and"):
-        return True
-    if any(word in q for word in _PROCEDURAL):
-        return False
-    return other_chamber or any(word in q for word in _PASSAGE)
-
 
 def alignment_points(stance_direction: str | None, effect_direction: str | None, position: str | None) -> int:
     """+1 when the vote moves the target the way the official says they
@@ -164,6 +116,7 @@ class Alignment:
     policy_area: str | None
     points: int
     effect_relation: str | None = None
+    effect_legal_force: str | None = None
     stance_scope: str | None = None
     bill_effect_count: int | None = None
     counted: bool = True
@@ -197,7 +150,7 @@ class Alignment:
             self.stance_evidence_quote, self.stance_source_url, self.policy_area,
             self.points, self.effect_relation, self.stance_scope, self.bill_effect_count,
             self.counted, self.reason, self.stance_target_id, self.stance_target_name,
-            self.match_similarity, self.match_inverse,
+            self.match_similarity, self.match_inverse, self.effect_legal_force,
         ]
 
 
@@ -209,6 +162,8 @@ def inputs_hash(alignments: Iterable[Alignment]) -> str:
 
 def rule_reason(a: Alignment) -> str | None:
     """Why a match is kept out of the score, or None if it counts."""
+    if a.effect_legal_force in NON_BINDING_FORCES:
+        return REASON_NON_BINDING
     if a.stance_emphasis == "low":
         return REASON_LOW_EMPHASIS
     if a.broad_bill and a.stance_scope == "local":
@@ -347,7 +302,7 @@ pairs AS (
         lv.position, e.target_id, e.mechanism, e.direction AS effect_direction,
         e.magnitude, e.rationale, e.relation, s.direction, s.emphasis, s.summary,
         s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area) AS policy_area,
-        s.scope, s.target_id AS stance_target_id, l.similarity, l.inverse
+        s.scope, s.target_id AS stance_target_id, l.similarity, l.inverse, e.legal_force
     FROM latest_votes lv
     JOIN bills b ON b.id = lv.bill_id AND b.classification_status = 'ok'
     JOIN bill_effects e ON e.bill_id = lv.bill_id
@@ -363,7 +318,7 @@ SELECT p.official_id, p.bill_id, p.roll_call_id, p.chamber, p.date,
        p.magnitude, p.rationale, p.direction, p.emphasis, p.summary,
        p.evidence_quote, p.source_url, p.policy_area,
        p.relation, p.scope, bs.effects, p.stance_target_id, st.name, p.similarity,
-       p.inverse
+       p.inverse, p.legal_force
 FROM pairs p
 JOIN bill_sizes bs ON bs.bill_id = p.bill_id
 JOIN policy_targets t ON t.id = p.target_id
@@ -405,7 +360,7 @@ def compute_alignments(
             policy_area=row[17], effect_relation=row[18],
             stance_scope=row[19], bill_effect_count=row[20], stance_target_id=row[21],
             stance_target_name=row[22], match_similarity=row[23], match_inverse=bool(row[24]),
-            points=0,
+            effect_legal_force=row[25], points=0,
         )
         points = alignment_points(alignment.stance_direction, alignment.compared_direction, alignment.vote_position)
         if points == 0:
@@ -452,7 +407,8 @@ def _write(session: Session, official_id: str, alignments: list[Alignment], dige
             stance_emphasis=a.stance_emphasis, stance_summary=a.stance_summary,
             stance_evidence_quote=a.stance_evidence_quote,
             stance_source_url=a.stance_source_url, policy_area=a.policy_area,
-            effect_relation=a.effect_relation, stance_scope=a.stance_scope,
+            effect_relation=a.effect_relation, effect_legal_force=a.effect_legal_force,
+            stance_scope=a.stance_scope,
             bill_effect_count=a.bill_effect_count, stance_target_id=a.stance_target_id,
             stance_target_name=a.stance_target_name, match_similarity=a.match_similarity,
             match_inverse=a.match_inverse, points=a.points,

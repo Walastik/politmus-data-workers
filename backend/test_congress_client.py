@@ -923,6 +923,63 @@ class SyncHouseVotesTests(unittest.TestCase):
         self.assertTrue(all(vote.roll_call_id == 3 for vote in votes))
 
 
+class SyncHouseSessionVotesTests(unittest.TestCase):
+    @patch("congress_client.refresh_bill_status")
+    @patch("congress_client.sync_bill_votes")
+    @patch("congress_client.sync_house_roll_call")
+    @patch("congress_client.load_official_ids")
+    @patch("congress_client.load_house_source_roll_call_ids")
+    @patch("congress_client.fetch_house_vote_list")
+    def test_fetches_only_missing_roll_calls(
+        self, mock_list, mock_stored, mock_officials, mock_roll_call, mock_bill_votes, mock_refresh
+    ):
+        from congress_client import sync_house_session_votes
+        from models import Bill
+
+        def vote(roll, bill_type="HR", number="9340"):
+            return {
+                "rollCallNumber": roll,
+                "legislationType": bill_type,
+                "legislationNumber": number,
+                "startDate": "2026-09-16T18:53:00-04:00",
+            }
+
+        mock_list.return_value = [
+            vote(312),
+            vote(311),  # already stored
+            {"rollCallNumber": 5},  # quorum call: no legislation
+            vote(400, number="77"),  # bill not in the database yet
+        ]
+        # The new bill's sync_bill_votes stores roll 400 itself.
+        mock_stored.side_effect = [
+            {"house-119-2-00311"},
+            {"house-119-2-00311", "house-119-2-00400"},
+        ]
+        mock_officials.return_value = {"A000055"}
+        mock_roll_call.return_value = {"inserted": 3, "updated": 0, "unchanged": 0}
+        mock_bill_votes.return_value = {
+            "inserted": 2, "updated": 0, "unchanged": 0, "skipped_unknown_officials": 0,
+        }
+        existing = Bill(id="119-hr-9340", title="Ratepayer Protection Act")
+        session = MagicMock()
+        session.get.side_effect = lambda model, bill_id: existing if bill_id == "119-hr-9340" else None
+
+        stats = sync_house_session_votes(119, 2, db_session=session)
+
+        self.assertEqual(
+            (stats["listed"], stats["already_stored"], stats["no_legislation"]), (4, 1, 1)
+        )
+        self.assertEqual((stats["fetched"], stats["bills_created"], stats["inserted"]), (2, 1, 5))
+        mock_roll_call.assert_called_once()
+        self.assertEqual(mock_roll_call.call_args.args[:5], (session, "119-hr-9340", 119, 2, 312))
+        mock_bill_votes.assert_called_once()
+        self.assertEqual(mock_bill_votes.call_args.args, (119, "HR", "77"))
+        self.assertEqual(existing.voted_date, date(2026, 9, 16))
+        self.assertEqual(
+            sorted(c.args[1] for c in mock_refresh.call_args_list), ["119-hr-77", "119-hr-9340"]
+        )
+
+
 class FetchRecentBillsTests(unittest.TestCase):
     def test_sorts_by_update_and_follows_pagination_until_limit(self):
         pages = [

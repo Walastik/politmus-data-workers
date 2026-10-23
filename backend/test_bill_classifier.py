@@ -75,6 +75,7 @@ def intent(**overrides) -> dict:
         "direction": "increase",
         "magnitude": "high",
         "relation": "core",
+        "legal_force": "binding",
         "rationale": "Adds $2 billion to the fund.",
     }
     data.update(overrides)
@@ -154,7 +155,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(data["eli5"], ELI5)
         self.assertEqual(
             set(data["intents"][0]),
-            {"target", "mechanism", "direction", "magnitude", "relation", "rationale", "citation"},
+            {"target", "mechanism", "direction", "magnitude", "relation", "legal_force", "rationale", "citation"},
         )
         self.assertEqual((data["model"], data["version"], data["chunks"]), ("m", "v", 3))
         self.assertEqual(data["rejected"], {REJECT_CITATION: 2})
@@ -321,6 +322,15 @@ class ClassifyShortBillTests(unittest.TestCase):
         self.assertIn("<summary>", model.calls[0][1])
         self.assertIn("Title: Clean Water Funding Act", model.calls[0][1])
 
+    def test_messages_ask_to_keep_legal_force_and_metadata_records_it(self):
+        model = FakeModel(full=full_json(intent(legal_force="advisory")))
+        result = classify_bill(BILL, self.text, prompt="P", chat_fn=model)
+        self.assertIn("Keep the legal force", model.calls[0][1])
+        self.assertIn("expresses_view:", model.calls[0][1])
+        metadata = result.metadata(model="m", version="v", classified_at="t")
+        self.assertEqual(metadata["intents"][0]["legal_force"], "advisory")
+        self.assertEqual(result.effects_output().effects[0].legal_force, "advisory")
+
     def test_missing_eli5_is_filled_by_a_summaries_call(self):
         model = FakeModel(
             full=full_json(intent(), eli5=""),
@@ -329,7 +339,8 @@ class ClassifyShortBillTests(unittest.TestCase):
         result = classify_bill(BILL, self.text, prompt="P", summary_prompt="S", chat_fn=model)
         self.assertEqual(model.kinds(), ["full", "summaries"])
         self.assertEqual(result.eli5, ELI5)
-        self.assertIn("Clean Water State Revolving Fund / funding / increase", model.calls[1][1])
+        self.assertIn("Clean Water State Revolving Fund / funding / increase (high, binding)", model.calls[1][1])
+        self.assertIn("Keep the legal force", model.calls[1][1])
         self.assertIn("previous answer left tldr or eli5 empty", model.calls[1][1])
 
     def test_still_missing_raises_incomplete(self):
@@ -419,7 +430,7 @@ class ClassifyLongBillTests(unittest.TestCase):
 class VersionTests(unittest.TestCase):
     def test_version_changes_with_prompts_and_model(self):
         base = classifier_version(("system",), "qwen3.6:27b")
-        self.assertTrue(base.startswith("bills-v2|p"))
+        self.assertTrue(base.startswith("bills-v3|p"))
         self.assertTrue(base.endswith("|qwen3.6:27b"))
         self.assertNotEqual(base, classifier_version(("system2",), "qwen3.6:27b"))
         self.assertNotEqual(base, classifier_version(("system", "summary"), "qwen3.6:27b"))

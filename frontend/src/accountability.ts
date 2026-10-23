@@ -43,6 +43,8 @@ export const BROAD_BILL_MIN_EFFECTS = 10
 
 // Why a match is kept out of the score (VoteAlignment.reason).
 export const NOT_COUNTED_REASONS: Record<string, string> = {
+  non_binding_provision:
+    'this provision only asks for a change to be considered, or states a view, without making it',
   low_emphasis: 'the position is only implied by a general statement',
   local_on_broad_bill: 'a local position does not say much about a vote on a broad bill',
   unrelated_provision:

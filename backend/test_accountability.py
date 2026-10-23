@@ -13,6 +13,7 @@ from services.accountability import (
     REASON_LOCAL_ON_BROAD,
     REASON_LOW_EMPHASIS,
     REASON_MINOR_PROVISION,
+    REASON_NON_BINDING,
     REASON_UNRELATED_PROVISION,
     Alignment,
     alignment_points,
@@ -155,6 +156,12 @@ class RuleTests(unittest.TestCase):
         [a] = apply_rules([_alignment(1)])
         self.assertTrue(a.counted)
         self.assertIsNone(a.reason)
+
+    def test_non_binding_provisions_never_count(self):
+        for force in ("advisory", "expresses_view"):
+            self.assertEqual(self.reasons(_alignment(1, effect_legal_force=force)), [REASON_NON_BINDING])
+        for force in ("binding", "conditional", None):
+            self.assertEqual(self.reasons(_alignment(1, effect_legal_force=force)), [None])
 
     def test_low_emphasis_never_counts(self):
         self.assertEqual(self.reasons(_alignment(1, stance_emphasis="low")), [REASON_LOW_EMPHASIS])
