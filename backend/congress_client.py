@@ -435,14 +435,56 @@ def parse_senate_vote_xml(xml_bytes, congress=None):
     }
 
 
-def senate_get(url):
-    """GET bytes from Senate.gov with polite pacing, browser headers, proxy support, and 429/5xx backoff."""
+# Set once Senate.gov blocks a direct request; the rest of the run then goes
+# through SENATE_PROXY_URL instead of hitting the block on every request.
+_senate_direct_blocked = False
+
+
+def _is_forbidden(exc):
+    return exc.response is not None and exc.response.status_code == 403
+
+
+def senate_get(url, use_proxy=False):
+    """GET bytes from Senate.gov, direct first and through SENATE_PROXY_URL only when needed.
+
+    The proxy is used when the caller asks (`use_proxy`, e.g. a roll call that
+    failed on an earlier run) or after a direct request in this run got a 403
+    from Senate.gov's WAF. Without SENATE_PROXY_URL every request is direct.
+    """
+    global _senate_direct_blocked
+    proxy_url = os.getenv("SENATE_PROXY_URL")
+    via_proxy = bool(proxy_url) and (use_proxy or _senate_direct_blocked)
+    try:
+        return _senate_request(url, proxy_url if via_proxy else None)
+    except requests.HTTPError as exc:
+        if not _is_forbidden(exc):
+            raise
+        if via_proxy or not proxy_url:
+            print(
+                f"  HTTP 403 Forbidden from Senate.gov for {url}"
+                + (
+                    " through SENATE_PROXY_URL."
+                    if via_proxy
+                    else ". Senate.gov's WAF is blocking this host; "
+                    "set SENATE_PROXY_URL to retry through a proxy."
+                )
+            )
+            raise
+    _senate_direct_blocked = True
+    print(
+        "  Senate.gov blocked the direct request (403); using SENATE_PROXY_URL "
+        "for the rest of this run."
+    )
+    return _senate_request(url, proxy_url)
+
+
+def _senate_request(url, proxy_url):
+    """One Senate.gov GET with polite pacing, browser headers, and 429/5xx backoff."""
     headers = {
         "User-Agent": SENATE_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
-    proxy_url = os.getenv("SENATE_PROXY_URL")
     proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
     delay = INITIAL_BACKOFF_SECONDS
     last_error = None
@@ -476,13 +518,6 @@ def senate_get(url):
             )
             continue
 
-        if response.status_code == 403:
-            print(
-                f"  HTTP 403 Forbidden from Senate.gov for {url}. "
-                "The runner IP or user agent appears to be blocked by Senate.gov WAF/Akamai. "
-                "Consider setting SENATE_PROXY_URL or using a self-hosted runner."
-            )
-
         response.raise_for_status()
         return response.content
 
@@ -491,10 +526,10 @@ def senate_get(url):
     raise RuntimeError(f"Failed to fetch {url}")
 
 
-def fetch_senate_vote_xml(congress, session, vote_number):
+def fetch_senate_vote_xml(congress, session, vote_number, use_proxy=False):
     """Download one Senate roll-call XML document, or None if it 404s."""
     url = senate_vote_url(congress, session, vote_number)
-    return senate_get(url)
+    return senate_get(url, use_proxy=use_proxy)
 
 
 def fetch_senate_vote_menu(congress, session):
@@ -2005,7 +2040,15 @@ def sync_senate_votes(
     }
 
     try:
-        xml_bytes = fetch_senate_vote_xml(congress, session, vote_number)
+        # A roll call that failed last run was most likely blocked; skip
+        # straight to the proxy rather than spend another direct request.
+        tracked = roll_calls.get(senate_roll_call_key(congress, session, vote_number))
+        xml_bytes = fetch_senate_vote_xml(
+            congress,
+            session,
+            vote_number,
+            use_proxy=tracked is not None and tracked.status == SENATE_ROLL_CALL_FAILED,
+        )
         if xml_bytes is None:
             stats["not_found"] = True
             upsert_senate_roll_call(
@@ -2537,6 +2580,7 @@ def sync_bill_votes(
         "house_roll_calls": 0,
         "senate_roll_calls": 0,
         "senate_roll_calls_skipped": 0,
+        "senate_roll_calls_failed": 0,
         "inserted": 0,
         "updated": 0,
         "unchanged": 0,
@@ -2590,6 +2634,7 @@ def sync_bill_votes(
         recorded = _recorded_votes_from_actions(actions)
         unknown_officials = set()
         senator_lookup = None
+        senate_roll_calls = {}
 
         for vote in recorded:
             session_number = vote.get("sessionNumber")
@@ -2600,22 +2645,57 @@ def sync_bill_votes(
                 if session_number is None or roll_number is None:
                     stats["senate_roll_calls_skipped"] += 1
                     continue
+                vote_congress = vote.get("congress") or congress
+                session_key = (int(vote_congress), int(session_number))
+                if session_key not in senate_roll_calls:
+                    senate_roll_calls[session_key] = load_senate_roll_calls(
+                        session, vote_congress, session_number
+                    )
+                roll_calls = senate_roll_calls[session_key]
+                tracked = roll_calls.get(
+                    senate_roll_call_key(vote_congress, session_number, roll_number)
+                )
+                # Senate roll calls are final once recorded; skip the refetch.
+                if tracked is not None and tracked.status == SENATE_ROLL_CALL_INGESTED:
+                    stats["senate_roll_calls_skipped"] += 1
+                    continue
                 if senator_lookup is None:
                     senator_lookup = load_senator_lookup(session)
-                stats["senate_roll_calls"] += 1
                 print(
                     f"  Senate roll call {roll_number} "
-                    f"(congress {vote.get('congress') or congress}, "
-                    f"session {session_number})"
+                    f"(congress {vote_congress}, session {session_number})"
                 )
-                senate_stats = sync_senate_votes(
-                    vote.get("congress") or congress,
-                    session_number,
-                    roll_number,
-                    db_session=session,
-                    senator_lookup=senator_lookup,
-                    expected_bill_id=bill_id,
-                )
+                try:
+                    senate_stats = sync_senate_votes(
+                        vote_congress,
+                        session_number,
+                        roll_number,
+                        db_session=session,
+                        senator_lookup=senator_lookup,
+                        expected_bill_id=bill_id,
+                        roll_calls=roll_calls,
+                    )
+                except requests.RequestException as exc:
+                    # Senate.gov's WAF blocks some hosts (403). The fetch runs
+                    # before any writes, and the senate-votes job retries any
+                    # roll call not yet ingested (through the proxy, once
+                    # marked failed), so keep ingesting bills.
+                    print(
+                        f"  FAILED Senate roll call {roll_number}: {exc}; "
+                        "leaving it for senate-votes."
+                    )
+                    stats["senate_roll_calls_failed"] += 1
+                    upsert_senate_roll_call(
+                        session,
+                        roll_calls,
+                        vote_congress,
+                        session_number,
+                        roll_number,
+                        SENATE_ROLL_CALL_FAILED,
+                        bill_id=bill_id,
+                    )
+                    continue
+                stats["senate_roll_calls"] += 1
                 stats["inserted"] += senate_stats["inserted"]
                 stats["updated"] += senate_stats["updated"]
                 stats["unchanged"] += senate_stats["unchanged"]
@@ -2690,6 +2770,7 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True, sinc
         "votes_skipped_unknown_officials": 0,
         "senate_roll_calls": 0,
         "senate_roll_calls_skipped": 0,
+        "senate_roll_calls_failed": 0,
         "house_roll_calls": 0,
     }
 
@@ -2791,6 +2872,9 @@ def sync_recent_bills(limit=50, congress=CURRENT_CONGRESS, sync_votes=True, sinc
                 stats["senate_roll_calls_skipped"] += vote_stats[
                     "senate_roll_calls_skipped"
                 ]
+                stats["senate_roll_calls_failed"] += vote_stats[
+                    "senate_roll_calls_failed"
+                ]
                 stats["house_roll_calls"] += vote_stats["house_roll_calls"]
                 print(
                     f"  Votes: inserted={vote_stats['inserted']} "
@@ -2826,6 +2910,7 @@ def _print_bill_stats(stats):
     print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
     print(f"  Senate roll calls ingested: {stats.get('senate_roll_calls', 0)}")
     print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
+    print(f"  Senate roll calls failed:   {stats['senate_roll_calls_failed']}")
     print(f"  Votes inserted:             {stats['votes_inserted']}")
     print(f"  Votes updated:              {stats['votes_updated']}")
     print(f"  Votes unchanged:            {stats['votes_unchanged']}")
@@ -2840,6 +2925,7 @@ def _print_vote_stats(stats):
     print(f"  House roll calls ingested:  {stats['house_roll_calls']}")
     print(f"  Senate roll calls ingested: {stats.get('senate_roll_calls', 0)}")
     print(f"  Senate roll calls skipped:  {stats['senate_roll_calls_skipped']}")
+    print(f"  Senate roll calls failed:   {stats['senate_roll_calls_failed']}")
     print(f"  Votes inserted:             {stats['inserted']}")
     print(f"  Votes updated:              {stats['updated']}")
     print(f"  Votes unchanged:            {stats['unchanged']}")

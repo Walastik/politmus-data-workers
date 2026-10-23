@@ -455,7 +455,98 @@ class PositionAndDateTests(unittest.TestCase):
         )
 
 
+def _senate_response(status, content=b"<xml/>"):
+    import requests
+
+    response = requests.Response()
+    response.status_code = status
+    response._content = content
+    response.url = "https://www.senate.gov/x.xml"
+    return response
+
+
+@patch("congress_client.SENATE_REQUEST_PAUSE_SECONDS", 0)
+class SenateGetProxyTests(unittest.TestCase):
+    PROXY = "http://user:pass@proxy.example:8080"
+
+    def setUp(self):
+        patcher = patch("congress_client._senate_direct_blocked", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _proxies(self, mock_get):
+        return [call.kwargs["proxies"] for call in mock_get.call_args_list]
+
+    @patch("congress_client.requests.get")
+    def test_goes_direct_while_not_blocked(self, mock_get):
+        from congress_client import senate_get
+
+        mock_get.return_value = _senate_response(200)
+        with patch.dict(os.environ, {"SENATE_PROXY_URL": self.PROXY}):
+            self.assertEqual(senate_get("https://www.senate.gov/x.xml"), b"<xml/>")
+        self.assertEqual(self._proxies(mock_get), [None])
+
+    @patch("congress_client.requests.get")
+    def test_403_retries_through_proxy_and_stays_on_it(self, mock_get):
+        from congress_client import senate_get
+
+        mock_get.side_effect = [
+            _senate_response(403),
+            _senate_response(200),
+            _senate_response(200),
+        ]
+        with patch.dict(os.environ, {"SENATE_PROXY_URL": self.PROXY}):
+            senate_get("https://www.senate.gov/a.xml")
+            senate_get("https://www.senate.gov/b.xml")
+        proxy = {"http": self.PROXY, "https": self.PROXY}
+        self.assertEqual(self._proxies(mock_get), [None, proxy, proxy])
+
+    @patch("congress_client.requests.get")
+    def test_use_proxy_skips_the_direct_request(self, mock_get):
+        from congress_client import senate_get
+
+        mock_get.return_value = _senate_response(200)
+        with patch.dict(os.environ, {"SENATE_PROXY_URL": self.PROXY}):
+            senate_get("https://www.senate.gov/x.xml", use_proxy=True)
+        proxy = {"http": self.PROXY, "https": self.PROXY}
+        self.assertEqual(self._proxies(mock_get), [proxy])
+
+    @patch("congress_client.requests.get")
+    def test_403_without_proxy_raises(self, mock_get):
+        import requests
+        from congress_client import senate_get
+
+        mock_get.return_value = _senate_response(403)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SENATE_PROXY_URL", None)
+            with self.assertRaises(requests.HTTPError):
+                senate_get("https://www.senate.gov/x.xml", use_proxy=True)
+        self.assertEqual(self._proxies(mock_get), [None])
+
+
 class SyncSenateVotesTests(unittest.TestCase):
+    @patch("congress_client.fetch_senate_vote_xml", return_value=None)
+    def test_previously_failed_roll_call_uses_proxy(self, mock_fetch):
+        from congress_client import sync_senate_votes
+        from models import SenateRollCall
+
+        roll_calls = {
+            (119, 1, 1): SenateRollCall(
+                congress=119, session=1, vote_number=1, status="failed"
+            ),
+            (119, 1, 2): SenateRollCall(
+                congress=119, session=1, vote_number=2, status="skipped_no_bill"
+            ),
+        }
+        for vote_number in (1, 2, 3):
+            sync_senate_votes(
+                119, 1, vote_number, db_session=MagicMock(), roll_calls=roll_calls
+            )
+        self.assertEqual(
+            [call.kwargs["use_proxy"] for call in mock_fetch.call_args_list],
+            [True, False, False],
+        )
+
     @patch("congress_client.fetch_senate_vote_xml", return_value=SAMPLE_SENATE_VOTE_XML)
     def test_upserts_roll_call_then_member_votes(self, _mock_fetch):
         from congress_client import sync_senate_votes
@@ -921,6 +1012,107 @@ class SyncHouseVotesTests(unittest.TestCase):
         self.assertEqual(roll_calls[0].source_roll_call_id, "house-119-1-00017")
         self.assertEqual({vote.official_id for vote in votes}, {"A000055", "B000001"})
         self.assertTrue(all(vote.roll_call_id == 3 for vote in votes))
+
+
+class SyncBillSenateVotesTests(unittest.TestCase):
+    SENATE_ACTIONS = [
+        {
+            "recordedVotes": [
+                {
+                    "chamber": "Senate",
+                    "congress": 119,
+                    "sessionNumber": 1,
+                    "rollNumber": 1,
+                    "date": "2025-01-09T19:54:00Z",
+                },
+                {
+                    "chamber": "Senate",
+                    "congress": 119,
+                    "sessionNumber": 1,
+                    "rollNumber": 7,
+                    "date": "2025-01-20T19:54:00Z",
+                },
+            ]
+        }
+    ]
+
+    def _sync(self):
+        from congress_client import sync_bill_votes
+        from models import Bill
+
+        session = MagicMock()
+        session.get.return_value = Bill(id="119-s-5", title="Laken Riley Act")
+        return sync_bill_votes(
+            119, "s", 5, session=session, official_ids=set(), ensure_bill=False
+        )
+
+    @patch("congress_client.upsert_senate_roll_call")
+    @patch("congress_client.load_senator_lookup", return_value={})
+    @patch("congress_client.load_senate_roll_calls", return_value={})
+    @patch("congress_client.sync_senate_votes")
+    @patch("congress_client.fetch_bill_actions")
+    def test_senate_gov_block_does_not_abort_bill(
+        self, mock_actions, mock_senate, _roll_calls, _lookup, mock_upsert
+    ):
+        import requests
+
+        mock_actions.return_value = self.SENATE_ACTIONS
+        mock_senate.side_effect = [
+            requests.HTTPError("403 Client Error: Forbidden"),
+            {
+                "inserted": 100,
+                "updated": 0,
+                "unchanged": 0,
+                "skipped_unknown_officials": 0,
+                "not_found": False,
+                "skipped_no_bill": False,
+            },
+        ]
+
+        stats = self._sync()
+
+        self.assertEqual(mock_senate.call_count, 2)
+        self.assertEqual(mock_upsert.call_args.args[2:6], (119, 1, 1, "failed"))
+        self.assertEqual(stats["senate_roll_calls_failed"], 1)
+        self.assertEqual(stats["senate_roll_calls"], 1)
+        self.assertEqual(stats["inserted"], 100)
+
+    @patch("congress_client.load_senator_lookup", return_value={})
+    @patch("congress_client.load_senate_roll_calls")
+    @patch("congress_client.sync_senate_votes")
+    @patch("congress_client.fetch_bill_actions")
+    def test_skips_senate_roll_calls_already_ingested(
+        self, mock_actions, mock_senate, mock_roll_calls, _lookup
+    ):
+        from congress_client import SENATE_ROLL_CALL_INGESTED
+        from models import SenateRollCall
+
+        mock_actions.return_value = self.SENATE_ACTIONS
+        mock_roll_calls.return_value = {
+            (119, 1, 1): SenateRollCall(
+                congress=119, session=1, vote_number=1,
+                status=SENATE_ROLL_CALL_INGESTED,
+            ),
+            (119, 1, 7): SenateRollCall(
+                congress=119, session=1, vote_number=7, status="failed",
+            ),
+        }
+        mock_senate.return_value = {
+            "inserted": 0,
+            "updated": 0,
+            "unchanged": 100,
+            "skipped_unknown_officials": 0,
+            "not_found": False,
+            "skipped_no_bill": False,
+        }
+
+        stats = self._sync()
+
+        mock_roll_calls.assert_called_once()
+        mock_senate.assert_called_once()
+        self.assertEqual(mock_senate.call_args.args[2], 7)
+        self.assertEqual(stats["senate_roll_calls_skipped"], 1)
+        self.assertEqual(stats["senate_roll_calls"], 1)
 
 
 class SyncHouseSessionVotesTests(unittest.TestCase):
