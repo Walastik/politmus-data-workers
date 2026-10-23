@@ -33,5 +33,19 @@ jobs:
       - name: Run Bill & Vote Ingestion
         run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py bills --since-hours 36 --limit 500"
 
+      # Catches House roll calls on bills the bills step did not see (cheap
+      # once caught up: two list requests per session).
+      - name: Run House Vote Catch-up
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py house-votes --all-sessions"
+
       - name: Run Enrichment (Summaries, Policy Areas, Dates)
         run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py enrich"
+
+      # Amendments, floor speeches, and committee views for voted bills whose
+      # latest action changed (bill_context.py); newest votes first.
+      - name: Run Bill Context (Amendments, Floor Speeches)
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py context --limit 40"
+
+      # New votes change scores; only officials whose inputs changed are rewritten.
+      - name: Rescore Officials (Accountability)
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/score_officials.py"

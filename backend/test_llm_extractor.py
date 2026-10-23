@@ -89,7 +89,7 @@ class SchemaTests(unittest.TestCase):
         schema = ExtractedEffect.model_json_schema()
         self.assertEqual(
             set(schema["properties"]),
-            {"target_name", "mechanism", "direction", "magnitude", "rationale"},
+            {"target_name", "mechanism", "direction", "magnitude", "rationale", "relation", "legal_force"},
         )
         self.assertEqual(schema["properties"]["mechanism"]["enum"], list(MECHANISMS))
         self.assertEqual(schema["properties"]["direction"]["enum"], list(DIRECTIONS))

@@ -75,5 +75,8 @@ jobs:
           
           # Run the ingestion job locally
           python backend/congress_client.py senate-votes --incremental
+
+          # Rescore officials whose votes changed (no-op when nothing did).
+          python backend/score_officials.py
           
           kill $PROXY_PID

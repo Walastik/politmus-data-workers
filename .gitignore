@@ -8,3 +8,4 @@ __pycache__/
 # Local untracked LLM categorization config
 backend/scripts/llm_config.py
 backend/scripts/positions_llm_config.py
+backend/scripts/debate_llm_config.py

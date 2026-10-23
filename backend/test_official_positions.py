@@ -75,6 +75,7 @@ def position(**overrides) -> dict:
         "direction": "increase",
         "stance": "supports",
         "emphasis": "high",
+        "scope": "national",
         "summary": "Supports moving the national grid to renewable energy.",
         "evidence_quote": (
             "The Clean Jobs Act would create millions of jobs and move our national "
@@ -288,6 +289,15 @@ class MergeTests(unittest.TestCase):
         ])
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].direction, "increase")
+
+    def test_any_national_statement_makes_the_position_national(self):
+        merged = merge_positions([
+            self._verified(emphasis="high", scope="local", summary="Dulles officers"),
+            self._verified(emphasis="medium", scope="national"),
+        ])
+        self.assertEqual((merged[0].position.summary, merged[0].position.scope), ("Dulles officers", "national"))
+        only_local = merge_positions([self._verified(scope="local")])
+        self.assertEqual(only_local[0].position.scope, "local")
 
     def test_weighted_majority_wins_over_a_weaker_conflict(self):
         # AOC: "Voting Rights" came out "mixed" from one off-phrased chunk.
@@ -958,6 +968,23 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         sync = self._sync()
         self.assertEqual(sync.status, "failed")
         self.assertIn("socket exploded", sync.last_error)
+
+    def test_official_id_list_selects_each_official_even_when_not_due(self):
+        from models import Official
+        from official_positions import select_officials
+
+        session = self.SessionLocal()
+        session.add(Official(
+            id="ZZTEST0002", name="Rep 2", state="Ohio", party="Independent",
+            office="Representative", district=2, current_member=False, level="zztest",
+        ))
+        session.commit()
+        rows = select_officials(
+            session, version="v1", now=self.clock[0], limit=1,
+            official_id=["ZZTEST0002", self.OFFICIAL_ID],
+        )
+        session.close()
+        self.assertEqual([official.id for official, _sync in rows], [self.OFFICIAL_ID, "ZZTEST0002"])
 
     def _cleanup_extra(self):
         from models import Official, OfficialPositionSync, OfficialSourcePage, OfficialStance

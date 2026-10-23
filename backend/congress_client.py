@@ -1931,6 +1931,23 @@ def _log_missing_official_sponsor(bill_id, bioguide_id, sponsor_name):
     )
 
 
+def compact_actions(actions):
+    """Congress.gov actions as stored on bills.actions, newest first."""
+    out = []
+    for action in actions or []:
+        text = (action.get("text") or "").strip()
+        if not text:
+            continue
+        out.append({
+            "date": action.get("actionDate"),
+            "text": text,
+            "type": action.get("type"),
+            "chamber": (action.get("sourceSystem") or {}).get("name"),
+        })
+    out.sort(key=lambda a: a["date"] or "", reverse=True)
+    return out
+
+
 def _recorded_votes_from_actions(actions):
     """Unique roll calls, oldest first so bill voted_date can advance in order."""
     seen = set()
@@ -2327,6 +2344,175 @@ def sync_senate_congress_votes(congress, sessions=SENATE_SESSIONS):
     return results
 
 
+def sync_house_roll_call(
+    session,
+    bill_id,
+    congress,
+    session_number,
+    roll_number,
+    official_ids,
+    unknown_officials,
+    fallback_date=None,
+):
+    """Store one House roll call on bill_id with its member positions.
+
+    Members missing from officials are added to unknown_officials. Returns
+    _apply_vote_positions counts.
+    """
+    members, metadata = fetch_house_roll_call(congress, session_number, roll_number)
+    house_by_official = {}
+    for member in members:
+        bioguide_id = member.get("bioguideID") or member.get("bioguideId")
+        if not bioguide_id:
+            continue
+        if bioguide_id not in official_ids:
+            unknown_officials.add(bioguide_id)
+            continue
+        position = normalize_position(member.get("voteCast"))
+        if not position:
+            continue
+        house_by_official[bioguide_id] = position
+
+    roll_call = upsert_roll_call(
+        session,
+        bill_id=bill_id,
+        chamber=ROLL_CALL_HOUSE,
+        source_roll_call_id=make_source_roll_call_id(
+            ROLL_CALL_HOUSE, congress, session_number, roll_number
+        ),
+        date=metadata.get("date") or fallback_date,
+        question=metadata.get("question"),
+        result=metadata.get("result"),
+        requires=metadata.get("requires"),
+    )
+    return _apply_vote_positions(session, roll_call.id, house_by_official)
+
+
+def fetch_house_vote_list(congress, session_number):
+    """Every House roll call in one congress/session (Congress.gov house-vote)."""
+    url = f"{BASE_URL}/house-vote/{congress}/{session_number}"
+    params = {"limit": PAGE_SIZE, "format": "json"}
+    votes = []
+    while url:
+        payload = congress_get(url, params=params)
+        votes.extend(payload.get("houseRollCallVotes") or [])
+        url = (payload.get("pagination") or {}).get("next")
+        params = None
+    return votes
+
+
+def load_house_source_roll_call_ids(session):
+    rows = session.query(RollCall.source_roll_call_id).filter(
+        RollCall.chamber == ROLL_CALL_HOUSE
+    )
+    return {row[0] for row in rows if row[0]}
+
+
+def sync_house_session_votes(congress, session_number, db_session=None):
+    """Ingest House roll calls on legislation that roll_calls does not have.
+
+    The bills job only sees recently updated bills, so House votes on bills
+    it missed (or that were created from Senate XML) never arrive. This
+    compares the session's house-vote list to stored roll calls. A bill not
+    in the database is created with sync_bill_votes, which also stores the
+    other roll calls named in its actions; votes still missing after that
+    (e.g. listed under the bill but not in its actions) are stored directly.
+    """
+    owns_session = db_session is None
+    if owns_session:
+        db_session = SessionLocal()
+    stats = {
+        "congress": congress,
+        "session": session_number,
+        "listed": 0,
+        "no_legislation": 0,
+        "already_stored": 0,
+        "fetched": 0,
+        "bills_created": 0,
+        "failed": 0,
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped_unknown_officials": 0,
+    }
+    try:
+        listed = fetch_house_vote_list(congress, session_number)
+        stats["listed"] = len(listed)
+        stored = load_house_source_roll_call_ids(db_session)
+        missing_by_bill = {}
+        for vote in sorted(listed, key=lambda v: v.get("rollCallNumber") or 0):
+            bill_type = (vote.get("legislationType") or "").strip()
+            number = (str(vote.get("legislationNumber") or "")).strip()
+            roll_number = vote.get("rollCallNumber")
+            if not bill_type or not number or roll_number is None:
+                stats["no_legislation"] += 1
+                continue
+            key = make_source_roll_call_id(ROLL_CALL_HOUSE, congress, session_number, roll_number)
+            if key in stored:
+                stats["already_stored"] += 1
+                continue
+            missing_by_bill.setdefault((bill_type, number), []).append(vote)
+
+        print(
+            f"House votes: congress {congress} session {session_number} lists "
+            f"{len(listed)} roll calls; {sum(len(v) for v in missing_by_bill.values())} "
+            f"missing across {len(missing_by_bill)} bills."
+        )
+        official_ids = load_official_ids(db_session)
+        for index, ((bill_type, number), votes) in enumerate(missing_by_bill.items(), start=1):
+            bill_id = make_bill_id(congress, bill_type, number)
+            print(f"[{index}/{len(missing_by_bill)}] {bill_id}: {len(votes)} House roll call(s)")
+            unknown = set()
+            try:
+                if db_session.get(Bill, bill_id) is None:
+                    bill_stats = sync_bill_votes(
+                        congress, bill_type, number, session=db_session,
+                        official_ids=official_ids, ensure_bill=True,
+                    )
+                    stats["bills_created"] += 1
+                    for field in ("inserted", "updated", "unchanged", "skipped_unknown_officials"):
+                        stats[field] += bill_stats[field]
+                    stored = load_house_source_roll_call_ids(db_session)
+                for vote in votes:
+                    roll_number = vote["rollCallNumber"]
+                    if make_source_roll_call_id(ROLL_CALL_HOUSE, congress, session_number, roll_number) in stored:
+                        stats["fetched"] += 1
+                        continue
+                    house_stats = sync_house_roll_call(
+                        db_session, bill_id, congress, session_number, roll_number,
+                        official_ids, unknown,
+                        fallback_date=parse_congress_date(vote.get("startDate")),
+                    )
+                    stats["fetched"] += 1
+                    for field in ("inserted", "updated", "unchanged"):
+                        stats[field] += house_stats[field]
+                vote_date = max(
+                    (d for d in (parse_congress_date(v.get("startDate")) for v in votes) if d),
+                    default=None,
+                )
+                bill = db_session.get(Bill, bill_id)
+                if bill is not None and vote_date and (bill.voted_date is None or vote_date > bill.voted_date):
+                    bill.voted_date = vote_date
+                refresh_bill_status(db_session, bill_id)
+                stats["skipped_unknown_officials"] += len(unknown)
+                if owns_session:
+                    db_session.commit()
+            except (requests.RequestException, RuntimeError) as exc:
+                print(f"  FAILED {bill_id}: {exc}")
+                stats["failed"] += 1
+                if owns_session:
+                    db_session.rollback()
+                stored = load_house_source_roll_call_ids(db_session)
+        return stats
+    except Exception:
+        if owns_session:
+            db_session.rollback()
+        raise
+    finally:
+        if owns_session:
+            db_session.close()
+
+
 def sync_bill_votes(
     congress,
     bill_type,
@@ -2395,11 +2581,12 @@ def sync_bill_votes(
             return stats
 
         actions = fetch_bill_actions(congress, bill_type, bill_number)
+        bill_row = session.get(Bill, bill_id)
+        if bill_row is not None:
+            bill_row.actions = compact_actions(actions)
         vote_date = _latest_vote_date(actions)
-        if vote_date is not None:
-            bill_row = session.get(Bill, bill_id)
-            if bill_row is not None:
-                bill_row.voted_date = vote_date
+        if vote_date is not None and bill_row is not None:
+            bill_row.voted_date = vote_date
         recorded = _recorded_votes_from_actions(actions)
         unknown_officials = set()
         senator_lookup = None
@@ -2455,41 +2642,15 @@ def sync_bill_votes(
                 f"  House roll call {roll_number} "
                 f"(congress {vote.get('congress')}, session {session_number})"
             )
-            members, metadata = fetch_house_roll_call(
+            house_stats = sync_house_roll_call(
+                session,
+                bill_id,
                 vote.get("congress") or congress,
                 session_number,
                 roll_number,
-            )
-            house_by_official = {}
-            for member in members:
-                bioguide_id = member.get("bioguideID") or member.get("bioguideId")
-                if not bioguide_id:
-                    continue
-                if bioguide_id not in official_ids:
-                    unknown_officials.add(bioguide_id)
-                    continue
-                position = normalize_position(member.get("voteCast"))
-                if not position:
-                    continue
-                house_by_official[bioguide_id] = position
-
-            roll_call = upsert_roll_call(
-                session,
-                bill_id=bill_id,
-                chamber=ROLL_CALL_HOUSE,
-                source_roll_call_id=make_source_roll_call_id(
-                    ROLL_CALL_HOUSE,
-                    vote.get("congress") or congress,
-                    session_number,
-                    roll_number,
-                ),
-                date=metadata.get("date") or parse_congress_date(vote.get("date")),
-                question=metadata.get("question"),
-                result=metadata.get("result"),
-                requires=metadata.get("requires"),
-            )
-            house_stats = _apply_vote_positions(
-                session, roll_call.id, house_by_official
+                official_ids,
+                unknown_officials,
+                fallback_date=parse_congress_date(vote.get("date")),
             )
             stats["inserted"] += house_stats["inserted"]
             stats["updated"] += house_stats["updated"]
@@ -2783,6 +2944,18 @@ def _print_enrichment_stats(stats):
         print(f"  Velocity μ/σ:           {mean:.1f} / {std:.1f} days")
 
 
+def _print_house_session_stats(stats):
+    print(
+        f"House votes congress {stats['congress']} session {stats['session']}: "
+        f"listed={stats['listed']} already_stored={stats['already_stored']} "
+        f"fetched={stats['fetched']} bills_created={stats['bills_created']} "
+        f"failed={stats['failed']} no_legislation={stats['no_legislation']} "
+        f"votes inserted={stats['inserted']} updated={stats['updated']} "
+        f"unchanged={stats['unchanged']} "
+        f"unknown_officials={stats['skipped_unknown_officials']}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Ingest Congress.gov members, bills, and roll-call votes."
@@ -2795,6 +2968,8 @@ def main():
             "bills",
             "votes",
             "senate-votes",
+            "house-votes",
+            "context",
             "sponsors",
             "backfill-sponsors",
             "backfill-name-parts",
@@ -2807,6 +2982,10 @@ def main():
         "votes: House and Senate roll calls for one bill. "
         "senate-votes: Senate.gov roll-call XML (one vote, one session, "
         "an entire congress, or incremental catch-up). "
+        "house-votes: House roll calls missing from the database, for one "
+        "session or (--all-sessions) the whole congress. "
+        "context: amendments, floor speeches, and committee views for "
+        "voted bills (bill_context.py). "
         "backfill-sponsors: insert missing historical sponsors. "
         "backfill-name-parts: fill first/middle/last name etc. on stored officials. "
         "enrich: fill policy area, CRS summary, dates, sponsorship, "
@@ -2856,6 +3035,11 @@ def main():
         help="When syncing bills, fetch every bill updated in the last N hours "
         "(capped by --limit) instead of only the newest --limit.",
     )
+    parser.add_argument(
+        "--bill-id",
+        action="append",
+        help="For context: only this bill (e.g. 119-hr-9340); repeatable.",
+    )
     parser.add_argument("--bill-type", help="Bill type for the votes command, e.g. hr.")
     parser.add_argument("--bill-number", help="Bill number for the votes command, e.g. 1.")
     args = parser.parse_args()
@@ -2897,6 +3081,24 @@ def main():
         ensure_schema()
         vote_stats = sync_bill_votes(args.congress, args.bill_type, args.bill_number)
         _print_vote_stats(vote_stats)
+        return
+
+    if args.command == "context":
+        from bill_context import sync_context
+
+        stats = sync_context(limit=args.limit, bill_ids=args.bill_id)
+        print(
+            f"Bill context: {stats['bills']} synced, {stats['failed']} failed; "
+            f"amendments={stats['amendments']} floor_speeches={stats['floor_speeches']} "
+            f"committee_views={stats['committee_views']}"
+        )
+        return
+
+    if args.command == "house-votes":
+        ensure_schema()
+        sessions = (1, 2) if args.all_sessions else (args.session,)
+        for session_number in sessions:
+            _print_house_session_stats(sync_house_session_votes(args.congress, session_number))
         return
 
     if args.command == "senate-votes":

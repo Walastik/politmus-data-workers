@@ -48,7 +48,7 @@ DEFAULT_CHUNK_CHARS = 10_000
 # A chunk whose answer is cut off is halved and retried, down to this size.
 MIN_SPLIT_CHUNK_CHARS = 2_000
 MIN_QUOTE_CHARS = 12
-MAX_STANCES_PER_OFFICIAL = 100
+MAX_STANCES_PER_OFFICIAL = 300
 MAX_VOCABULARY_TARGETS = 150
 
 # Congress.gov / CRS policy areas, the same values stored on bills.policy_area
@@ -89,6 +89,7 @@ PolicyArea = Literal[
 POLICY_AREAS = get_args(PolicyArea)
 
 Stance = Literal["supports", "opposes"]
+Scope = Literal["national", "local"]
 
 # What the official wants, given the policy action and their stance on it.
 _OPPOSED_DIRECTION = {
@@ -118,7 +119,17 @@ class StatedPosition(BaseModel):
     mechanism: Mechanism = Field(description="funding, regulation, oversight, or taxation.")
     direction: Direction = Field(description="Direction of the policy action described, as a bill effect would be labelled.")
     stance: Stance = Field(description="Whether the official supports or opposes that policy action.")
-    emphasis: Magnitude = Field(description="low, medium, or high.")
+    emphasis: Magnitude = Field(
+        description=(
+            "How directly the quote states the change: high if it names the change "
+            "(more or less money, a new rule, a repeal); medium if it clearly supports or "
+            "opposes the target so the direction is plain; low if the direction is inferred "
+            "from a slogan or value statement."
+        )
+    )
+    scope: Scope = Field(
+        description="local if about one district, state, facility, or project; otherwise national."
+    )
     policy_area: PolicyArea = Field(description="Closest CRS policy area.")
     summary: str = Field(description="One plain sentence stating the official's position.")
 
@@ -520,7 +531,10 @@ def merge_positions(verified: list[VerifiedPosition]) -> list[VerifiedPosition]:
         direction = leaders[0] if len(leaders) == 1 else "mixed"
         pool = [i for i in items if i.direction == direction] or items
         chosen = max(pool, key=lambda i: _EMPHASIS_RANK[i.position.emphasis])
-        out.append(VerifiedPosition(chosen.position.model_copy(), chosen.source_url, chosen.page_id, direction))
+        # Any national statement makes the merged position national.
+        scope = "national" if any(i.position.scope == "national" for i in pool) else "local"
+        position = chosen.position.model_copy(update={"scope": scope})
+        out.append(VerifiedPosition(position, chosen.source_url, chosen.page_id, direction))
     out.sort(key=lambda v: (-_EMPHASIS_RANK[v.position.emphasis], v.position.policy_area, v.position.target_name))
     return out[:MAX_STANCES_PER_OFFICIAL]
 
@@ -641,6 +655,7 @@ def persist_official_stances(
             target_name=p.target_name,
             target_slug=slugify_target(p.target_name),
             emphasis=p.emphasis,
+            scope=p.scope,
             policy_area=p.policy_area,
             issue_label=p.issue_label.strip()[:200] or None,
             summary=p.summary.strip(),

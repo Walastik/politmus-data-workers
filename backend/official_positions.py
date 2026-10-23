@@ -34,7 +34,9 @@ from sqlalchemy import or_
 
 from models import Candidacy, Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 from services import llm_runtime
+from services.accountability import try_rescore
 from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle
+from services.target_matching import make_matcher, try_refresh
 from services.llm_runtime import TruncatedOutputError, load_local_module, required_strings
 from services.official_positions import (
     DEFAULT_CHUNK_CHARS,
@@ -182,17 +184,19 @@ def select_officials(
     version: str,
     now: datetime,
     limit: int | None,
-    official_id: str | None = None,
+    official_id: str | list[str] | None = None,
     level: str = "federal",
     force: bool = False,
     max_age_days: float = DEFAULT_MAX_AGE_DAYS,
     require_pages: bool = False,
 ) -> list[tuple[Official, OfficialPositionSync | None]]:
+    """official_id (one id or a list) selects those officials, due or not."""
     query = session.query(Official, OfficialPositionSync).outerjoin(
         OfficialPositionSync, OfficialPositionSync.official_id == Official.id
     )
     if official_id:
-        return query.filter(Official.id == official_id).all()
+        ids = [official_id] if isinstance(official_id, str) else list(official_id)
+        return query.filter(Official.id.in_(ids)).order_by(Official.id).all()
     query = query.filter(
         Official.level == level,
         Official.website_url.isnot(None),
@@ -359,7 +363,7 @@ def _empty_stats(model, dry_run):
 def run_positions(
     *,
     limit: int | None = 5,
-    official_id: str | None = None,
+    official_id: str | list[str] | None = None,
     level: str = "federal",
     force: bool = False,
     dry_run: bool = False,
@@ -377,6 +381,7 @@ def run_positions(
     crawl_config=None,
     prompts: Prompts | None = None,
     chat_fn=None,
+    matcher=None,
     crawler=None,
     session_factory=None,
     now_fn=utcnow,
@@ -416,6 +421,8 @@ def run_positions(
             return stats
 
         if chat_fn is None and not crawl_only:
+            if matcher is None and not dry_run:
+                matcher = make_matcher(host or DEFAULT_HOST, review_model=model_name)
             chat_fn = make_chat_fn(
                 model_name,
                 host or DEFAULT_HOST,
@@ -479,6 +486,7 @@ def run_positions(
                     stats=stats,
                     prompt=prompts.positions if prompts else "",
                     chat_fn=chat_fn,
+                    matcher=matcher,
                     vocabulary=vocabulary,
                     version=version,
                     model_name=model_name,
@@ -516,6 +524,7 @@ def _process_official(
     prompt,
     chat_fn,
     vocabulary,
+    matcher=None,
     version,
     model_name,
     force,
@@ -652,6 +661,8 @@ def _process_official(
         session.commit()
         stats["extracted"] += 1
         stats["stances_saved"] += len(saved)
+        try_refresh(matcher, session, log=log, official_ids=[official.id])
+        try_rescore(session, official_ids=[official.id], log=log)
     except Exception as exc:
         session.rollback()
         stats["failed"] += 1
@@ -740,7 +751,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     parser.add_argument("--limit", type=int, default=5, help="Maximum officials this run (default 5). 0 for all due.")
-    parser.add_argument("--official-id", help="Process one official by id (e.g. O000172). Ignores due checks.")
+    parser.add_argument("--official-id", action="append", help="Process this official by id (e.g. O000172), repeatable. Ignores due checks.")
     parser.add_argument(
         "--level", default="federal",
         help="Official level to select (default federal; candidate reads this cycle's campaign sites).",

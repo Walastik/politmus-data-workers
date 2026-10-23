@@ -6,11 +6,20 @@ from sqlalchemy import desc, func, nulls_first, nulls_last
 from sqlalchemy.orm import Session
 
 from api.filters import classify_bipartisan_type, normalize_party
-from api.schemas import BillDetailOut, BillPageOut, BillVoterOut, BillVotersOut, RollCallOut
+from api.schemas import (
+    BillAmendmentOut,
+    BillDetailOut,
+    BillPageOut,
+    BillSourceOut,
+    BillVoterOut,
+    BillVotersOut,
+    RollCallOut,
+)
 from api.auth import get_current_user
 from database import get_db
-from models import Bill, Official, RollCall, Vote
+from models import Bill, BillAmendment, BillSource, Official, RollCall, Vote
 from services.bill_classification import model_from_version
+from services.vote_questions import VOTE_KIND_PASSAGE, vote_kind
 from clerk_backend_api.security.types import RequestState
 
 router = APIRouter()
@@ -51,6 +60,7 @@ def _roll_call_out(row: RollCall) -> RollCallOut:
         result=row.result,
         requires=row.requires,
         source_roll_call_id=row.source_roll_call_id,
+        vote_kind=vote_kind(row.question),
     )
 
 
@@ -72,25 +82,27 @@ def _roll_calls_by_bill(db: Session, bill_ids: list[str]) -> dict[str, list[Roll
     return grouped
 
 
-def _latest_roll_call_ids(roll_calls: list[RollCall]) -> list[int]:
-    """One latest roll call per chamber so tallies are not mixed across votes."""
-    latest: dict[str, int] = {}
-    for row in roll_calls:
-        chamber = (row.chamber or "").strip().lower()
-        if chamber not in CHAMBERS or chamber in latest:
-            continue
-        latest[chamber] = row.id
-    return list(latest.values())
-
-
-def _latest_roll_call_for_chamber(
+def _tally_roll_call_for_chamber(
     roll_calls: list[RollCall], chamber: str
 ) -> RollCall | None:
+    """The vote a chamber's tally shows: its latest vote on passage, else
+    its latest vote of any kind. A later cloture or amendment vote would
+    otherwise hide how the chamber voted on the bill itself.
+    roll_calls must be newest first (_roll_calls_by_bill)."""
     wanted = chamber.strip().lower()
-    for row in roll_calls:
-        if (row.chamber or "").strip().lower() == wanted:
-            return row
-    return None
+    rows = [row for row in roll_calls if (row.chamber or "").strip().lower() == wanted]
+    passage = next((row for row in rows if vote_kind(row.question) == VOTE_KIND_PASSAGE), None)
+    return passage or (rows[0] if rows else None)
+
+
+def _tally_roll_call_ids(roll_calls: list[RollCall]) -> dict[str, int]:
+    """One roll call per chamber so tallies are not mixed across votes."""
+    out = {}
+    for chamber in CHAMBERS:
+        row = _tally_roll_call_for_chamber(roll_calls, chamber)
+        if row is not None:
+            out[chamber] = row.id
+    return out
 
 
 def _party_bucket(party: str | None) -> str:
@@ -188,7 +200,7 @@ def _vote_summaries(
     latest_ids = []
     for bill_id in bill_ids:
         latest_ids.extend(
-            _latest_roll_call_ids(roll_calls_by_bill.get(bill_id) or [])
+            _tally_roll_call_ids(roll_calls_by_bill.get(bill_id) or []).values()
         )
     if not latest_ids:
         return summaries, party_summaries
@@ -249,6 +261,7 @@ def _bill_detail(
         votes_summary=votes_summary or _empty_chamber_summaries(),
         votes_by_party=votes_by_party or _empty_party_summaries(),
         roll_calls=[_roll_call_out(row) for row in (roll_calls or [])],
+        tally_roll_call_ids=_tally_roll_call_ids(roll_calls or []),
     )
 
 
@@ -338,7 +351,7 @@ def list_bill_votes(
 
     wanted_party = _party_bucket(party)
     roll_calls = _roll_calls_by_bill(db, [bill_id]).get(bill_id) or []
-    latest = _latest_roll_call_for_chamber(roll_calls, chamber)
+    latest = _tally_roll_call_for_chamber(roll_calls, chamber)
     if latest is None:
         return BillVotersOut(
             bill_id=bill_id,
@@ -381,9 +394,38 @@ def get_bill(bill_id: str, db: Session = Depends(get_db)):
     summaries, party_summaries = _vote_summaries(
         db, [bill_id], roll_calls_by_bill
     )
-    return _bill_detail(
+    detail = _bill_detail(
         bill,
         summaries.get(bill_id) or _empty_chamber_summaries(),
         party_summaries.get(bill_id) or _empty_party_summaries(),
         roll_calls_by_bill.get(bill_id) or [],
     )
+    amendments = (
+        db.query(BillAmendment)
+        .filter(BillAmendment.bill_id == bill_id)
+        .order_by(nulls_last(desc(BillAmendment.submitted_date)), desc(BillAmendment.id))
+        .all()
+    )
+    sources = (
+        db.query(
+            BillSource.id, BillSource.kind, BillSource.date, BillSource.chamber,
+            BillSource.title, BillSource.speaker_name, BillSource.speaker_state,
+            BillSource.speaker_party, func.array_length(func.regexp_split_to_array(BillSource.text, r"\s+"), 1),
+            BillSource.url,
+        )
+        .filter(BillSource.bill_id == bill_id)
+        .order_by(nulls_last(BillSource.date), BillSource.id)
+        .all()
+    )
+    detail.amendments = [BillAmendmentOut.model_validate(row) for row in amendments]
+    detail.sources = [
+        BillSourceOut(
+            id=row[0], kind=row[1], date=row[2], chamber=row[3], title=row[4],
+            speaker_name=row[5], speaker_state=row[6], speaker_party=row[7],
+            words=row[8] or 0, url=row[9],
+        )
+        for row in sources
+    ]
+    detail.documents = bill.documents
+    detail.debate = bill.debate_metadata
+    return detail

@@ -24,6 +24,10 @@ export interface Official {
   openstates_id?: string | null
   positions_status?: PositionsStatus | null
   positions_count?: number | null
+  // Accountability score; null/absent when the official is not scored.
+  score_points?: number | null
+  score_pct?: number | null
+  score_matches?: number | null
 }
 
 export type PositionsStatus =
@@ -45,6 +49,7 @@ export interface OfficialStance {
   stance: 'supports' | 'opposes' | string | null
   policy_direction: string | null
   emphasis: 'low' | 'medium' | 'high' | string | null
+  scope?: 'national' | 'local' | string | null
   summary: string | null
   evidence_quote: string | null
   source_url: string | null
@@ -105,10 +110,62 @@ export interface OfficialVote {
   date?: string | null
 }
 
+export interface AreaScore {
+  points: number
+  aligned: number
+  conflicting: number
+}
+
+export interface AccountabilityScore {
+  points: number
+  aligned: number
+  conflicting: number
+  bills_scored: number
+  stances_matched: number
+  alignment_pct: number | null
+  by_policy_area: Record<string, AreaScore> | null
+  engine_version: string
+  computed_at: string
+}
+
+export interface VoteAlignment {
+  bill_id: string
+  bill_title: string | null
+  roll_call_id: number
+  chamber: string | null
+  vote_date: string | null
+  vote_position: string
+  target_name: string | null
+  mechanism: string
+  effect_direction: string
+  effect_magnitude: string | null
+  effect_rationale: string | null
+  stance_direction: string
+  stance_emphasis: string | null
+  stance_summary: string | null
+  stance_evidence_quote: string | null
+  stance_source_url: string | null
+  policy_area: string | null
+  effect_relation?: 'core' | 'secondary' | string | null
+  effect_legal_force?: LegalForce | string | null
+  stance_scope?: 'national' | 'local' | string | null
+  bill_effect_count?: number | null
+  // Set when the position names a similar but not identical target.
+  stance_target_name?: string | null
+  match_similarity?: number | null
+  // More of the bill's target means less of the position's.
+  match_inverse?: boolean
+  points: number
+  counted?: boolean
+  reason?: string | null
+}
+
 export interface OfficialDetail extends Official {
   votes: OfficialVote[]
   stated_positions: OfficialStance[]
   positions_sync: PositionsSync | null
+  accountability?: AccountabilityScore | null
+  alignments?: VoteAlignment[]
   wikipedia_url?: string | null
   bio?: OfficialBio | null
   // Newest election first.
@@ -386,13 +443,85 @@ export interface BillRollCall {
   result: string | null
   requires: string | null
   source_roll_call_id: string
+  // backend services/vote_questions.py vote_kind
+  vote_kind?: 'passage' | 'procedural' | 'amendment' | 'other' | null
 }
+
+export interface BillAmendment {
+  id: string
+  chamber: string | null
+  number: string
+  sponsor_name: string | null
+  sponsor_party: string | null
+  submitted_date: string | null
+  purpose: string | null
+  latest_action_text: string | null
+  latest_action_date: string | null
+  text_url: string | null
+  text_excerpt: string | null
+}
+
+// A floor speech or committee views (backend bill_sources), without text.
+export interface BillSourceSummary {
+  id: number
+  kind: 'floor_speech' | 'committee_views' | string
+  date: string | null
+  chamber: string | null
+  title: string | null
+  speaker_name: string | null
+  speaker_state: string | null
+  speaker_party: string | null
+  words: number
+  url: string | null
+}
+
+export interface BillDocuments {
+  short_titles?: string[]
+  committee_reports?: { citation: string; url?: string | null }[]
+  cbo_cost_estimates?: {
+    title?: string | null
+    description?: string | null
+    date?: string | null
+    url: string
+  }[]
+}
+
+export interface DebatePoint {
+  point: string
+  quote: string
+  source_id: number
+  speaker: string | null
+  party: string | null
+  state: string | null
+  chamber: string | null
+  kind: string
+  title: string | null
+  date: string | null
+  url: string | null
+}
+
+// backend services/bill_debate.py
+export interface BillDebate {
+  key_dispute: string | null
+  supporters: DebatePoint[]
+  opponents: DebatePoint[]
+  sources_considered?: number
+  sources_total?: number
+  model?: string
+  generated_at?: string
+}
+
+// How much a provision changes the law (backend LEGAL_FORCE_DEFINITIONS).
+export type LegalForce = 'binding' | 'conditional' | 'advisory' | 'expresses_view'
 
 export interface ClassificationIntent {
   target: string
   mechanism: 'funding' | 'regulation' | 'oversight' | 'taxation' | string
   direction: 'increase' | 'decrease' | 'maintain' | 'mixed' | string
   magnitude: 'low' | 'medium' | 'high' | string
+  relation?: 'core' | 'secondary' | string | null
+  // Absent on bills classified before the field existed.
+  legal_force?: LegalForce | string | null
   rationale?: string
   citation?: string
 }
@@ -428,6 +557,14 @@ export interface Bill {
   votes_summary: BillVoteSummary
   votes_by_party?: BillVotePartySummary
   roll_calls?: BillRollCall[]
+  // Chamber -> the roll call votes_summary / votes_by_party count: the
+  // latest passage vote, else the latest vote.
+  tally_roll_call_ids?: Partial<Record<VoteChamber, number>>
+  // Detail endpoint only.
+  amendments?: BillAmendment[]
+  sources?: BillSourceSummary[]
+  documents?: BillDocuments | null
+  debate?: BillDebate | null
 }
 
 export interface CivicAddress {
@@ -1687,4 +1824,13 @@ export interface UpcomingElection {
   id: string
   name: string
   date: string | null
+}
+
+/** congress.gov page for a citation like "H. Rept. 119-814". */
+export function committeeReportUrl(citation: string): string | null {
+  const match = /\b([HS])\.\s*Rept\.\s*(\d+)-(\d+)/.exec(citation)
+  if (!match) return null
+  const [, chamber, congress, number] = match
+  const kind = chamber === 'H' ? 'house-report' : 'senate-report'
+  return `https://www.congress.gov/congressional-report/${congress}th-congress/${kind}/${number}`
 }

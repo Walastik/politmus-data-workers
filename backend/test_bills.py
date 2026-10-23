@@ -13,7 +13,7 @@ from api.routes.bills import (
     _chamber_for_office,
     _empty_chamber_summaries,
     _empty_party_summaries,
-    _latest_roll_call_ids,
+    _tally_roll_call_ids,
     _record_vote_count,
     bill_feed_sort_key,
     bills_feed_order,
@@ -221,15 +221,24 @@ class BipartisanTypeTests(unittest.TestCase):
             "Became Public Law No: 119-1.",
         )
 
-    def test_latest_roll_call_ids_picks_newest_per_chamber(self):
+    def test_tally_roll_call_ids_picks_newest_per_chamber(self):
         from models import RollCall
 
         house_old = RollCall(id=1, bill_id="119-hr-1", chamber="House")
         senate = RollCall(id=2, bill_id="119-hr-1", chamber="Senate")
         house_new = RollCall(id=3, bill_id="119-hr-1", chamber="House")
         # Helper expects newest-first order, matching _roll_calls_by_bill.
-        ids = _latest_roll_call_ids([house_new, senate, house_old])
-        self.assertEqual(set(ids), {3, 2})
+        ids = _tally_roll_call_ids([house_new, senate, house_old])
+        self.assertEqual(ids, {"house": 3, "senate": 2})
+
+    def test_tally_prefers_the_latest_passage_vote(self):
+        from models import RollCall
+
+        passage = RollCall(id=1, chamber="House", question="On Motion to Suspend the Rules and Pass")
+        recommit = RollCall(id=2, chamber="House", question="On Motion to Recommit")
+        cloture = RollCall(id=3, chamber="Senate", question="On Cloture on the Motion to Proceed H.R. 1")
+        ids = _tally_roll_call_ids([cloture, recommit, passage])
+        self.assertEqual(ids, {"house": 1, "senate": 3})
 
 
 class BillFeedSortTests(unittest.TestCase):

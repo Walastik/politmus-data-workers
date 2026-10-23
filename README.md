@@ -130,6 +130,19 @@ python congress_client.py senate-votes --congress 119 --session 1
 python congress_client.py enrich
 ```
 
+**House votes catch-up** — the `bills` command only sees recently updated bills, so House roll calls on bills it missed never arrived (the Senate has its own menu sweep). This compares each session's Congress.gov `house-vote` list to `roll_calls` and fetches only the missing ones, creating bills that are not stored yet. The first run backfills every House vote of the congress; later runs are two list requests per session:
+
+```bash
+python congress_client.py house-votes --congress 119 --all-sessions
+```
+
+**Bill context** (`bill_context.py`) — for voted bills, stores what explains how a bill was received: amendments filed (`bill_amendments`: sponsor, party, latest action, the start of their text), floor speeches from the Congressional Record and committee report minority / dissenting / additional views (`bill_sources`: speaker, party, text), the full action list (`bills.actions`), and links to committee reports and CBO estimates (`bills.documents`). Speeches come from Record articles headed with the bill's short title or number, on the days of its floor actions (and the days between actions up to two weeks apart); speakers are matched to officials by surname, chamber and state. A bill is re-fetched only when its latest action changes:
+
+```bash
+python congress_client.py context --limit 40
+python congress_client.py context --bill-id 119-hr-9340
+```
+
 **Extract bill effects (superseded)** — the bill classifier (`scripts/classify_bills.py`, below) now writes `bill_effects` from the same run as the drawer's intents; stop this worker's cron once the classifier has run. It sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores normalized policy facts: a growing `policy_targets` catalog (the nouns, e.g. ICE, Voting Eligibility) and one `bill_effects` row per fact (`mechanism`, `direction`, `magnitude`, `rationale`). Only bills with a summary and no effects yet are processed, unless you pass `--force`. Extraction rules live in `extraction_guidelines` so you can update the prompt in Postgres without changing worker code.
 
 Requires a running Ollama instance (default `http://localhost:11434`) and a pulled model such as `qwen2.5-coder:32b`. The worker is meant to run on the Mac Mini that hosts Ollama, pointed at the same `DATABASE_URL` as the rest of the pipeline.
@@ -167,7 +180,7 @@ All Congress.gov requests pause briefly between calls and retry with exponential
 Writes the TLDR, ELI5 and policy intents shown in the bill drawer (`bills.classification_metadata`) and the matching `bill_effects` rows used for vote scoring, from each bill's CRS summary, with a local Ollama model. Runs on the Mac Mini against the same `DATABASE_URL` (the Fly database). Launch it with `./scripts/run_classifier.sh [args]` from the repo root (activates the venv) or `python scripts/classify_bills.py [args]` from `backend/`.
 
 1. **Input.** The CRS summary HTML is turned into text with `## ` headings (bold-only paragraphs such as `TITLE I--…` / `Subtitle A--…`), and is never truncated. Summaries up to `--chunk-chars` (default 10,000) go to the model in one call that returns `tldr`, `eli5` and `intents`. Longer ones are split at headings into chunks of about that size; each chunk gets its own intents-only call (`--concurrency 2` in parallel), and one final call writes `tldr` and `eli5` from the opening of the summary plus the merged intent list.
-2. **Schema.** The output schema is in the repo (`services/bill_classification.py`): `tldr` and `eli5` are required and must be at least 20 characters, and each intent is `citation` (first), `target`, `mechanism`, `direction`, `magnitude`, `rationale`, with the same enums as `bill_effects`. If a full answer comes back without a TLDR/ELI5, one TLDR/ELI5-only call fills them in; if they are still missing the bill is saved as `incomplete` (never `ok`) and retried later.
+2. **Schema.** The output schema is in the repo (`services/bill_classification.py`): `tldr` and `eli5` are required and must be at least 20 characters, and each intent is `citation` (first), `target`, `mechanism`, `direction`, `magnitude`, `relation`, `rationale`, with the same enums as `bill_effects`. `relation` is `core` (part of the bill's stated purpose) or `secondary` (an unrelated add-on); it is stored on `bill_effects.relation`, and chunks after the first get the summary's opening as context for it. The bill drawer flags broad bills (10 or more effects) and lists secondary effects as unrelated provisions. If a full answer comes back without a TLDR/ELI5, one TLDR/ELI5-only call fills them in; if they are still missing the bill is saved as `incomplete` (never `ok`) and retried later.
 3. **Verification.** An intent is dropped when its `citation` is not in the text the model saw (ignoring whitespace, curly quotes, markdown and case; no ellipses) or its target is a bill name or number. Long-standing laws used as programs (Affordable Care Act, Clean Water Act, …) are allowed. Duplicates by (target, mechanism) are merged: the higher magnitude is kept and directions vote, weighted by magnitude; only an exact tie becomes `mixed`. At most 60 intents are kept, strongest first.
 4. **Saving.** Each bill is saved in its own transaction: `classification_metadata` (the frontend keys plus `model`, `version`, `classified_at`, `chunks`, `rejected`), and its `bill_effects` rows are replaced with the verified intents (citation appended to the rationale), so the drawer and vote scoring come from the same run. No database connection is held while the model runs. A failure or incomplete answer records the status and error and keeps the previous metadata and effects.
 
@@ -193,6 +206,17 @@ caffeinate -i ./scripts/run_classifier.sh --limit 0 2>&1 | tee -a ~/bill_classif
 
 On the Mac Mini, set `OLLAMA_NUM_PARALLEL=2` for Ollama to match `--concurrency`, and check `ollama list` shows the model tag.
 
+**Legal force.** Each intent also has a `legal_force` (`binding`, `conditional`, `advisory`, `expresses_view`), and the request tells the model to keep it in the TLDR and ELI5, so a bill that "requires states to consider" a standard is not summarized as one that requires the standard. That rule is in the request (`services/bill_classification.py`), not the local prompts. Scoring leaves advisory and sense-of-Congress provisions out (`non_binding_provision`).
+
+### `debate_worker.py` (run as `scripts/run_debate.sh`)
+
+Writes "Where the sides disagree" in the bill drawer (`bills.debate_metadata`): one neutral sentence naming the dispute and each side's main arguments, from the floor speeches and committee views `congress_client.py context` stored, with a local Ollama model (same defaults as the classifier; `DEBATE_MODEL` overrides). The rules are in `services/bill_debate.py`, and neutrality is enforced in code: every argument must quote its source word for word or it is dropped; the speaker, party and Record link come from the stored source, not the model; sides are assigned by what members argued, not by party; both sides keep the same number of points; loaded wording outside quotes drops the point. A bill is due when its sources, the prompt, or the model change. The prompt is `DEFAULT_DEBATE_PROMPT` unless the gitignored `backend/scripts/debate_llm_config.py` defines `DEBATE_PROMPT`.
+
+```bash
+./scripts/run_debate.sh --bill-id 119-hr-9340 --dry-run
+./scripts/run_debate.sh --limit 50
+```
+
 **Prompts are local, not in the repo.** The worker reads `SYSTEM_PROMPT` (and optionally `SUMMARY_PROMPT`, for the TLDR/ELI5 call) from `backend/scripts/llm_config.py`, which is gitignored. A `ClassificationMetadata` class left in that file is ignored; the schema is in the repo. To start from scratch:
 
 ```bash
@@ -206,13 +230,13 @@ Builds a citable record of what each official **says** they stand for, so it can
 1. **Crawls** the official site (from Congress.gov). It follows nav links that look like an issues section (`Issues`, `Priorities`, `On the Issues`, `In Congress`, …) and then the issue pages beneath them. If none are found it tries common paths (`/issues`, `/priorities`, …), then asks the model to pick from the homepage's links. Press releases, news, contact forms, constituent services, community-project / appropriations request lists, contests and nomination forms are skipped, and pages with identical text (e.g. `?page=0` copies) are kept once. The crawler stays on the official's own host, obeys `robots.txt` (a `robots.txt` that redirects to an error page counts as having no rules, as with major search engines), skips error pages that missing paths redirect to (e.g. `/404?notfound=/issues`), waits 3 seconds between requests to a site, fetches at most 20 HTML pages, does not run JavaScript, and identifies itself with an honest User-Agent (`POLITMUS_CRAWLER_UA`). Sites that answer 403 are recorded as `blocked` and are not worked around.
 2. **Extracts** positions with the local Ollama model. Page text (markdown with headings kept) is split at headings into chunks of about 10,000 characters, and each chunk is its own small request (fixed `num_ctx`, default 16k; `--concurrency 2` parallel requests). Thinking is off by default (`--think` turns it on), because reasoning models like Nemotron otherwise spend the output budget on hidden reasoning and return an empty answer. An empty or cut-off answer (output limit reached before the JSON ends) is retried once with double `--num-predict` (default 4096). If it is still cut off, the chunk is split in half at paragraph/sentence boundaries and each half is extracted, down to about 2,000 characters. If it is still empty, the error says why. The prompts come from the gitignored `backend/scripts/positions_llm_config.py` (see below). Each request also gets the most-used bill target names so both sides reuse the same nouns.
 3. **Verifies** every position: its `evidence_quote` must appear on the page (ignoring whitespace, curly quotes, markdown, and case). Positions whose quote is not on the page are discarded and counted as "Rejected (bad quote)". Positions whose target is a bill name or number ("National Defense Authorization Act", "H.R. 1976") are discarded as "Rejected (bill name)", because a bill name says nothing about which policy moves which way. Long-standing laws people treat as programs (Affordable Care Act, Voting Rights Act, …) are allowed. Statements about the same target and mechanism are merged by an emphasis-weighted vote on the official's direction; only an exact tie becomes `mixed`.
-4. **Saves** one row per (target, mechanism) in `official_stances`. The model labels the policy action the text talks about the same way a bill effect is labelled (target, mechanism, direction), plus whether the official `supports` or `opposes` it. The code then works out what the official wants: "fights cuts to Medicaid" is stored as `direction=increase`, with `stance=opposes` and `policy_direction=decrease` kept for display. Each row has `target_id` (shared `policy_targets`, joins `bill_effects`), `target_name`/`target_slug` (joins `bills.classification_metadata` intents), `policy_area` (CRS area, joins `bills.policy_area`; treat it as a grouping hint, since local models pick it less reliably than the target), `mechanism`, `direction`, `emphasis`, `issue_label`, `summary`, `evidence_quote`, and `source_url`. Crawled page text goes in `official_source_pages`. `GET /api/officials/{id}` returns the rows as `stated_positions`.
+4. **Saves** one row per (target, mechanism) in `official_stances`. The model labels the policy action the text talks about the same way a bill effect is labelled (target, mechanism, direction), plus whether the official `supports` or `opposes` it. The code then works out what the official wants: "fights cuts to Medicaid" is stored as `direction=increase`, with `stance=opposes` and `policy_direction=decrease` kept for display. Each row has `target_id` (shared `policy_targets`, joins `bill_effects`), `target_name`/`target_slug` (joins `bills.classification_metadata` intents), `policy_area` (CRS area, joins `bills.policy_area`; treat it as a grouping hint, since local models pick it less reliably than the target), `mechanism`, `direction`, `emphasis` (how directly the quote states the change: `high` names it, `medium` clearly implies it, `low` is inferred from a slogan or value statement), `scope` (`local` for one district, state, facility, or project; otherwise `national`; any national statement makes a merged position national), `issue_label`, `summary`, `evidence_quote`, and `source_url`. Crawled page text goes in `official_source_pages`. `GET /api/officials/{id}` returns the rows as `stated_positions`.
 
 Re-running is idempotent. `official_position_sync` records each official's status (`ok`, `no_positions`, `no_issue_pages`, `blocked`, `needs_js` (a JavaScript app shell with no readable text), `thin_site` (a server-rendered site with almost no text and no issue pages), `no_website`, `failed`), a hash of their pages, and the extractor version (schema, prompt row, and model). An official is only picked up when never processed, older than `--max-age-days` (default 30), a prompt or the model changed, or a failure is past its backoff. If the pages are unchanged, the model is not called. Each official is written in one transaction, so a failed run keeps their previous positions. A lock file stops overlapping runs.
 
 ```bash
 python official_positions.py --limit 20 --crawl-only        # see which pages are found; no model calls
-python official_positions.py --official-id O000172 --dry-run # crawl + model, print JSON, write nothing
+python official_positions.py --official-id O000172 --dry-run # crawl + model, print JSON, write nothing (--official-id is repeatable)
 python official_positions.py --limit 3                      # test on a few
 python official_positions.py --show O000172                 # print stored positions
 python official_positions.py --extract-only --force         # re-run the model on stored pages
@@ -250,6 +274,74 @@ cp backend/scripts/positions_llm_config.example.py backend/scripts/positions_llm
 ```
 
 Without it, every mode except `--crawl-only` stops with an error saying the file is missing. Editing either prompt changes the extractor version (a hash of both prompts plus the model), so each official is re-extracted on their next run, or right away from stored pages with `--extract-only`.
+
+### `score_officials.py` (accountability / litmus score)
+
+Scores whether officials vote for what they say they want. Each classified bill intent (`bill_effects`) that matches one of the official's stated positions (`official_stances`, same `mechanism` and the same target or a near match, see below) is scored against their passage vote on that bill:
+
+| Stance vs. bill intent | Yes | No |
+|---|---|---|
+| Same direction (wants increase, bill increases) | +1 | −1 |
+| Opposite direction (wants increase, bill cuts) | −1 | +1 |
+| Either side `maintain` / `mixed` | 0 | 0 |
+
+Not every match counts. A match is kept (with a `reason`, shown in the drawer) but not counted when:
+
+- the position is `low` emphasis (`low_emphasis`);
+- the position is `local` and the bill is broad, 10 or more effects (`local_on_broad_bill`);
+- the position is not `high` emphasis and the effect is an unrelated add-on, `relation = secondary` (`unrelated_provision`), or anything but a `high`-magnitude effect of a broad bill (`minor_provision`). High-emphasis positions name the change, so they count on any provision; a counted secondary effect is labelled "via an unrelated provision";
+- a later vote in the same Congress matched the same policy (target, mechanism, and effect direction), so a chamber's version and the final bill count once (`later_vote`).
+
+Each vote then scores once: its counted matches net to +1, −1, or 0, so a vote touching several matching intents is one point, and one whose matches cancel out is neither aligned nor conflicting. Not Voting and Present never score. Only passage-type votes count (On Passage, Suspend the Rules and Pass/Agree, Agreeing to the Resolution, conference reports, concurring in the other chamber's amendment, veto overrides); procedural motions (recommit, previous question, cloture, table, …) and amendment votes do not. When a bill has several passage votes in one chamber, only the official's latest Yes/No counts. Bills must have `classification_status = ok`.
+
+Results go in `vote_alignments` (one row per match, counted or not, with `counted`, `reason`, the bill's effect and the official's quote, so every point has a receipt) and `official_scores` (raw `points`, `aligned` and `conflicting` votes, `alignment_pct` = aligned ÷ scored votes, a per-policy-area breakdown). Officials with positions but no scored votes get a zero row; officials without positions get none. The API returns `score_points` / `score_pct` / `score_matches` on `GET /api/officials` and the full `accountability` + `alignments` on `GET /api/officials/{id}`; the UI hides the percentage below 5 scored votes.
+
+No model calls, so a full run takes seconds. It is idempotent: each official's computed rows are hashed (with `ENGINE_VERSION` in `services/accountability.py`) and only changed officials are rewritten. It runs on its own when inputs change: the bill classifier rescores everyone who voted on each bill it classifies, the positions worker rescores each official it saves, and the ingest workflows run it after new votes. Bump `ENGINE_VERSION` when the rules change.
+
+```bash
+./scripts/run_scoring.sh                       # incremental: only officials whose inputs changed
+./scripts/run_scoring.sh --all                 # rewrite everyone
+./scripts/run_scoring.sh --official-id O000172 # one official (repeatable)
+./scripts/run_scoring.sh --bill-id 119-hr-105  # everyone who voted on a bill (repeatable)
+./scripts/run_scoring.sh --dry-run             # compute and report, write nothing
+./scripts/run_scoring.sh --show O000172        # print one official's score and matches
+```
+
+#### Target matching (`match_targets.py`)
+
+The bill classifier and the positions extractor name targets independently, and the names drift between runs ("Voter Registration" on a bill, "Automatic Voter Registration" in a position). So targets also match by meaning: the workers embed every target name with a local Ollama embedding model (`TARGET_EMBED_MODEL`, default `nomic-embed-text`) and store each pair with cosine similarity of at least 0.75 in `target_matches`. Similar names are not always the same policy ("Naval Petroleum Reserves" is not the "Strategic Petroleum Reserve"), and some point opposite ways (more "Voter Registration Requirements" means less "Automatic Voter Registration"). So each pair that could score (a bill intent's target and the position target of an official who voted on that bill, same mechanism, similarity at least `TARGET_REVIEW_FLOOR`, default 0.8) is reviewed once by the worker's chat model and stored with a verdict: `same`, `inverse` (scoring flips the bill's direction before comparing), or `unrelated`. A verdict decides; an unreviewed pair counts when its similarity is at least `TARGET_MATCH_THRESHOLD` (default 0.85). An exact target always wins over a near one, and the match row records the position's own target, the similarity, and whether it was inverse (the drawer shows "their position is on …"). Scoring itself never calls a model, so it still runs on Fly and in CI; targets not embedded yet only match exactly.
+
+Setup on the worker machine: `pip install -r backend/requirements-worker.txt` (numpy) and `ollama pull nomic-embed-text`. The workers embed and review after each bill or official (the review uses the worker's own model, `TARGET_REVIEW_MODEL` by hand); after changing the model, or to backfill, run it by hand and rescore:
+
+```bash
+cd backend
+python match_targets.py                                # embed targets added since the last run
+python match_targets.py --rebuild                      # re-embed everything
+python match_targets.py --official-id B001267         # also review that official's pairs (repeatable; --bill-id too)
+python match_targets.py --review-all                   # review every pair that could score (slow)
+python match_targets.py --neighbors "Voter Registration"   # stored matches and verdicts for one name
+../scripts/run_scoring.sh
+```
+
+The lab report lists each fixture official's near misses (similar names just below the threshold) for tuning it; try a threshold with `TARGET_MATCH_THRESHOLD=0.8 ./scripts/lab.sh grade`.
+
+### `lab.py` (scoring lab)
+
+For the step-by-step tuning loop and how to roll a change out afterwards, see [docs/scoring-tuning.md](docs/scoring-tuning.md).
+
+A fast loop for tuning the bill prompt, the positions prompt, and scoring on a small fixed set: one broad and one narrow bill (plus a bill for any chamber those two miss) and three officials per party, each party with at least one senator and one representative who voted on them. It runs the real workers against the `DATABASE_URL` database, so the fixture rows are updated in place.
+
+```bash
+./scripts/lab.sh pick             # choose the fixture (edit ~/politmus-lab/fixture.json to swap anything)
+./scripts/lab.sh report           # snapshot what is stored now (use first, as the baseline)
+./scripts/lab.sh bills            # re-classify the fixture bills, regrade, report
+./scripts/lab.sh positions        # re-extract the fixture officials from stored pages (no crawl), regrade, report
+./scripts/lab.sh grade            # regrade only, report
+./scripts/lab.sh all              # bills, positions, grade, report
+./scripts/lab.sh positions -- --model gemma3:27b   # arguments after -- go to the worker
+```
+
+Each report is saved under `~/politmus-lab/runs/<time>/` (`report.md`, `snapshot.json`, `diff.txt`, set `LAB_DIR` to move it) with the git commit and a hash of each local prompt file, and prints what changed since the previous run: effects and positions added, removed, or relabelled, and score and match changes. `positions` takes the same lock as a full positions run, so stop a full run first.
 
 ### `openstates_client.py`
 
@@ -373,6 +465,8 @@ fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.p
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py bills"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py enrich"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py senate-votes --congress 119 --all-sessions"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py house-votes --congress 119 --all-sessions"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py context --limit 200"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py crosswalk"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py candidates"

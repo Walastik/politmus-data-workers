@@ -201,6 +201,11 @@ function PositionItem({
               {position.emphasis}
             </span>
           ) : null}
+          {position.scope === 'local' ? (
+            <span className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-400">
+              local
+            </span>
+          ) : null}
         </div>
       </div>
       {line ? <p className="mt-1 text-[11px] text-slate-400">{line}</p> : null}

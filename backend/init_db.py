@@ -244,6 +244,7 @@ def ensure_schema():
             "extracted_at TIMESTAMP",
             "extractor_version VARCHAR",
             "model VARCHAR",
+            "scope VARCHAR",
         ):
             conn.execute(text(
                 f"ALTER TABLE official_stances ADD COLUMN IF NOT EXISTS {column_sql}"
@@ -266,6 +267,34 @@ def ensure_schema():
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_policy_targets_slug "
             "ON policy_targets (slug)"
         ))
+        conn.execute(text("ALTER TABLE bill_effects ADD COLUMN IF NOT EXISTS relation VARCHAR"))
+        conn.execute(text("ALTER TABLE bill_effects ADD COLUMN IF NOT EXISTS legal_force VARCHAR"))
+        for column_sql in (
+            "actions JSONB",
+            "documents JSONB",
+            "context_synced_at TIMESTAMP",
+            "context_input VARCHAR",
+            "debate_metadata JSONB",
+            "debate_status VARCHAR",
+            "debate_attempted_at TIMESTAMP",
+        ):
+            conn.execute(text(f"ALTER TABLE bills ADD COLUMN IF NOT EXISTS {column_sql}"))
+        for column_sql in (
+            "effect_relation VARCHAR",
+            "effect_legal_force VARCHAR",
+            "stance_scope VARCHAR",
+            "bill_effect_count INTEGER",
+            "counted BOOLEAN NOT NULL DEFAULT true",
+            "reason VARCHAR",
+            "stance_target_id INTEGER",
+            "stance_target_name VARCHAR",
+            "match_similarity DOUBLE PRECISION",
+            "match_inverse BOOLEAN NOT NULL DEFAULT false",
+        ):
+            conn.execute(text(
+                f"ALTER TABLE vote_alignments ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
+        conn.execute(text("ALTER TABLE target_matches ADD COLUMN IF NOT EXISTS verdict VARCHAR"))
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS "
             "uq_bill_effects_bill_target_mechanism "

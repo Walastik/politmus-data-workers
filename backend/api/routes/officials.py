@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, load_only
 from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.routes.candidates import race_for
 from api.schemas import (
+    AccountabilityScoreOut,
     CandidacyOut,
     FinanceElectionOut,
     FinanceStateOut,
@@ -23,6 +24,7 @@ from api.schemas import (
     OutsideSpendingOut,
     PeerComparisonOut,
     PositionsSyncOut,
+    VoteAlignmentOut,
 )
 from database import get_db
 from models import (
@@ -31,9 +33,11 @@ from models import (
     Official,
     OfficialFinanceTotal,
     OfficialPositionSync,
+    OfficialScore,
     OfficialStance,
     RollCall,
     Vote,
+    VoteAlignment,
 )
 from services import candidate_races, finance_insights
 from services.candidate_races import CANDIDATE_LEVEL, current_cycle
@@ -74,11 +78,19 @@ def list_officials(
     ),
     db: Session = Depends(get_db),
 ):
-    # One LEFT JOIN for the positions worker status; stances_saved stands in
-    # for the stance count so the list never aggregates official_stances.
-    query = db.query(
-        Official, OfficialPositionSync.status, OfficialPositionSync.stances_saved
-    ).outerjoin(OfficialPositionSync, OfficialPositionSync.official_id == Official.id)
+    # LEFT JOINs for the positions worker status and the accountability
+    # score; stances_saved stands in for the stance count so the list never
+    # aggregates official_stances.
+    query = (
+        db.query(
+            Official,
+            OfficialPositionSync.status,
+            OfficialPositionSync.stances_saved,
+            OfficialScore,
+        )
+        .outerjoin(OfficialPositionSync, OfficialPositionSync.official_id == Official.id)
+        .outerjoin(OfficialScore, OfficialScore.official_id == Official.id)
+    )
     party_value = normalize_party(party)
     state_value = normalize_state(state)
     name_pattern = name_search_pattern(q)
@@ -105,10 +117,20 @@ def list_officials(
     rows = query.order_by(Official.name).limit(limit).all()
     return [
         OfficialOut.model_validate(official).model_copy(
-            update={"positions_status": status, "positions_count": count}
+            update={"positions_status": status, "positions_count": count, **_score_fields(score)}
         )
-        for official, status, count in rows
+        for official, status, count, score in rows
     ]
+
+
+def _score_fields(score: Optional[OfficialScore]) -> dict:
+    if score is None:
+        return {}
+    return {
+        "score_points": score.points,
+        "score_pct": score.alignment_pct,
+        "score_matches": score.aligned + score.conflicting,
+    }
 
 
 def _finance_election_out(row):
@@ -260,6 +282,18 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         .all()
     )
     sync = db.get(OfficialPositionSync, official_id)
+    score = db.get(OfficialScore, official_id)
+    alignment_rows = (
+        db.query(VoteAlignment, Bill.title)
+        .join(Bill, Bill.id == VoteAlignment.bill_id)
+        .filter(VoteAlignment.official_id == official_id)
+        .order_by(
+            nulls_last(desc(VoteAlignment.vote_date)),
+            VoteAlignment.bill_id,
+            VoteAlignment.target_name,
+        )
+        .all()
+    )
     candidacies = (
         db.query(Candidacy)
         .filter(Candidacy.official_id == official_id)
@@ -306,6 +340,12 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         ],
         stated_positions=[OfficialStanceOut.model_validate(s) for s in stances],
         positions_sync=PositionsSyncOut.model_validate(sync) if sync else None,
+        **_score_fields(score),
+        accountability=AccountabilityScoreOut.model_validate(score) if score else None,
+        alignments=[
+            VoteAlignmentOut.model_validate(alignment).model_copy(update={"bill_title": title})
+            for alignment, title in alignment_rows
+        ],
         wikipedia_url=official.wikipedia_url,
         bio=OfficialBioOut(**official.bio) if official.bio else None,
         candidacies=[_candidacy_out(candidacy) for candidacy in candidacies],

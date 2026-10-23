@@ -8,6 +8,8 @@ chamber passage.
 
 import re
 
+from services.vote_questions import is_passage_question
+
 STATUS_BECAME_LAW = "Became Law"
 STATUS_VETOED = "Vetoed"
 STATUS_FAILED = "Failed"
@@ -31,10 +33,6 @@ BILL_STATUSES = (
 HOUSE_BILL_TYPES = frozenset({"hr", "hres", "hjres", "hconres"})
 SENATE_BILL_TYPES = frozenset({"s", "sres", "sjres", "sconres"})
 
-_PASSAGE_QUESTION_RE = re.compile(
-    r"\bon passage\b|\bon the passage\b|\bpassage\b",
-    re.IGNORECASE,
-)
 _PASSED_RESULT_RE = re.compile(
     r"\bpassed\b|\bagreed to\b|\boverridden\b",
     re.IGNORECASE,
@@ -98,8 +96,9 @@ def _chamber_key(value):
 
 
 def _is_passage_roll_call(roll_call):
-    question = str(_attr(roll_call, "question") or "")
-    return bool(_PASSAGE_QUESTION_RE.search(question))
+    # Includes suspension votes ("On Motion to Suspend the Rules and Pass"),
+    # how the House passes most bills.
+    return is_passage_question(_attr(roll_call, "question"))
 
 
 def _passage_by_chamber(roll_calls):
