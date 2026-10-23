@@ -2,10 +2,12 @@ import {
   partyBadgeClass,
   partyShort,
   type Bill,
+  type BillRollCall,
   type BillVotePartySummary,
   type ChamberVoteSummary,
   type VoteChamber,
 } from './types'
+import { voteKindNote } from './voteContext'
 
 const PARTY_PIES = ['Democratic', 'Republican', 'Independent'] as const
 
@@ -165,17 +167,37 @@ function PartyVotePie({
   return <div className={className}>{pie}</div>
 }
 
+// What the tallied vote was on, so a cloture or amendment vote is not read
+// as a vote on the bill itself.
+function TalliedVoteLabel({ rollCall }: { rollCall?: BillRollCall | null }) {
+  if (!rollCall) return null
+  const note = voteKindNote(rollCall)
+  if (!note) {
+    return <p className="mt-0.5 text-[11px] text-slate-500">Vote on passage</p>
+  }
+  return (
+    <p className="mt-1 rounded border border-sky-700/40 bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200">
+      <strong className="font-semibold">
+        {rollCall.vote_kind === 'amendment' ? 'Amendment vote.' : 'Procedural vote.'}
+      </strong>{' '}
+      {note}
+    </p>
+  )
+}
+
 function ChamberTally({
   label,
   chamber,
   summary,
   byParty,
+  rollCall,
   onPartyClick,
 }: {
   label: string
   chamber: VoteChamber
   summary: ChamberVoteSummary | undefined
   byParty: Record<string, ChamberVoteSummary> | undefined
+  rollCall?: BillRollCall | null
   onPartyClick?: (chamber: VoteChamber, party: string) => void
 }) {
   const yes = summary?.Yes ?? 0
@@ -204,6 +226,7 @@ function ChamberTally({
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         {label}
       </p>
+      <TalliedVoteLabel rollCall={rollCall} />
       <div className="mt-1.5 flex h-2 overflow-hidden rounded bg-slate-700">
         <div className="bg-emerald-500" style={{ width: `${yesPct}%` }} />
         <div className="bg-red-500" style={{ width: `${noPct}%` }} />
@@ -232,10 +255,13 @@ function ChamberTally({
 export default function VoteTallyBar({
   summary,
   byParty,
+  rollCalls,
   onPartyClick,
 }: {
   summary: Bill['votes_summary']
   byParty?: BillVotePartySummary
+  // The roll call each chamber's tally counts, to label its kind.
+  rollCalls?: Partial<Record<VoteChamber, BillRollCall | null>>
   onPartyClick?: (chamber: VoteChamber, party: string) => void
 }) {
   const house = summary?.house
@@ -251,6 +277,7 @@ export default function VoteTallyBar({
         chamber="house"
         summary={house}
         byParty={byParty?.house}
+        rollCall={rollCalls?.house}
         onPartyClick={onPartyClick}
       />
       <ChamberTally
@@ -258,10 +285,13 @@ export default function VoteTallyBar({
         chamber="senate"
         summary={senate}
         byParty={byParty?.senate}
+        rollCall={rollCalls?.senate}
         onPartyClick={onPartyClick}
       />
       <p className="text-[10px] text-slate-600">
-        Latest roll call stored for each chamber
+        {rollCalls
+          ? 'Latest vote on passage in each chamber, or the latest vote if none'
+          : 'Latest roll call stored for each chamber'}
       </p>
     </div>
   )

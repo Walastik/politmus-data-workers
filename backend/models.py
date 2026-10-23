@@ -96,6 +96,22 @@ class Bill(Base):
     classification_error = Column(Text, nullable=True)
     classification_attempted_at = Column(DateTime, nullable=True)
     classified_at = Column(DateTime, nullable=True)
+    # Congress.gov actions, newest first: [{"date", "text", "type", "chamber"}].
+    actions = Column(JSONB, nullable=True)
+    # Links from bill detail: {"short_titles": [...], "committee_reports":
+    # [{"citation", "title", "url"}], "cbo_cost_estimates": [{"title",
+    # "description", "date", "url"}]}.
+    documents = Column(JSONB, nullable=True)
+    # bill_context.py: when amendments / floor speeches / committee views were
+    # last fetched, and the latest action they were fetched for.
+    context_synced_at = Column(DateTime, nullable=True)
+    context_input = Column(String, nullable=True)
+    # services/bill_debate.py output: {"key_dispute", "supporters",
+    # "opponents", "model", "version", "input_hash", "generated_at"}.
+    debate_metadata = Column(JSONB, nullable=True)
+    # ok | failed | no_sources; NULL = never run.
+    debate_status = Column(String, nullable=True)
+    debate_attempted_at = Column(DateTime, nullable=True)
 
     sponsor = relationship("Official", back_populates="bills")
     roll_calls = relationship("RollCall", back_populates="bill")
@@ -173,6 +189,9 @@ class BillEffect(Base):
     # core (the bill's stated purpose) | secondary (an unrelated add-on);
     # NULL for effects classified before the field existed.
     relation = Column(String, nullable=True)
+    # binding | conditional | advisory | expresses_view (see
+    # LEGAL_FORCE_DEFINITIONS); NULL for effects classified before the field.
+    legal_force = Column(String, nullable=True)
 
     bill = relationship("Bill", back_populates="effects")
     target = relationship("PolicyTarget", back_populates="effects")
@@ -191,6 +210,54 @@ class ExtractionGuideline(Base):
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     prompt = Column(Text, nullable=False)
     updated_at = Column(DateTime, nullable=False)
+
+
+class BillAmendment(Base):
+    """An amendment filed to a bill (Congress.gov /bill/.../amendments)."""
+
+    __tablename__ = "bill_amendments"
+
+    # e.g. 119-samdt-6840
+    id = Column(String, primary_key=True)
+    bill_id = Column(String, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True)
+    chamber = Column(String, nullable=True)
+    number = Column(String, nullable=False)
+    sponsor_name = Column(String, nullable=True)
+    sponsor_bioguide_id = Column(String, nullable=True)
+    sponsor_party = Column(String, nullable=True)
+    submitted_date = Column(Date, nullable=True)
+    purpose = Column(Text, nullable=True)
+    latest_action_text = Column(Text, nullable=True)
+    latest_action_date = Column(Date, nullable=True)
+    text_url = Column(String, nullable=True)
+    # Start of the amendment's text from its Congressional Record page.
+    text_excerpt = Column(Text, nullable=True)
+
+
+class BillSource(Base):
+    """Words about a bill from its debate: one member's floor speech in one
+    Congressional Record article, or a committee report's minority /
+    dissenting / additional views. Input to the debate summary."""
+
+    __tablename__ = "bill_sources"
+    __table_args__ = (UniqueConstraint("source_key", name="uq_bill_sources_source_key"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_id = Column(String, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True)
+    # floor_speech | committee_views
+    kind = Column(String, nullable=False)
+    # Article URL + speaker, or report citation + heading.
+    source_key = Column(String, nullable=False)
+    date = Column(Date, nullable=True)
+    chamber = Column(String, nullable=True)
+    # Record article title, or e.g. "H. Rept. 119-814: Dissenting Views".
+    title = Column(String, nullable=True)
+    speaker_name = Column(String, nullable=True)
+    speaker_state = Column(String, nullable=True)
+    speaker_official_id = Column(String, nullable=True)
+    speaker_party = Column(String, nullable=True)
+    text = Column(Text, nullable=False)
+    url = Column(String, nullable=True)
 
 
 class RollCall(Base):
@@ -429,6 +496,7 @@ class VoteAlignment(Base):
     stance_source_url = Column(String, nullable=True)
     policy_area = Column(String, nullable=True)
     effect_relation = Column(String, nullable=True)
+    effect_legal_force = Column(String, nullable=True)
     stance_scope = Column(String, nullable=True)
     # bill_effects rows on the bill; BROAD_BILL_MIN_EFFECTS or more is broad.
     bill_effect_count = Column(Integer, nullable=True)

@@ -245,8 +245,20 @@ def ensure_schema():
             "ON policy_targets (slug)"
         ))
         conn.execute(text("ALTER TABLE bill_effects ADD COLUMN IF NOT EXISTS relation VARCHAR"))
+        conn.execute(text("ALTER TABLE bill_effects ADD COLUMN IF NOT EXISTS legal_force VARCHAR"))
+        for column_sql in (
+            "actions JSONB",
+            "documents JSONB",
+            "context_synced_at TIMESTAMP",
+            "context_input VARCHAR",
+            "debate_metadata JSONB",
+            "debate_status VARCHAR",
+            "debate_attempted_at TIMESTAMP",
+        ):
+            conn.execute(text(f"ALTER TABLE bills ADD COLUMN IF NOT EXISTS {column_sql}"))
         for column_sql in (
             "effect_relation VARCHAR",
+            "effect_legal_force VARCHAR",
             "stance_scope VARCHAR",
             "bill_effect_count INTEGER",
             "counted BOOLEAN NOT NULL DEFAULT true",

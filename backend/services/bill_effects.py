@@ -20,8 +20,27 @@ Mechanism = Literal["funding", "regulation", "oversight", "taxation"]
 Direction = Literal["increase", "decrease", "maintain", "mixed"]
 Magnitude = Literal["low", "medium", "high"]
 Relation = Literal["core", "secondary"]
+LegalForce = Literal["binding", "conditional", "advisory", "expresses_view"]
 
 DEFAULT_GUIDELINES_NAME = "default"
+
+# How much the provision actually changes the law. A bill that tells states
+# to "consider" a standard reads like a mandate in a short summary; this
+# keeps the difference visible and lets scoring set aside provisions that
+# change nothing on their own.
+LEGAL_FORCE_DEFINITIONS = """\
+legal_force:
+- binding: the text requires, prohibits, appropriates, or changes the law \
+directly ("requires", "must", "shall", "prohibits", "appropriates")
+- conditional: takes effect only if someone opts in or a condition is met \
+(grants states may apply for, a program that starts upon certification)
+- advisory: asks someone to consider, study, or report on a change without \
+requiring it ("requires states to consider", "encourages", "may", \
+"authorizes but does not require")
+- expresses_view: sense of Congress or sense of the Senate, findings, or \
+resolutions with no legal effect
+"""
+NON_BINDING_FORCES = ("advisory", "expresses_view")
 
 # Shared by bill extraction and official stated-position extraction so both
 # sides of the accountability comparison label mechanism/direction the same way.
@@ -96,6 +115,10 @@ class ExtractedEffect(BaseModel):
     relation: Optional[Relation] = Field(
         default=None,
         description="core if part of the bill's stated purpose, secondary if an unrelated add-on.",
+    )
+    legal_force: Optional[LegalForce] = Field(
+        default=None,
+        description="binding, conditional, advisory, or expresses_view.",
     )
 
 
@@ -288,6 +311,7 @@ def persist_bill_effects(
             existing.magnitude = effect.magnitude
             existing.rationale = effect.rationale
             existing.relation = effect.relation
+            existing.legal_force = effect.legal_force
             stored.append(existing)
             continue
         row = BillEffect(
@@ -298,6 +322,7 @@ def persist_bill_effects(
             magnitude=effect.magnitude,
             rationale=effect.rationale,
             relation=effect.relation,
+            legal_force=effect.legal_force,
         )
         session.add(row)
         stored.append(row)

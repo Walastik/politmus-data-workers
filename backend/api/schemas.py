@@ -130,6 +130,7 @@ class VoteAlignmentOut(BaseModel):
     stance_source_url: Optional[str] = None
     policy_area: Optional[str] = None
     effect_relation: Optional[str] = None
+    effect_legal_force: Optional[str] = None
     stance_scope: Optional[str] = None
     bill_effect_count: Optional[int] = None
     stance_target_name: Optional[str] = None
@@ -471,6 +472,39 @@ class RollCallOut(BaseModel):
     result: Optional[str] = None
     requires: Optional[str] = None
     source_roll_call_id: str
+    # passage | procedural | amendment | other (services/vote_questions.py)
+    vote_kind: Optional[str] = None
+
+
+class BillAmendmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    chamber: Optional[str] = None
+    number: str
+    sponsor_name: Optional[str] = None
+    sponsor_party: Optional[str] = None
+    submitted_date: Optional[Date] = None
+    purpose: Optional[str] = None
+    latest_action_text: Optional[str] = None
+    latest_action_date: Optional[Date] = None
+    text_url: Optional[str] = None
+    text_excerpt: Optional[str] = None
+
+
+class BillSourceOut(BaseModel):
+    """A floor speech or committee views, without the full text."""
+
+    id: int
+    kind: str
+    date: Optional[Date] = None
+    chamber: Optional[str] = None
+    title: Optional[str] = None
+    speaker_name: Optional[str] = None
+    speaker_state: Optional[str] = None
+    speaker_party: Optional[str] = None
+    words: int
+    url: Optional[str] = None
 
 
 class BillDetailOut(BillOut):
@@ -479,6 +513,14 @@ class BillDetailOut(BillOut):
         default_factory=dict
     )
     roll_calls: list[RollCallOut] = Field(default_factory=list)
+    # Chamber -> roll call id that votes_summary / votes_by_party count.
+    tally_roll_call_ids: dict[str, int] = Field(default_factory=dict)
+    # Detail endpoint only (empty in lists): see bill_context.py.
+    amendments: list[BillAmendmentOut] = Field(default_factory=list)
+    sources: list[BillSourceOut] = Field(default_factory=list)
+    documents: Optional[dict] = None
+    # Where supporters and opponents disagree (services/bill_debate.py).
+    debate: Optional[dict] = None
 
 
 class BillPageOut(BaseModel):

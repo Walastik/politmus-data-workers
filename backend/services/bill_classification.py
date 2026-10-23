@@ -28,6 +28,8 @@ from services.bill_effects import (
     BillEffectsOutput,
     Direction,
     ExtractedEffect,
+    LEGAL_FORCE_DEFINITIONS,
+    LegalForce,
     Magnitude,
     Mechanism,
     Relation,
@@ -44,7 +46,7 @@ from services.official_positions import (
 
 # Bump when the output schema, input text, or validation rules change so
 # every bill is re-classified on the next run.
-SCHEMA_VERSION = "bills-v2"
+SCHEMA_VERSION = "bills-v3"
 
 DEFAULT_CHUNK_CHARS = 10_000
 MIN_SUMMARY_CHARS = 20
@@ -83,6 +85,13 @@ class BillIntent(BaseModel):
             "secondary if it is an add-on unrelated to that purpose."
         )
     )
+    legal_force: LegalForce = Field(
+        description=(
+            "binding if the text requires or changes something directly; conditional if it applies "
+            "only when someone opts in; advisory if it only asks someone to consider, study, or "
+            "report; expresses_view for a sense of Congress or findings."
+        )
+    )
     rationale: str = Field(description="One sentence on why this label fits the citation.")
 
 
@@ -99,13 +108,20 @@ class BillSummaries(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tldr: str = Field(min_length=MIN_SUMMARY_CHARS, description="One or two plain sentences on what the bill does.")
+    tldr: str = Field(
+        min_length=MIN_SUMMARY_CHARS,
+        description=(
+            "One or two plain sentences on what the bill does. Keep each provision's legal force: "
+            "if the bill only asks someone to consider a change, say so."
+        ),
+    )
     eli5: str = Field(
         min_length=MIN_SUMMARY_CHARS,
         description=(
             "The bill explained in plain language for a general reader. Keep specific "
             "real-world terms (e.g. 'data center') and explain them briefly instead of "
-            "replacing them with vague descriptions."
+            "replacing them with vague descriptions. Keep each provision's legal force: never "
+            "describe 'consider' or 'may' as 'must'."
         ),
     )
 
@@ -192,6 +208,7 @@ class ClassificationResult:
                     "direction": i.direction,
                     "magnitude": i.magnitude,
                     "relation": i.relation,
+                    "legal_force": i.legal_force,
                     "rationale": i.rationale,
                     "citation": i.citation,
                 }
@@ -215,6 +232,7 @@ class ClassificationResult:
                 magnitude=i.magnitude,
                 rationale=f'{i.rationale.strip()} "{i.citation}"'.strip(),
                 relation=i.relation,
+                legal_force=i.legal_force,
             )
             for i in self.intents
         ])
@@ -356,6 +374,16 @@ _CITATION_RULE = (
     "is not in the text are discarded. Targets are policy nouns, never bill names."
 )
 _SUMMARY_RULE = f"tldr and eli5 are required and must each be at least {MIN_SUMMARY_CHARS} characters."
+# In the user message, not the local prompts, so it applies whatever
+# llm_config.py says. The classic miss: "requires States to consider
+# implementing a standard" summarized as "requires States to implement".
+_LEGAL_FORCE_RULE = (
+    "Keep the legal force of every provision exactly as the summary states it. "
+    "\"Requires X to consider\", \"encourages\", \"may\", \"authorizes\", and \"sense of Congress\" "
+    "are not mandates: never write them as \"requires X to\", \"must\", or \"ensures\" in the tldr, "
+    "eli5, or rationale.\n"
+    f"{LEGAL_FORCE_DEFINITIONS}"
+)
 _RETRY_NOTE = "Your previous answer left tldr or eli5 empty or too short. Write both."
 
 
@@ -370,7 +398,7 @@ def build_full_messages(prompt: str, bill: BillSnapshot, text: str) -> list[dict
     user = (
         f"Analyze this bill:\n{describe_bill(bill)}\n\n"
         f"Congressional Research Service (CRS) Summary:\n<summary>\n{text}\n</summary>\n\n"
-        f"{_SUMMARY_RULE} {_CITATION_RULE} Return JSON matching the schema."
+        f"{_SUMMARY_RULE} {_CITATION_RULE}\n\n{_LEGAL_FORCE_RULE}\nReturn JSON matching the schema."
     )
     return _messages(prompt, user)
 
@@ -388,7 +416,7 @@ def build_chunk_messages(
     user = (
         f"Analyze this bill:\n{describe_bill(bill)}\n\n{context}{where}.\n<summary>\n{chunk.text}\n</summary>\n\n"
         "Return only the policy intents found in this part; the TLDR and ELI5 are written "
-        f"separately. {_CITATION_RULE} Return JSON matching the schema."
+        f"separately. {_CITATION_RULE}\n\n{_LEGAL_FORCE_RULE}\nReturn JSON matching the schema."
     )
     return _messages(prompt, user)
 
@@ -402,13 +430,14 @@ def build_summary_messages(
     retry: bool = False,
 ) -> list[dict[str, str]]:
     listing = "\n".join(
-        f"- {i.target} / {i.mechanism} / {i.direction} ({i.magnitude})" for i in intents
+        f"- {i.target} / {i.mechanism} / {i.direction} ({i.magnitude}, {i.legal_force})" for i in intents
     ) or "- (none found)"
     user = (
         f"Analyze this bill:\n{describe_bill(bill)}\n\n"
         f"Beginning of the CRS summary:\n<summary>\n{overview}\n</summary>\n\n"
         f"Policy intents found across the whole summary:\n{listing}\n\n"
-        f"Write the tldr and eli5 for the whole bill. {_SUMMARY_RULE} Return JSON matching the schema."
+        f"Write the tldr and eli5 for the whole bill. {_SUMMARY_RULE}\n\n{_LEGAL_FORCE_RULE}\n"
+        "Return JSON matching the schema."
     )
     if retry:
         user += f"\n\n{_RETRY_NOTE}"

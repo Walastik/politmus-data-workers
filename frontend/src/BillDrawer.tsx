@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { BROAD_BILL_MIN_EFFECTS } from './accountability'
 import { apiUrl } from './api'
+import { BillContextSections, DebateSection } from './components/BillContextSections'
 import CopyLinkButton from './components/CopyLinkButton'
 import VotePartyList from './VotePartyList'
 import VoteTallyBar from './VoteTallyBar'
@@ -26,6 +27,7 @@ import {
   type VoteChamber,
 } from './types'
 import { useScrolledPast } from './useScrolledPast'
+import { chamberDivergenceNote, tallyRollCall } from './voteContext'
 
 export default function BillDrawer({
   bill,
@@ -165,18 +167,25 @@ export default function BillDrawer({
               <VoteTallyBar
                 summary={view.votes_summary}
                 byParty={view.votes_by_party}
+                rollCalls={{
+                  house: tallyRollCall(view, 'house'),
+                  senate: tallyRollCall(view, 'senate'),
+                }}
                 onPartyClick={(chamber, party) =>
                   setVoterList({ chamber, party })
                 }
               />
+              <ChamberDivergenceNote bill={view} />
             </div>
             <RollCallList rollCalls={view.roll_calls} />
             <SignedIn>
+              <DebateSection debate={view.debate} />
               <AiClassificationSection
                 metadata={view.classification_metadata}
                 model={view.classification_model}
               />
             </SignedIn>
+            <BillContextSections bill={view} />
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               CRS summary
             </h3>
@@ -206,6 +215,22 @@ export default function BillDrawer({
   )
 }
 
+function ChamberDivergenceNote({ bill }: { bill: Bill }) {
+  const note = chamberDivergenceNote(bill)
+  if (!note) return null
+  return (
+    <p className="mt-3 rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-xs text-slate-200">
+      <strong className="font-semibold">The chambers voted differently.</strong> {note}
+    </p>
+  )
+}
+
+const VOTE_KIND_CHIPS: Record<string, string> = {
+  passage: 'Passage',
+  procedural: 'Procedural',
+  amendment: 'Amendment',
+}
+
 function RollCallList({ rollCalls }: { rollCalls?: BillRollCall[] }) {
   if (!rollCalls || rollCalls.length === 0) {
     return null
@@ -229,9 +254,22 @@ function RollCallList({ rollCalls }: { rollCalls?: BillRollCall[] }) {
               key={rollCall.id}
               className="rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2"
             >
-              <p className="text-sm font-medium text-slate-100">
-                {rollCall.result || 'Recorded vote'}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-100">
+                  {rollCall.result || 'Recorded vote'}
+                </p>
+                {rollCall.vote_kind && VOTE_KIND_CHIPS[rollCall.vote_kind] ? (
+                  <span
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      rollCall.vote_kind === 'passage'
+                        ? 'border-slate-600 bg-slate-800 text-slate-300'
+                        : 'border-sky-600/50 bg-sky-950/40 text-sky-300'
+                    }`}
+                  >
+                    {VOTE_KIND_CHIPS[rollCall.vote_kind]}
+                  </span>
+                ) : null}
+              </div>
               {rollCall.question ? (
                 <p className="mt-0.5 text-xs text-slate-300">{rollCall.question}</p>
               ) : null}
@@ -438,6 +476,34 @@ function BreadthNote({ intents }: { intents: ClassificationIntent[] }) {
   )
 }
 
+// Chip labels for provisions that do not change the law on their own.
+const LEGAL_FORCE_LABELS: Record<string, string> = {
+  conditional: 'Conditional',
+  advisory: 'Advisory',
+  expresses_view: 'Sense of Congress',
+}
+
+// Flags provisions that only ask for a change to be considered, or state a
+// view, so a summary like "states must..." is not read as a mandate.
+function LegalForceNote({ intents }: { intents: ClassificationIntent[] }) {
+  const nonBinding = intents.filter(
+    (intent) => intent.legal_force === 'advisory' || intent.legal_force === 'expresses_view'
+  )
+  if (nonBinding.length === 0) return null
+  const all = nonBinding.length === intents.length
+  return (
+    <div className="mt-3 rounded-lg border border-sky-600/40 bg-sky-950/20 p-3 text-xs text-sky-100">
+      <strong>
+        {all
+          ? 'Non-binding:'
+          : `${nonBinding.length} of ${intents.length} provisions are non-binding:`}
+      </strong>{' '}
+      {all ? 'the bill' : 'they'} ask{all ? 's' : ''} for changes to be considered, studied, or
+      stated as a view, but {all ? 'does' : 'do'} not require them.
+    </div>
+  )
+}
+
 function AiClassificationSection({
   metadata,
   model,
@@ -493,6 +559,7 @@ function AiClassificationSection({
       ) : null}
 
       <BreadthNote intents={intents} />
+      <LegalForceNote intents={intents} />
 
       {intents.length > 0 ? (
         <div className="mt-3 space-y-3">
@@ -526,6 +593,11 @@ function AiClassificationSection({
                   {intent.magnitude ? (
                     <span className="rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono uppercase text-slate-400">
                       {intent.magnitude}
+                    </span>
+                  ) : null}
+                  {intent.legal_force && LEGAL_FORCE_LABELS[intent.legal_force] ? (
+                    <span className="rounded border border-sky-600/50 bg-sky-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-300">
+                      {LEGAL_FORCE_LABELS[intent.legal_force]}
                     </span>
                   ) : null}
                   {intent.relation === 'secondary' ? (
