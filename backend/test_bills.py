@@ -18,6 +18,7 @@ from api.routes.bills import (
     bill_feed_sort_key,
     bills_feed_order,
     last_name_from_official_name,
+    parse_bill_id_query,
     sort_bill_voters,
 )
 from api.schemas import BillVoterOut, OfficialVoteOut, RollCallOut
@@ -303,6 +304,126 @@ class BillFeedSortTests(unittest.TestCase):
         sql = str(stmt.compile(dialect=postgresql.dialect())).lower()
         self.assertIn("voted_date desc nulls first", sql)
         self.assertIn("introduced_date desc nulls last", sql)
+
+
+class BillIdQueryTests(unittest.TestCase):
+    def test_parses_common_bill_number_spellings(self):
+        cases = {
+            "H.R. 1": (None, "hr", "1"),
+            "hr1": (None, "hr", "1"),
+            "HR-0042": (None, "hr", "42"),
+            "S. 5": (None, "s", "5"),
+            "H.J.Res. 7": (None, "hjres", "7"),
+            "S. Con. Res. 3": (None, "sconres", "3"),
+            "h res 9": (None, "hres", "9"),
+            "119-hr-197": ("119", "hr", "197"),
+            "119 S 5": ("119", "s", "5"),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(parse_bill_id_query(text), expected)
+
+    def test_ignores_words_and_bare_numbers(self):
+        for text in ("", None, "veterans", "hr", "1234", "tax hr 1", "hr 1 tax"):
+            with self.subTest(text=text):
+                self.assertIsNone(parse_bill_id_query(text))
+
+
+def _test_database_available() -> bool:
+    url = os.environ.get("DATABASE_URL", "")
+    if not url.rstrip("/").endswith("_test"):
+        return False
+    try:
+        from database import engine
+
+        with engine.connect():
+            return True
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_test_database_available(), "needs a reachable *_test Postgres database")
+class BillSearchApiTests(unittest.TestCase):
+    # Congress 999 keeps seeded bills apart from real ones.
+    PREFIX = "999-"
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+
+        from api.main import app
+        from init_db import ensure_schema
+
+        ensure_schema()
+        cls.client = TestClient(app)
+
+    def setUp(self):
+        from database import SessionLocal
+
+        self.SessionLocal = SessionLocal
+        self._cleanup()
+        session = SessionLocal()
+        session.add_all([
+            Bill(
+                id="999-hr-4521",
+                title="Zzyzx Wildfire Sprinkler Incentive Act",
+                sponsor_name="Rep. Quillfeather, Ada [D-ZZ-1]",
+                policy_area="Emergency Management",
+                summary="<p>This bill funds retrofits in high-rise housing.</p>",
+                level="federal",
+            ),
+            Bill(
+                id="999-sjres-12",
+                title="Zzyzx joint resolution on tariffs",
+                sponsor_name="Sen. Brambleton, Otto [R-ZZ]",
+                policy_area="Foreign Trade and International Finance",
+                level="federal",
+            ),
+        ])
+        session.commit()
+        session.close()
+
+    def tearDown(self):
+        self._cleanup()
+
+    def _cleanup(self):
+        session = self.SessionLocal()
+        session.query(Bill).filter(Bill.id.like(f"{self.PREFIX}%")).delete(
+            synchronize_session=False
+        )
+        session.commit()
+        session.close()
+
+    def _ids(self, q, **params):
+        response = self.client.get("/api/bills", params={"q": q, "limit": 500, **params})
+        self.assertEqual(response.status_code, 200)
+        return [item["id"] for item in response.json()["items"]]
+
+    def test_bill_number_matches_by_id(self):
+        self.assertEqual(self._ids("999 H.R. 4521"), ["999-hr-4521"])
+        self.assertIn("999-sjres-12", self._ids("S.J.Res. 12"))
+        self.assertNotIn("999-hr-4521", self._ids("H.R. 452"))
+
+    def test_bare_number_matches_bill_number(self):
+        self.assertIn("999-hr-4521", self._ids("4521"))
+
+    def test_words_match_title_sponsor_policy_area_and_summary(self):
+        self.assertIn("999-hr-4521", self._ids("wildfire sprinkler"))
+        self.assertIn("999-hr-4521", self._ids("Quillfeather"))
+        self.assertIn("999-sjres-12", self._ids("international finance"))
+        self.assertIn("999-hr-4521", self._ids("retrofits housing"))
+
+    def test_typos_and_partial_words_match_fuzzily(self):
+        self.assertIn("999-hr-4521", self._ids("sprinklr"))
+        self.assertIn("999-hr-4521", self._ids("Quilfeather"))
+        self.assertIn("999-sjres-12", self._ids("Brambl"))
+
+    def test_relevance_sort_puts_the_better_match_first(self):
+        ids = [i for i in self._ids("zzyzx tariffs", sort="relevance") if i.startswith(self.PREFIX)]
+        self.assertEqual(ids[0], "999-sjres-12")
+
+    def test_unrelated_words_match_nothing(self):
+        self.assertNotIn("999-hr-4521", self._ids("tariffs"))
 
 
 if __name__ == "__main__":

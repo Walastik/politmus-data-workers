@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react'
+import { Search, Sparkles } from 'lucide-react'
 import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
@@ -18,6 +18,8 @@ export default function BillsFeed({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [voteStatus, setVoteStatus] = useState<string>('all')
   const [pace, setPace] = useState<string>('all')
   const [status, setStatus] = useState<string>('all')
@@ -28,12 +30,30 @@ export default function BillsFeed({
   const [pageSize, setPageSize] = useState(50)
   const [total, setTotal] = useState(0)
 
+  // Starting a search switches the default sort to best match, and clearing
+  // it switches back; a sort the user picked is left alone.
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const next = query.trim()
+      if (next === debouncedQuery) return
+      if (next && !debouncedQuery) {
+        setSort((current) => (current === 'voted_desc' ? 'relevance' : current))
+      } else if (!next) {
+        setSort((current) => (current === 'relevance' ? 'voted_desc' : current))
+      }
+      setDebouncedQuery(next)
+      setPage(1)
+    }, 250)
+    return () => window.clearTimeout(timeout)
+  }, [query, debouncedQuery])
+
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError(null)
 
     const params = new URLSearchParams()
+    if (debouncedQuery) params.set('q', debouncedQuery)
     if (voteStatus !== 'all') params.set('vote_status', voteStatus)
     if (pace !== 'all') params.set('pace', pace)
     if (status !== 'all') params.set('status', status)
@@ -67,11 +87,25 @@ export default function BillsFeed({
       })
 
     return () => controller.abort()
-  }, [voteStatus, pace, status, sponsorParty, bipartisan, sort, page, pageSize])
+  }, [debouncedQuery, voteStatus, pace, status, sponsorParty, bipartisan, sort, page, pageSize])
 
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm flex flex-wrap gap-4">
+        <label className="relative block w-full">
+          <span className="sr-only">Search bills</span>
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search by bill number (H.R. 1, S. 5), title, sponsor, or topic"
+            className="w-full rounded border border-slate-600 bg-slate-700 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none"
+          />
+        </label>
         <label className="flex flex-col text-sm text-slate-300">
           Vote Status
           <select value={voteStatus} onChange={(e) => { setVoteStatus(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
@@ -120,6 +154,7 @@ export default function BillsFeed({
         <label className="flex flex-col text-sm text-slate-300">
           Sort By
           <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
+            {debouncedQuery ? <option value="relevance">Best Match</option> : null}
             <option value="voted_desc">Voted On (Newest)</option>
             <option value="voted_asc">Voted On (Oldest)</option>
             <option value="introduced_desc">Introduced (Newest)</option>
@@ -141,16 +176,18 @@ export default function BillsFeed({
         <p className="text-red-400">
           {error}. Check that the API is reachable and refresh.
         </p>
-      ) : loading ? (
+      ) : loading && bills.length === 0 ? (
         <p className="text-slate-400">Loading legislation feed...</p>
       ) : bills.length === 0 ? (
-        <p className="text-slate-400">No bills match your filters.</p>
+        <p className="text-slate-400">
+          {debouncedQuery ? `No bills match "${debouncedQuery}" with these filters.` : 'No bills match your filters.'}
+        </p>
       ) : (
         <>
           <p className="text-sm text-slate-400">
             Showing {bills.length}/{total} bill{total === 1 ? '' : 's'}
           </p>
-      <div className="space-y-3">
+      <div className={`space-y-3 transition-opacity ${loading ? 'opacity-50' : ''}`} aria-busy={loading}>
         {bills.map((bill) => (
           <article
             key={bill.id}
