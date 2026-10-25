@@ -337,6 +337,13 @@ def ensure_schema():
             "ON senate_roll_calls (congress, session, vote_number)"
         ))
         conn.execute(text(
+            "ALTER TABLE bill_sources DROP CONSTRAINT IF EXISTS uq_bill_sources_source_key"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_bill_sources_bill_source_key "
+            "ON bill_sources (bill_id, source_key)"
+        ))
+        conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_roll_calls_source_id "
             "ON roll_calls (source_roll_call_id)"
         ))
