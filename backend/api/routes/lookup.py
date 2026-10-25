@@ -5,7 +5,13 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.census import CensusMatch, CensusUnavailable, geocode_address, geocode_coordinates
-from api.schemas import CivicAddressOut, CivicDivisionOut, CivicLookupOut, CivicRepresentativeOut
+from api.schemas import (
+    CivicAddressOut,
+    CivicDivisionOut,
+    CivicLookupOut,
+    CivicRepresentativeOut,
+    GeoPointOut,
+)
 from database import get_db
 from models import Official
 
@@ -258,6 +264,11 @@ def _lookup_for_match(db: Session, match: CensusMatch) -> CivicLookupOut:
             city=match.city,
             state=match.state_abbr,
             zip=match.zip,
+        ),
+        point=(
+            GeoPointOut(lat=match.latitude, lon=match.longitude)
+            if match.latitude is not None and match.longitude is not None
+            else None
         ),
         divisions=divisions,
         representatives=representatives,

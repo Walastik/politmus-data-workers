@@ -7,10 +7,10 @@ from sqlalchemy import tuple_
 from sqlalchemy.orm import Session, load_only
 
 from api.filters import STATE_ABBR_BY_NAME, STATE_NAME_BY_ABBR, normalize_party, normalize_state
-from api.schemas import RaceCandidateOut, RaceOut, RacesPageOut
+from api.schemas import BallotNomineeOut, CandidateIssueOut, RaceCandidateOut, RaceOut, RacesPageOut
 from database import get_db
-from models import Candidacy, Official, OfficialFinanceTotal, OfficialPositionSync
-from services import candidate_races, finance_insights
+from models import Candidacy, Official, OfficialFinanceTotal, OfficialPositionSync, OfficialStance
+from services import ballot_nominees, candidate_races, finance_insights
 from services.candidate_races import CANDIDATE_LEVEL, current_cycle
 
 router = APIRouter()
@@ -58,7 +58,57 @@ def _finance_by_key(db, candidacies):
     return {(row.fec_candidate_id, row.election_year): row for row in rows}
 
 
-def _candidate_out(candidacy, official, positions_count, finance):
+TOP_ISSUES = 3
+EMPHASIS_RANK = {"high": 0, "medium": 1, "low": 2}
+BACKGROUND_ITEMS = 3
+
+
+def issues_by_official(db, official_ids):
+    """Each official's headline issues: one per issue heading, most direct first."""
+    if not official_ids:
+        return {}
+    stances = (
+        db.query(OfficialStance)
+        .filter(OfficialStance.official_id.in_(list(official_ids)))
+        .options(
+            load_only(
+                OfficialStance.official_id,
+                OfficialStance.issue_label,
+                OfficialStance.policy_area,
+                OfficialStance.summary,
+                OfficialStance.source_url,
+                OfficialStance.emphasis,
+                OfficialStance.scope,
+                OfficialStance.id,
+            )
+        )
+        .all()
+    )
+    stances.sort(key=lambda s: (EMPHASIS_RANK.get(s.emphasis, 3), s.scope != "national", s.id))
+    issues = defaultdict(list)
+    for stance in stances:
+        label = (stance.issue_label or stance.policy_area or "").strip()
+        picked = issues[stance.official_id]
+        if not label or len(picked) >= TOP_ISSUES or any(i.label.lower() == label.lower() for i in picked):
+            continue
+        picked.append(CandidateIssueOut(label=label, summary=stance.summary, source_url=stance.source_url))
+    return issues
+
+
+def background(official):
+    """Offices held and occupations from Wikidata, e.g. ["Attorney General of Texas", "lawyer"]."""
+    bio = official.bio or {}
+    items = [p for p in bio.get("positions_held") or [] if p] + [o for o in bio.get("occupations") or [] if o]
+    seen = []
+    for item in items:
+        if item.lower() not in (s.lower() for s in seen):
+            seen.append(item)
+    return seen[:BACKGROUND_ITEMS]
+
+
+def _candidate_out(candidacy, official, positions_count, finance, on_ballot=None, issues=(), website=None):
+    """on_ballot overrides the FEC filing flag when a hand-maintained ballot decides;
+    website fills in when neither FEC nor Wikidata gave one."""
     outside = (finance.outside_spending if finance else None) or {}
     return RaceCandidateOut(
         official_id=official.id,
@@ -66,11 +116,11 @@ def _candidate_out(candidacy, official, positions_count, finance):
         name=official.display_name,
         party=candidacy.party or official.party,
         photo_url=official.photo_url,
-        website_url=official.website_url,
+        website_url=official.website_url or website,
         incumbent_challenge=candidacy.incumbent_challenge,
         is_member=official.level != CANDIDATE_LEVEL,
         current_member=bool(official.current_member),
-        in_general_election=candidacy.in_general_election,
+        in_general_election=candidacy.in_general_election if on_ballot is None else on_ballot,
         receipts=candidacy.receipts,
         disbursements=candidacy.disbursements,
         cash_on_hand=candidacy.cash_on_hand,
@@ -79,21 +129,56 @@ def _candidate_out(candidacy, official, positions_count, finance):
         small_donor_share=finance_insights.small_donor_share(finance) if finance else None,
         outside_support=outside.get("support_total"),
         outside_oppose=outside.get("oppose_total"),
+        background=background(official),
+        wikipedia_url=official.wikipedia_url,
+        top_issues=list(issues),
     )
 
 
-def race_out(key, rows, finance_by_key, show_all=False, today=None):
+def race_out(key, rows, finance_by_key, show_all=False, today=None, issues=None):
     """rows: (candidacy, official, positions_count) for everyone in the race."""
     year, state, office, district = key
     by_candidacy = {id(candidacy): (official, count) for candidacy, official, count in rows}
-    shown, filtered = candidate_races.visible_candidacies(
-        [candidacy for candidacy, _, _ in rows], show_all=show_all, today=today
-    )
+    candidacies = [candidacy for candidacy, _, _ in rows]
+    ballot = ballot_nominees.ballot_for(year, state, office, district)
+    nominee_ids = None
+    websites = {}
+    unlisted = []
+    if ballot:
+        nominees, ballot_source = ballot
+        nominee_ids = {n.fec_candidate_id for n in nominees if n.fec_candidate_id}
+        websites = {n.fec_candidate_id: n.website for n in nominees if n.fec_candidate_id}
+        filed = {c.fec_candidate_id for c in candidacies}
+        unlisted = [
+            BallotNomineeOut(name=n.name, party=n.party)
+            for n in nominees
+            if n.fec_candidate_id not in filed
+        ]
+        shown = sorted(
+            (c for c in candidacies if show_all or c.fec_candidate_id in nominee_ids),
+            key=lambda c: c.receipts or 0,
+            reverse=True,
+        )
+        filtered = not show_all
+    else:
+        ballot_source = None
+        shown, filtered = candidate_races.visible_candidacies(candidacies, show_all=show_all, today=today)
     candidates = []
     for candidacy in shown:
         official, count = by_candidacy[id(candidacy)]
         finance = finance_by_key.get((candidacy.fec_candidate_id, candidacy.election_year))
-        candidates.append(_candidate_out(candidacy, official, count, finance))
+        on_ballot = None if nominee_ids is None else candidacy.fec_candidate_id in nominee_ids
+        candidates.append(
+            _candidate_out(
+                candidacy,
+                official,
+                count,
+                finance,
+                on_ballot,
+                issues=(issues or {}).get(official.id, ()),
+                website=websites.get(candidacy.fec_candidate_id),
+            )
+        )
     return RaceOut(
         key=f"{year}-{state}-{office}" + (f"-{district}" if office == "H" else ""),
         election_year=year,
@@ -105,8 +190,10 @@ def race_out(key, rows, finance_by_key, show_all=False, today=None):
         label=candidate_races.race_label(office, district),
         total_receipts=sum(float(c.receipts or 0) for c in shown),
         ballot_filtered=filtered,
+        ballot_source=ballot_source,
         hidden_count=len(rows) - len(shown),
         candidates=candidates,
+        unlisted_nominees=unlisted,
     )
 
 
@@ -136,6 +223,7 @@ def race_for(db, candidacy, today=None):
         rows,
         _finance_by_key(db, [c for c, _, _ in rows]),
         today=today,
+        issues=issues_by_official(db, {o.id for _, o, _ in rows}),
     )
 
 
@@ -186,11 +274,12 @@ def list_races(
 
     today = date.today()
     finance_by_key = _finance_by_key(db, [c for race_rows in by_race.values() for c, _, _ in race_rows])
+    issues = issues_by_official(db, {o.id for race_rows in by_race.values() for _, o, _ in race_rows})
     races = [
-        race_out(key, race_rows, finance_by_key, show_all=show_all, today=today)
+        race_out(key, race_rows, finance_by_key, show_all=show_all, today=today, issues=issues)
         for key, race_rows in by_race.items()
     ]
-    races = [race for race in races if race.candidates]
+    races = [race for race in races if race.candidates or race.unlisted_nominees]
     if state_abbr:
         races.sort(key=lambda race: candidate_races.race_sort_key(
             (race.election_year, race.state, race.office, race.district)

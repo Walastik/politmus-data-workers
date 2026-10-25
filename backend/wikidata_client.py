@@ -23,7 +23,7 @@ from urllib.parse import quote, unquote, urlparse
 
 import requests
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from congress_client import _retry_wait_seconds
 from database import SessionLocal
@@ -318,18 +318,24 @@ def run(level=None, limit=None, max_names=MAX_NAME_SEARCHES):
 
 
 def name_search_due(session, official_ids, now=None):
-    """Unmatched candidates who raised real money, least recently searched first."""
+    """Unmatched candidates who raised real money, least recently searched first.
+
+    Among those, the biggest fundraisers go first, so a backlog spread over
+    several capped runs reaches the races voters look at (Senate nominees)
+    before long-shot filers.
+    """
     now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     funded = (
-        session.query(Candidacy.official_id)
+        session.query(Candidacy.official_id, func.max(Candidacy.receipts).label("receipts"))
         .filter(Candidacy.receipts >= CANDIDATE_DETAIL_MIN_RECEIPTS)
-        .distinct()
+        .group_by(Candidacy.official_id)
+        .subquery()
     )
     return (
         session.query(Official)
+        .join(funded, funded.c.official_id == Official.id)
         .filter(
             Official.id.in_(official_ids),
-            Official.id.in_(funded),
             Official.level == CANDIDATE_LEVEL,
             Official.wikidata_id.is_(None),
             or_(
@@ -337,7 +343,11 @@ def name_search_due(session, official_ids, now=None):
                 Official.wikidata_searched_at < now - timedelta(days=SEARCH_RECHECK_DAYS),
             ),
         )
-        .order_by(Official.wikidata_searched_at.asc().nulls_first(), Official.id)
+        .order_by(
+            Official.wikidata_searched_at.asc().nulls_first(),
+            funded.c.receipts.desc(),
+            Official.id,
+        )
         .all()
     )
 

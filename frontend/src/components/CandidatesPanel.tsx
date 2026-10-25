@@ -12,6 +12,7 @@ import {
   partyBadgeClass,
   partyShort,
   raceTitle,
+  type BallotNominee,
   type Official,
   type Race,
   type RaceCandidate,
@@ -98,6 +99,12 @@ export default function CandidatesPanel({
   const races = page?.items ?? []
   const electionDate = races[0] ? formatBillDate(races[0].election_date) : null
   const awaitingBallot = races.some((race) => !race.ballot_filtered)
+  // States whose November ballot comes from services/ballot_nominees.py, not FEC.
+  const curated = [
+    ...new Map(
+      races.filter((race) => race.ballot_source).map((race) => [race.state_name, race.ballot_source]),
+    ),
+  ]
 
   return (
     <div>
@@ -177,6 +184,7 @@ export default function CandidatesPanel({
             {awaitingBallot
               ? 'FEC does not record primary results, so until pre-general reports are in, races list everyone who raised at least $5,000, including candidates who lost a primary.'
               : 'Races list the campaigns that filed a pre-general report, the ones on the November ballot.'}
+            {curated.map(([state, source]) => ` ${state} races list the November nominees (${source}).`)}
           </p>
           <div className="space-y-4">
             {races.map((race) => (
@@ -267,13 +275,20 @@ function RaceCard({
             />
           </li>
         ))}
+        {(race.unlisted_nominees ?? []).map((nominee) => (
+          <li key={nominee.name}>
+            <UnlistedNomineeCard nominee={nominee} />
+          </li>
+        ))}
       </ul>
       {race.hidden_count > 0 && !showAll ? (
         <p className="mt-3 text-xs text-slate-500">
           {race.hidden_count} more filer{race.hidden_count === 1 ? '' : 's'} not shown
-          {race.ballot_filtered
-            ? ': no pre-general report, so not on the November ballot.'
-            : ': raised under $5,000.'}
+          {race.ballot_source
+            ? ': not on the November ballot.'
+            : race.ballot_filtered
+              ? ': no pre-general report, so not on the November ballot.'
+              : ': raised under $5,000.'}
         </p>
       ) : null}
     </section>
@@ -340,6 +355,26 @@ function CandidateCard({
         <div className={`h-full ${partyBarClass(party)}`} style={{ width: `${share * 100}%` }} />
       </div>
     </button>
+  )
+}
+
+// A nominee on the hand-maintained ballot with no FEC filings, so no profile to open.
+export function UnlistedNomineeCard({ nominee }: { nominee: BallotNominee }) {
+  return (
+    <div className="flex h-full flex-col rounded-lg border border-dashed border-slate-700 bg-slate-800/50 p-3">
+      <div className="flex items-center gap-3">
+        <OfficialPhoto url={null} name={nominee.name} party={nominee.party} />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${partyBadgeClass(nominee.party)}`}>
+              {partyShort(nominee.party)}
+            </span>
+            <span className="truncate text-sm font-semibold">{nominee.name}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">No FEC filings, so no profile yet.</p>
+        </div>
+      </div>
+    </div>
   )
 }
 

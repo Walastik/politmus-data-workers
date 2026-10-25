@@ -206,6 +206,18 @@ class RaceCandidateOut(BaseModel):
     small_donor_share: Optional[float] = None
     outside_support: Optional[float] = None
     outside_oppose: Optional[float] = None
+    # A quick read on who they are and what they run on, for ballot cards.
+    background: list[str] = Field(default_factory=list)
+    wikipedia_url: Optional[str] = None
+    top_issues: list["CandidateIssueOut"] = Field(default_factory=list)
+
+
+class CandidateIssueOut(BaseModel):
+    """One headline issue from the candidate's stated positions."""
+
+    label: str
+    summary: Optional[str] = None
+    source_url: Optional[str] = None
 
 
 class RaceOut(BaseModel):
@@ -218,11 +230,21 @@ class RaceOut(BaseModel):
     district: int = 0
     label: str
     total_receipts: float = 0
-    # True when the race only shows campaigns that filed a pre-general report.
+    # True when the race only shows who is on the November ballot: from a
+    # hand-maintained ballot (ballot_source) or pre-general report filings.
     ballot_filtered: bool = False
+    # Set when services/ballot_nominees.py, not FEC, decided the ballot.
+    ballot_source: Optional[str] = None
     # Filers the default view leaves out (primary losers, tiny campaigns).
     hidden_count: int = 0
     candidates: list[RaceCandidateOut] = Field(default_factory=list)
+    # Nominees on a hand-maintained ballot with no FEC filings to show.
+    unlisted_nominees: list["BallotNomineeOut"] = Field(default_factory=list)
+
+
+class BallotNomineeOut(BaseModel):
+    name: str
+    party: str
 
 
 class RacesPageOut(BaseModel):
@@ -607,8 +629,15 @@ class CivicRepresentativeOut(BaseModel):
     channels: list[CivicChannelOut] = Field(default_factory=list)
 
 
+class GeoPointOut(BaseModel):
+    lat: float
+    lon: float
+
+
 class CivicLookupOut(BaseModel):
     normalized_input: Optional[CivicAddressOut] = None
+    # Where the address geocoded to; lets the client sort voting sites by distance.
+    point: Optional[GeoPointOut] = None
     divisions: list[CivicDivisionOut] = Field(default_factory=list)
     representatives: list[CivicRepresentativeOut] = Field(default_factory=list)
 
@@ -663,6 +692,8 @@ class LocationOut(CamelModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     notes: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     sources: list[SourceOut] = Field(default_factory=list)
 
 

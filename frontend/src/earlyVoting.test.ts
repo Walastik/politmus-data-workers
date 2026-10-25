@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { STATE_VOTER_RESOURCES } from './types'
 import { parseIsoDate } from './calendar'
-import { earlyVotingPhase, getEarlyVotingWindow, localToday } from './earlyVoting'
+import {
+  earlyVotingPhase,
+  getEarlyVotingWindow,
+  localToday,
+  nextCalendarElection,
+  statesWithEarlyVotingOpen,
+} from './earlyVoting'
 
 describe('early voting calendar', () => {
   it('has a valid 2026 general window for all 50 states plus DC', () => {
@@ -43,5 +49,19 @@ describe('early voting calendar', () => {
 
   it('formats local today as YYYY-MM-DD', () => {
     expect(localToday(new Date(2026, 0, 5, 23, 59))).toBe('2026-01-05')
+  })
+})
+
+describe('election-wide early voting', () => {
+  it('picks the next calendar election', () => {
+    expect(nextCalendarElection('2026-10-25')).toBe('2026-11-03')
+    expect(nextCalendarElection('2026-11-04')).toBeNull()
+  })
+
+  it('lists the states with early voting open today', () => {
+    const open = statesWithEarlyVotingOpen('2026-11-03', '2026-10-25')
+    expect(open).toContain('TX')
+    expect(open).not.toContain('KY') // opens Oct 29
+    expect(statesWithEarlyVotingOpen('1999-11-02', '2026-10-25')).toEqual([])
   })
 })

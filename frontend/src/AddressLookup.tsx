@@ -18,7 +18,16 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
-type Tab = 'representatives' | 'voting'
+export type LookupView = 'representatives' | 'voting'
+type Tab = LookupView
+
+// Asks the lookup to show an address in a given view, e.g. Happening Now's
+// "See all locations". A new id repeats the request.
+export interface AddressRequest {
+  id: number
+  address: string
+  view: LookupView
+}
 
 interface PhotonResult {
   formattedAddress: string
@@ -94,10 +103,12 @@ async function reverseGeocode(point: Point): Promise<string | null> {
 export default function AddressLookup({
   onSelectOfficial,
   savedAddressRequest = 0,
+  addressRequest = null,
 }: {
   onSelectOfficial: (official: Official) => void
   // Bumped by "My Representatives" to show the saved address's results.
   savedAddressRequest?: number
+  addressRequest?: AddressRequest | null
 }) {
   const [address, setAddress] = useState('')
   const debouncedAddress = useDebounce(address, 300)
@@ -247,7 +258,7 @@ export default function AddressLookup({
   // Looks up representatives for an address, or for a point when `point` is given.
   // With a point, `targetAddress` is the reverse-geocoded address ('' if none was
   // found) and is only used for display and the Voting Locations tab.
-  async function performLookup(targetAddress: string, point?: Point) {
+  async function performLookup(targetAddress: string, point?: Point, view?: Tab) {
     const trimmed = targetAddress.trim()
     if (!trimmed && !point) {
       setError('Enter a U.S. street address.')
@@ -268,7 +279,7 @@ export default function AddressLookup({
     // Voting Locations tab, fetch for the new address once the representative
     // lookup settles (it supplies the state hint); otherwise wait for the tab.
     const lookupSeq = ++lookupSeqRef.current
-    const votingTabOpen = activeTab === 'voting' && Boolean(trimmed)
+    const votingTabOpen = (view ?? activeTab) === 'voting' && Boolean(trimmed)
     resetVoterInfo()
     if (votingTabOpen) {
       setVoterInfoLoading(true)
@@ -343,6 +354,24 @@ export default function AddressLookup({
     setShowSuggestions(false)
     await performLookup(address)
   }
+
+  const handledAddressRequestRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!addressRequest || handledAddressRequestRef.current === addressRequest.id) return
+    handledAddressRequestRef.current = addressRequest.id
+    // This request wins over the first-load saved address lookup.
+    handledSavedRequestRef.current = savedAddressRequest
+    setAddress(addressRequest.address)
+    setShowSuggestions(false)
+    if (lookup && !locationLookup && sameAddress(lookedUpAddress, addressRequest.address)) {
+      selectTab(addressRequest.view)
+      return
+    }
+    setActiveTab(addressRequest.view)
+    performLookup(addressRequest.address, undefined, addressRequest.view)
+    // Keyed on the request id, like the saved address effect below.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressRequest])
 
   // Shows the saved address's results: once when Clerk has loaded (request 0),
   // then each time "My Representatives" bumps the request. Skipped when those

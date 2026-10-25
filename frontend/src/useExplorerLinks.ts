@@ -3,9 +3,9 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { billStub, officialStub, type Bill, type Official } from './types'
 
-export type ExplorerTab = 'lookup' | 'roster' | 'candidates' | 'bills'
+export type ExplorerTab = 'now' | 'lookup' | 'roster' | 'candidates' | 'bills'
 
-const TABS: readonly ExplorerTab[] = ['lookup', 'roster', 'candidates', 'bills']
+const TABS: readonly ExplorerTab[] = ['now', 'lookup', 'roster', 'candidates', 'bills']
 
 // Rows the user clicked, kept in history state so a drawer header renders
 // immediately instead of waiting on its detail fetch. `drawerPush` marks entries
@@ -27,7 +27,7 @@ export function useExplorerLinks() {
   const rawTab = searchParams.get('tab')
   const tab: ExplorerTab = TABS.includes(rawTab as ExplorerTab)
     ? (rawTab as ExplorerTab)
-    : 'lookup'
+    : 'now'
   const officialId = searchParams.get('official')
   const billId = searchParams.get('bill')
 

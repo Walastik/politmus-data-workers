@@ -219,6 +219,17 @@ export interface RaceCandidate {
   small_donor_share: number | null
   outside_support: number | null
   outside_oppose: number | null
+  // Offices held and occupations (Wikidata), e.g. "Texas Attorney General".
+  background?: string[]
+  wikipedia_url?: string | null
+  // Headline issues from their stated positions (AI-read campaign site).
+  top_issues?: CandidateIssue[]
+}
+
+export interface CandidateIssue {
+  label: string
+  summary: string | null
+  source_url: string | null
 }
 
 export interface Race {
@@ -231,10 +242,19 @@ export interface Race {
   district: number
   label: string
   total_receipts: number
-  // Only campaigns that filed a pre-general report, i.e. on the November ballot.
+  // Only who is on the November ballot: from a hand-maintained ballot
+  // (ballot_source) or campaigns that filed a pre-general report.
   ballot_filtered: boolean
+  ballot_source?: string | null
   hidden_count: number
   candidates: RaceCandidate[]
+  // Hand-maintained nominees FEC has no filings for; shown by name only.
+  unlisted_nominees?: BallotNominee[]
+}
+
+export interface BallotNominee {
+  name: string
+  party: string
 }
 
 export interface RacesPage {
@@ -601,6 +621,8 @@ export interface CivicRepresentative {
 
 export interface CivicLookup {
   normalized_input: CivicAddress | null
+  // Where the address geocoded to, for sorting voting sites by distance.
+  point?: { lat: number; lon: number } | null
   divisions: CivicDivision[]
   representatives: CivicRepresentative[]
 }
@@ -1196,6 +1218,8 @@ export interface VoterLocation {
   startDate: string | null
   endDate: string | null
   notes: string | null
+  latitude?: number | null
+  longitude?: number | null
   sources: VoterSource[]
 }
 
