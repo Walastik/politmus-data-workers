@@ -178,7 +178,6 @@ function RepresentativeCard({
         ) : null}
         <div className="min-w-0 flex-1">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
-            <span>{officialName(representative)}</span>
             {party ? (
               <span
                 className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(party)}`}
@@ -186,6 +185,7 @@ function RepresentativeCard({
                 {partyShort(party)}
               </span>
             ) : null}
+            <span>{officialName(representative)}</span>
           </h3>
           <p className="mt-1 text-xs text-slate-400">
             {representative.office}
