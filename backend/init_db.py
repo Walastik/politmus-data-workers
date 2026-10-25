@@ -279,6 +279,22 @@ def ensure_schema():
             "debate_attempted_at TIMESTAMP",
         ):
             conn.execute(text(f"ALTER TABLE bills ADD COLUMN IF NOT EXISTS {column_sql}"))
+        # Bill search (api/routes/bills.py): full text over search_vector,
+        # trigram fuzzy match on title and sponsor, ID suffix lookups.
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        conn.execute(text(
+            "ALTER TABLE bills ADD COLUMN IF NOT EXISTS search_vector TSVECTOR "
+            f"GENERATED ALWAYS AS ({BILL_SEARCH_VECTOR_SQL}) STORED"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_bills_search_vector "
+            "ON bills USING gin (search_vector)"
+        ))
+        for column in ("id", "title", "sponsor_name"):
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_bills_{column}_trgm "
+                f"ON bills USING gin ({column} gin_trgm_ops)"
+            ))
         for column_sql in (
             "effect_relation VARCHAR",
             "effect_legal_force VARCHAR",

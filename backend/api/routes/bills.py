@@ -1,8 +1,9 @@
 from collections import defaultdict
+import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, func, nulls_first, nulls_last
+from sqlalchemy import desc, func, literal, nulls_first, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from api.filters import classify_bipartisan_type, normalize_party
@@ -33,6 +34,56 @@ VOTE_SORT_ORDER = {
     "Present": 2,
     "Not Voting": 3,
 }
+
+
+# Congress.gov bill types as they appear in bill IDs ("119-hjres-7").
+BILL_TYPES = ("hr", "s", "hres", "sres", "hjres", "sjres", "hconres", "sconres")
+# After lowercasing and dropping spaces, dots and hyphens: "H.R. 1" -> "hr1",
+# "119-s-5" -> "119s5", "S. Con. Res. 3" -> "sconres3".
+BILL_ID_QUERY_RE = re.compile(
+    r"^(?P<congress>\d{2,3})?(?P<type>" + "|".join(BILL_TYPES) + r")(?P<number>\d+)$"
+)
+
+
+def parse_bill_id_query(q: str | None) -> tuple[str | None, str, str] | None:
+    """(congress, type, number) when the search text is a bill number."""
+    if not q:
+        return None
+    compact = re.sub(r"[\s.\-]", "", q.lower())
+    match = BILL_ID_QUERY_RE.match(compact)
+    if not match:
+        return None
+    return match["congress"], match["type"], str(int(match["number"]))
+
+
+def _bill_search(q: str):
+    """(filter, relevance) for the bills list search box.
+
+    A bill number matches by ID. Anything else matches the weighted
+    full-text document, or fuzzily (trigram word similarity, which also
+    catches partial words while typing) the title or sponsor. A bare number
+    also matches bill numbers.
+    """
+    parsed = parse_bill_id_query(q)
+    if parsed:
+        congress, bill_type, number = parsed
+        if congress:
+            return Bill.id == f"{congress}-{bill_type}-{number}", None
+        return Bill.id.like(f"%-{bill_type}-{number}"), None
+
+    tsquery = func.websearch_to_tsquery("english", q)
+    term = literal(q)
+    conditions = [
+        Bill.search_vector.op("@@")(tsquery),
+        term.op("<%")(Bill.title),
+        term.op("<%")(Bill.sponsor_name),
+    ]
+    if q.isdigit():
+        conditions.append(Bill.id.like(f"%-{int(q)}"))
+    relevance = func.ts_rank_cd(Bill.search_vector, tsquery) + func.word_similarity(
+        term, func.coalesce(Bill.title, "")
+    )
+    return or_(*conditions), relevance
 
 
 def _chamber_for_office(office: str | None) -> str | None:
@@ -278,10 +329,20 @@ def list_bills(
     status: Optional[str] = Query(None),
     sponsor_party: Optional[str] = Query(None),
     bipartisan: Optional[str] = Query(None),
+    q: Optional[str] = Query(
+        default=None,
+        max_length=200,
+        description="Bill number (H.R. 1, 119-s-5) or words from the title, sponsor, policy area or summary.",
+    ),
     sort: Optional[str] = Query("voted_desc"),
     db: Session = Depends(get_db),
 ):
     query = db.query(Bill)
+    relevance = None
+    search = (q or "").strip()
+    if search:
+        search_filter, relevance = _bill_search(search)
+        query = query.filter(search_filter)
     if level and level.strip().lower() not in {"all", "*"}:
         query = query.filter(Bill.level.ilike(level.strip()))
 
@@ -309,7 +370,9 @@ def list_bills(
         
     total = query.count()
         
-    if sort == "voted_desc":
+    if sort == "relevance" and relevance is not None:
+        query = query.order_by(desc(relevance), nulls_last(desc(Bill.voted_date)), desc(Bill.id))
+    elif sort == "voted_desc":
         query = query.order_by(nulls_last(desc(Bill.voted_date)), desc(Bill.id))
     elif sort == "voted_asc":
         query = query.order_by(nulls_last(Bill.voted_date), desc(Bill.id))
