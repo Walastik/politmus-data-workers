@@ -17,6 +17,7 @@ from api.census import (
     CensusMatch,
     CensusUnavailable,
     _coordinates_match_from_payload,
+    _match_from_payload,
     geocode_coordinates,
 )
 from api.main import app
@@ -85,6 +86,23 @@ class CoordinatesMatchTests(unittest.TestCase):
         self.assertEqual(params["x"], -97.7431)
         self.assertEqual(params["y"], 30.2672)
         self.assertEqual(params["benchmark"], "Public_AR_Current")
+        self.assertEqual((match.latitude, match.longitude), (30.2672, -97.7431))
+
+    def test_address_match_keeps_geocoded_point(self):
+        payload = {
+            "result": {
+                "addressMatches": [
+                    {
+                        "matchedAddress": "100 CONGRESS AVE, AUSTIN, TX, 78701",
+                        "coordinates": {"x": -97.7437, "y": 30.2638},
+                        "addressComponents": {"state": "TX", "city": "AUSTIN", "zip": "78701"},
+                        "geographies": _fixture("census_coordinates_austin.json")["result"]["geographies"],
+                    }
+                ]
+            }
+        }
+        match = _match_from_payload(payload)
+        self.assertEqual((match.latitude, match.longitude), (30.2638, -97.7437))
 
     @patch("api.census.httpx.Client")
     def test_geocode_coordinates_raises_when_unreachable(self, mock_client_cls):

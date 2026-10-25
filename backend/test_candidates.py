@@ -16,7 +16,7 @@ import fec_client
 import wikidata_client
 from api.main import app
 from fec_client import candidacy_values, fec_ids_for_office, fec_party, parse_fec_name
-from services import candidate_races
+from services import ballot_nominees, candidate_races
 from wikidata_client import campaign_website, label_name_parts, names_state, portrait_url, search_names
 
 
@@ -154,6 +154,22 @@ class RaceRuleTests(unittest.TestCase):
         self.assertEqual(candidate_races.race_label("S", 0), "U.S. Senate")
         self.assertEqual(candidate_races.race_label("H", 0), "U.S. House · At-large")
         self.assertEqual(candidate_races.race_label("H", 21), "U.S. House · District 21")
+
+
+class BallotNomineeDataTests(unittest.TestCase):
+    def test_texas_2026_is_complete_and_consistent(self):
+        races = ballot_nominees.BALLOTS[(2026, "TX")].races
+        self.assertEqual(sorted(races), [("H", d) for d in range(1, 39)] + [("S", 0)])
+        ids = [n.fec_candidate_id for nominees in races.values() for n in nominees if n.fec_candidate_id]
+        self.assertEqual(len(ids), len(set(ids)))
+        for (office, _), nominees in races.items():
+            parties = [n.party for n in nominees]
+            self.assertEqual(len(parties), len(set(parties)), nominees)
+            for n in nominees:
+                if n.fec_candidate_id:
+                    self.assertEqual(n.fec_candidate_id[0], office, n)
+        senate = [n.name for n in races[("S", 0)]]
+        self.assertEqual(senate, ["Ken Paxton", "James Talarico", "Ted Brown"])
 
 
 class FinanceQueueRuleTests(unittest.TestCase):
@@ -370,9 +386,11 @@ class CandidateSyncTests(unittest.TestCase):
         self._cleanup()
 
     def _cleanup(self):
-        from models import Candidacy, Official, OfficialFinanceTotal
+        from models import Candidacy, Official, OfficialFinanceTotal, OfficialStance, PolicyTarget
 
         session = self.SessionLocal()
+        session.query(OfficialStance).filter(OfficialStance.official_id.in_(self.IDS)).delete(synchronize_session=False)
+        session.query(PolicyTarget).filter(PolicyTarget.slug.like("zzcand-%")).delete(synchronize_session=False)
         session.query(Candidacy).filter(Candidacy.official_id.in_(self.IDS)).delete(synchronize_session=False)
         session.query(OfficialFinanceTotal).filter(
             OfficialFinanceTotal.official_id.in_(self.IDS)
@@ -466,6 +484,19 @@ class CandidateSyncTests(unittest.TestCase):
                 self.assertEqual(find.call_count, 2)
             self.assertIsNotNone(session.get(Official, "S8ZZ00001").wikidata_searched_at)
             self.assertIsNone(session.get(Official, "H8ZZ01001").wikidata_searched_at)
+        finally:
+            session.close()
+
+    def test_name_search_takes_big_fundraisers_first(self):
+        # A House ID sorts before a Senate ID, but the Senate candidate raised more.
+        self._sync([
+            totals_row("H8ZZ01001", "DOE, JANE", 50_000.0, office="H", state="TX", district=1),
+            totals_row("S8ZZ00002", "PAXTON, WARREN KENNETH JR.", 19_000_000.0, state="TX", party="REP"),
+        ])
+        session = self.SessionLocal()
+        try:
+            due = wikidata_client.name_search_due(session, list(self.IDS))
+            self.assertEqual([o.id for o in due], ["S8ZZ00002", "H8ZZ01001"])
         finally:
             session.close()
 
@@ -570,6 +601,89 @@ class CandidateSyncTests(unittest.TestCase):
         self.assertEqual(len(by_name[0]["candidates"]), 3)
 
         self.assertEqual(self.client.get("/api/candidates/races", params={"office": "X"}).status_code, 422)
+
+    def test_hand_maintained_ballot_decides_the_race(self):
+        self._load_race()
+        Nominee = ballot_nominees.Nominee
+        ballot = ballot_nominees.StateBallot(
+            source="Test source",
+            races={
+                ("S", 0): (
+                    Nominee("S8ZZ00002", "Ken Paxton", "Republican"),
+                    Nominee("S8ZZ00001", "James Talarico", "Democratic"),
+                    Nominee(None, "Ted Brown", "Libertarian"),
+                ),
+            },
+        )
+        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): ballot}):
+            senate = self.client.get(
+                "/api/candidates/races", params={"cycle": self.CYCLE, "state": "TX", "office": "S"}
+            ).json()["items"][0]
+            everyone = self.client.get(
+                "/api/candidates/races",
+                params={"cycle": self.CYCLE, "state": "TX", "office": "S", "all": "true"},
+            ).json()["items"][0]
+
+        # The sitting member filed with FEC but lost the primary: off the ballot.
+        self.assertEqual([c["official_id"] for c in senate["candidates"]], ["S8ZZ00001", "S8ZZ00002"])
+        self.assertTrue(all(c["in_general_election"] for c in senate["candidates"]))
+        self.assertEqual(senate["unlisted_nominees"], [{"name": "Ted Brown", "party": "Libertarian"}])
+        self.assertEqual((senate["ballot_filtered"], senate["ballot_source"], senate["hidden_count"]),
+                         (True, "Test source", 1))
+        self.assertFalse(everyone["ballot_filtered"])
+        on_ballot = {c["official_id"]: c["in_general_election"] for c in everyone["candidates"]}
+        self.assertEqual(on_ballot[self.MEMBER_ID], False)
+
+    def test_race_cards_carry_background_issues_and_nominee_websites(self):
+        from api.routes.candidates import issues_by_official
+        from models import Official, OfficialStance, PolicyTarget
+
+        self._load_race()
+        session = self.SessionLocal()
+        paxton = session.get(Official, "S8ZZ00002")
+        paxton.bio = {"positions_held": ["Texas Attorney General"], "occupations": ["lawyer", "Lawyer"]}
+        target = PolicyTarget(name="Zzcand Border", slug="zzcand-border")
+        session.add(target)
+        session.flush()
+
+        def stance(label, emphasis, mechanism, summary):
+            return OfficialStance(
+                official_id="S8ZZ00002", target_id=target.id, mechanism=mechanism, direction="increase",
+                issue_label=label, emphasis=emphasis, scope="national", summary=summary,
+                source_type="campaign_site",
+            )
+
+        session.add_all([
+            stance("Energy", "low", "regulation", "Drill more."),
+            stance("Border", "high", "funding", "Fund the wall."),
+            stance("border", "medium", "enforcement", "Duplicate heading."),
+        ])
+        session.commit()
+        issues = issues_by_official(session, {"S8ZZ00002", "S8ZZ00001"})
+        session.close()
+        self.assertEqual([(i.label, i.summary) for i in issues["S8ZZ00002"]],
+                         [("Border", "Fund the wall."), ("Energy", "Drill more.")])
+        self.assertNotIn("S8ZZ00001", issues)
+
+        Nominee = ballot_nominees.Nominee
+        ballot = ballot_nominees.StateBallot(source="Test", races={("S", 0): (
+            Nominee("S8ZZ00002", "Ken Paxton", "Republican", "https://kenpaxton.example"),
+            Nominee("S8ZZ00001", "James Talarico", "Democratic"),
+        )})
+        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): ballot}):
+            senate = self.client.get(
+                "/api/candidates/races", params={"cycle": self.CYCLE, "state": "TX", "office": "S"}
+            ).json()["items"][0]
+            session = self.SessionLocal()
+            self.assertEqual(ballot_nominees.fill_websites(session), 1)
+            session.commit()
+            self.assertEqual(session.get(Official, "S8ZZ00002").website_url, "https://kenpaxton.example")
+            session.close()
+
+        card = next(c for c in senate["candidates"] if c["official_id"] == "S8ZZ00002")
+        self.assertEqual(card["background"], ["Texas Attorney General", "lawyer"])
+        self.assertEqual(card["website_url"], "https://kenpaxton.example")
+        self.assertEqual([i["label"] for i in card["top_issues"]], ["Border", "Energy"])
 
     def test_official_detail_and_race_comparison(self):
         self._load_race()

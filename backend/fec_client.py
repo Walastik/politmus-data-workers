@@ -40,6 +40,7 @@ from models import Candidacy, Official, OfficialFinanceTotal, PacContribution, P
 from services.candidate_races import (
     CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle, general_election_date,
 )
+from services import ballot_nominees
 from services.finance_insights import election_periods, is_completed, pac_category
 
 BASE_URL = "https://api.open.fec.gov/v1"
@@ -913,6 +914,10 @@ def run_candidates(cycle=None, offices=None, state=None):
             candidacy.in_general_election = candidacy.fec_candidate_id in general
         session.commit()
         print(f"{sum(c.in_general_election for c in rows)} candidacies filed a pre-general report.")
+        # Hand-maintained nominees' campaign sites, so the positions worker can read them.
+        filled = ballot_nominees.fill_websites(session)
+        session.commit()
+        print(f"{filled} nominees got a campaign website from services/ballot_nominees.py.")
     finally:
         session.close()
 

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 import httpx
@@ -28,6 +28,9 @@ class CensusMatch:
     sldu_label: Optional[str] = None
     sldl: Optional[int] = None
     sldl_label: Optional[str] = None
+    # The geocoded point, used to sort voting sites by distance.
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class CensusUnavailable(Exception):
@@ -195,11 +198,24 @@ def _match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
     geographies = first.get("geographies")
     if not isinstance(geographies, dict):
         geographies = {}
-    return _match_from_geographies(
+    match = _match_from_geographies(
         geographies,
         components,
         matched_address=_text_or_none(first.get("matchedAddress")),
     )
+    coordinates = first.get("coordinates")
+    if match and isinstance(coordinates, dict):
+        lon, lat = _float_or_none(coordinates.get("x")), _float_or_none(coordinates.get("y"))
+        if lat is not None and lon is not None:
+            match = replace(match, latitude=lat, longitude=lon)
+    return match
+
+
+def _float_or_none(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _coordinates_match_from_payload(payload: dict[str, Any]) -> Optional[CensusMatch]:
@@ -299,4 +315,5 @@ def geocode_coordinates(lat: float, lon: float) -> Optional[CensusMatch]:
     Returns None for points outside any U.S. state or congressional district.
     """
     payload = _census_get(CENSUS_COORDINATES_URL, {"x": lon, "y": lat})
-    return _coordinates_match_from_payload(payload)
+    match = _coordinates_match_from_payload(payload)
+    return replace(match, latitude=lat, longitude=lon) if match else None

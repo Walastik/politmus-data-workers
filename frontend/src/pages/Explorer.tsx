@@ -1,14 +1,15 @@
-import { Landmark, MapPin, MapPinHouse, Rss, ScrollText, Search, Sparkles, Users, Vote } from 'lucide-react'
+import { Landmark, MapPin, MapPinHouse, Radio, Rss, ScrollText, Search, Sparkles, Users, Vote } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useEffect, useState, type ReactNode } from 'react'
 import { SignInButton, UserButton, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 
 import CandidatesPanel from '../components/CandidatesPanel'
+import HappeningNow from '../components/HappeningNow'
 import LocationSettings from '../components/LocationSettings'
 import ScoreHeadline from '../components/ScoreHeadline'
 import PositionsProgressPanel from '../components/PositionsProgressPanel'
 
-import AddressLookup from '../AddressLookup'
+import AddressLookup, { type AddressRequest } from '../AddressLookup'
 import { apiUrl } from '../api'
 import BillDrawer from '../BillDrawer'
 import BillsFeed from '../BillsFeed'
@@ -52,11 +53,17 @@ export default function Explorer() {
   const { isSignedIn } = useAuth()
   const { savedAddress } = useSavedAddress()
   const [savedAddressRequest, setSavedAddressRequest] = useState(0)
+  const [addressRequest, setAddressRequest] = useState<AddressRequest | null>(null)
   // Lookup stays mounted after its first visit, so switching tabs keeps its
   // results instead of re-running the lookup.
   const [lookupVisited, setLookupVisited] = useState(tab === 'lookup')
   if (tab === 'lookup' && !lookupVisited) {
     setLookupVisited(true)
+  }
+  // Happening Now stays mounted too, so coming back doesn't refetch its data.
+  const [nowVisited, setNowVisited] = useState(tab === 'now')
+  if (tab === 'now' && !nowVisited) {
+    setNowVisited(true)
   }
   const visibleOfficials =
     isSignedIn && hasPositionsOnly
@@ -135,7 +142,7 @@ export default function Explorer() {
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Politmus Explorer</h1>
               <p className="mt-1 text-sm text-slate-400">
-                Address lookup, congressional roster, candidates, and legislation feed
+                What's happening in your election, plus address lookup, roster, candidates and bills
               </p>
             </div>
           </div>
@@ -155,6 +162,12 @@ export default function Explorer() {
                   }}
                 />
               ) : null}
+              <TabButton
+                active={tab === 'now'}
+                icon={<Radio className="h-3.5 w-3.5" />}
+                label="Happening Now"
+                onClick={() => setTab('now')}
+              />
               <TabButton
                 active={tab === 'lookup'}
                 icon={<MapPin className="h-3.5 w-3.5" />}
@@ -318,10 +331,27 @@ export default function Explorer() {
             <AddressLookup
               onSelectOfficial={openOfficial}
               savedAddressRequest={savedAddressRequest}
+              addressRequest={addressRequest}
             />
           </div>
         ) : null}
-        {tab === 'lookup' ? null : tab === 'bills' ? (
+        {nowVisited ? (
+          <div hidden={tab !== 'now'}>
+            <HappeningNow
+              onSelectOfficial={openOfficial}
+              onSeeAllLocations={(address) => {
+                setAddressRequest((request) => ({
+                  id: (request?.id ?? 0) + 1,
+                  address,
+                  view: 'voting',
+                }))
+                setTab('lookup')
+              }}
+              onSeeCandidates={() => setTab('candidates')}
+            />
+          </div>
+        ) : null}
+        {tab === 'lookup' || tab === 'now' ? null : tab === 'bills' ? (
           <BillsFeed onSelectBill={openBill} />
         ) : tab === 'candidates' ? (
           <CandidatesPanel onSelectOfficial={openOfficial} />

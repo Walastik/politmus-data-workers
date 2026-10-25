@@ -108,6 +108,23 @@ export function getEarlyVotingWindow(
   }
 }
 
+// The next election we have a calendar for, still on or after `today`.
+export function nextCalendarElection(today: string): string | null {
+  const upcoming = EARLY_VOTING_CALENDARS.map((c) => c.electionDate)
+    .filter((date) => date >= today)
+    .sort()
+  return upcoming[0] ?? null
+}
+
+// Postal codes of the states whose early voting window includes `today`.
+export function statesWithEarlyVotingOpen(electionDate: string, today: string): string[] {
+  const calendar = EARLY_VOTING_CALENDARS.find((c) => c.electionDate === electionDate)
+  if (!calendar) return []
+  return Object.entries(calendar.states)
+    .filter(([, window]) => earlyVotingPhase(window, today)?.phase === 'open')
+    .map(([code]) => code)
+}
+
 export type EarlyVotingPhase =
   | { phase: 'upcoming'; daysUntil: number }
   | { phase: 'open' }

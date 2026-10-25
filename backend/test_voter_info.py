@@ -17,6 +17,7 @@ from api.routes.voter_info import (
     elections_cache,
     rate_limiter,
     parse_cache_control_ttl,
+    parse_location,
     response_cache,
     sanitize_url,
     upcoming_elections,
@@ -519,6 +520,13 @@ def test_sanitize_url_validation():
     assert sanitize_url("ftp://files.gov") is None
     assert sanitize_url("") is None
     assert sanitize_url(None) is None
+
+
+def test_parse_location_keeps_coordinates():
+    loc = parse_location({"address": {"line1": "1 Main St"}, "latitude": 30.26, "longitude": -97.74})
+    assert (loc.latitude, loc.longitude) == (30.26, -97.74)
+    # Missing or junk coordinates are dropped rather than guessed.
+    assert parse_location({"latitude": "30.2", "longitude": None}).latitude is None
 
 
 @pytest.mark.asyncio

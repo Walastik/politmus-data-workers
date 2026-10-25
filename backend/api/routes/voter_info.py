@@ -311,6 +311,12 @@ def parse_cache_control_ttl(header_val: Optional[str]) -> Optional[int]:
     return min(int(match.group(1)), 3600)
 
 
+def _coordinate(value) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def parse_location(item: dict) -> LocationOut:
     addr = item.get("address") or {}
     if not isinstance(addr, dict):
@@ -331,6 +337,8 @@ def parse_location(item: dict) -> LocationOut:
         start_date=item.get("startDate") or None,
         end_date=item.get("endDate") or None,
         notes=item.get("notes") or None,
+        latitude=_coordinate(item.get("latitude")),
+        longitude=_coordinate(item.get("longitude")),
         sources=sources,
     )
 
