@@ -3,13 +3,10 @@ name: Senate Votes Ingestion
 on:
   schedule:
     # Every 12 hours at :45 UTC, offset from Congress ingest (minute 0).
-    # Also runs after Congress ingest completes via workflow_run so
-    # newly stored bills can unlock previously skipped Senate votes.
+    # No need to wait for Congress ingest: Senate XML creates any missing
+    # bill as a stub row, so votes never wait on a bill being stored first.
     - cron: '45 */12 * * *'
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Congress Data Ingestion"]
-    types: [completed]
 
 concurrency:
   group: senate-votes-ingest
@@ -17,7 +14,6 @@ concurrency:
 
 jobs:
   sync_senate_votes:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -44,8 +40,8 @@ jobs:
           SECRET_DB_URL: ${{ secrets.DATABASE_URL }}
           SENATE_PROXY_URL: ${{ secrets.SENATE_PROXY_URL }}
         run: |
-          # Senate.gov blocks Fly.io datacenter IPs, but not GitHub Actions.
-          # We run the script locally here and proxy the DB connection to Fly.
+          # Senate.gov blocks Fly.io datacenter IPs, so we run the script on
+          # the runner and proxy the DB connection to Fly.
           
           # Start a proxy to the database in the background, retrying when
           # the Fly tunnel can't be opened (flyctl exits early in that case).
