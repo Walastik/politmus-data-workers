@@ -592,6 +592,7 @@ class CivicDivisionOut(BaseModel):
 class CivicRepresentativeOut(BaseModel):
     id: Optional[str] = None
     name: str
+    display_name: Optional[str] = None
     office: str
     division_id: Optional[str] = None
     division_name: Optional[str] = None

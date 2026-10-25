@@ -584,6 +584,7 @@ export interface CivicDivision {
 export interface CivicRepresentative {
   id: string | null
   name: string
+  display_name?: string | null
   office: string
   division_id: string | null
   division_name: string | null
@@ -1154,6 +1155,7 @@ export function civicRepresentativeToOfficial(
   return {
     id: rep.id,
     name: rep.name,
+    display_name: rep.display_name ?? null,
     state,
     party: rep.party || '',
     office: rep.office,
