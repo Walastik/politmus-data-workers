@@ -254,7 +254,11 @@ class BillSource(Base):
     dissenting / additional views. Input to the debate summary."""
 
     __tablename__ = "bill_sources"
-    __table_args__ = (UniqueConstraint("source_key", name="uq_bill_sources_source_key"),)
+    # Per bill: companion bills (e.g. the House and Senate NDAA) share
+    # floor debate, so one speech can belong to several bills.
+    __table_args__ = (
+        UniqueConstraint("bill_id", "source_key", name="uq_bill_sources_bill_source_key"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     bill_id = Column(String, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True)
