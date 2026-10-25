@@ -61,6 +61,7 @@ def _representative_from_official(
     return CivicRepresentativeOut(
         id=official.id,
         name=official.name or "Unknown",
+        display_name=official.display_name,
         office=official.office or "Member of Congress",
         division_id=division_id,
         division_name=division_name,

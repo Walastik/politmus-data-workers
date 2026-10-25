@@ -7,6 +7,7 @@ import {
   civicRepresentativeToOfficial,
   formatCivicAddress,
   groupCivicRepresentatives,
+  officialName,
   partyBadgeClass,
   partyShort,
   stateNameFromAbbr,
@@ -167,30 +168,25 @@ function RepresentativeCard({
 
   const content = (
     <>
-      <div className="flex items-start justify-between gap-3">
-        {party ? (
-          <span
-            className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(party)}`}
-          >
-            {partyShort(party)}
-          </span>
-        ) : (
-          <span />
-        )}
-        {stateLabel ? (
-          <span className="text-xs text-slate-400">{stateLabel}</span>
-        ) : null}
-      </div>
-      <div className="mt-2 flex items-center gap-3">
+      <div className="flex items-center gap-3">
         {representative.photo_url ? (
           <OfficialPhoto
             url={representative.photo_url}
-            name={representative.name}
+            name={officialName(representative)}
             party={party}
           />
         ) : null}
-        <div className="min-w-0">
-          <h3 className="text-base font-semibold">{representative.name}</h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            <span>{officialName(representative)}</span>
+            {party ? (
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(party)}`}
+              >
+                {partyShort(party)}
+              </span>
+            ) : null}
+          </h3>
           <p className="mt-1 text-xs text-slate-400">
             {representative.office}
             {representative.division_name &&
@@ -201,6 +197,9 @@ function RepresentativeCard({
               : ''}
           </p>
         </div>
+        {stateLabel ? (
+          <span className="self-start text-xs text-slate-400">{stateLabel}</span>
+        ) : null}
       </div>
       {phone || website ? (
         <ul className="mt-3 space-y-1.5 text-xs text-slate-400">
