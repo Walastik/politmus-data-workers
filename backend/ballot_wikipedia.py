@@ -7,11 +7,15 @@ an FEC candidate ID by state, office, district and name. Campaign websites
 come from the articles' "Official campaign websites" links.
 
 Writes services/ballots_<cycle>.json, which ballot_nominees.py loads for every
-state it has no hand-maintained ballot for, and prints the races that need a
-person to check them. A race whose article has no general-election box yet
-is left out, so it falls back to FEC filings.
+state it has no hand-maintained ballot for, or with --save-db the
+ballot_snapshots rows the API reads over it (the daily Ballot Nominees
+workflow). Prints the races that need a person to check them. A race with
+no results box yet is read from its infobox plus the article's other
+candidates and marked incomplete; a race with neither is left out, so it
+falls back to FEC filings.
 
     python ballot_wikipedia.py [--cycle 2026] [--state OH] [--cache DIR]
+    python ballot_wikipedia.py --save-db --until-election
 """
 
 import argparse
@@ -20,15 +24,16 @@ import os
 import re
 import time
 import unicodedata
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import requests
 
 from api.filters import STATE_NAME_BY_ABBR
 from congress_client import _retry_wait_seconds
-from fec_client import NAME_SUFFIXES, fec_get, parse_fec_name
-from services.ballot_nominees import HAND_MAINTAINED
+from fec_client import NAME_SUFFIXES, RateLimited, fec_get, parse_fec_name
+from services.ballot_nominees import HAND_MAINTAINED, MAJOR_PARTIES
+from services.candidate_races import general_election_date
 
 API_URL = "https://en.wikipedia.org/w/api.php"
 USER_AGENT = os.getenv(
@@ -70,7 +75,6 @@ PARTY_NAMES = {
     "working families": "Working Families",
     "forward": "Forward",
 }
-MAJOR_PARTIES = {"Democratic", "Republican"}
 
 
 # --- Wikitext -------------------------------------------------------------
@@ -280,6 +284,52 @@ def infobox_nominees(text, year, office, at_large=False):
                 nominees.append((name, party_name(params.get(f"party{n}", ""))))
         if nominees:
             races.setdefault(district, nominees)
+    return races
+
+
+# Sections listing candidates outside the major-party primaries, and the
+# subsections in them that name people running (not withdrawn or rumored).
+OTHER_CANDIDATES_HEADING = re.compile(
+    r"independent|third[- ]part|other (?:candidates|parties)|minor part|libertarian|green|"
+    r"constitution|working families|forward|socialist|reform party|write-in", re.I)
+DECLARED_HEADING = re.compile(r"declared|nominees?|qualified|candidates|on (?:the )?ballot|certified", re.I)
+NOT_RUNNING_HEADING = re.compile(
+    r"withdr|declined|eliminated|potential|disqualified|failed|filed paperwork|publicly|"
+    r"expressed|speculat|removed|write-in|endorse", re.I)
+
+
+def other_candidates(text, office, at_large=False):
+    """district -> [(name, party)] from "Independent candidates" and similar
+    sections, for races whose infobox lists only the major-party nominees."""
+    headings = _headings(text)
+    races = {}
+    for index, (start, level, title) in enumerate(headings):
+        path = _section_path(headings, start)
+        group = next((h for h in path[:-1] if OTHER_CANDIDATES_HEADING.search(h)), None)
+        if not group and OTHER_CANDIDATES_HEADING.search(title) and not NOT_RUNNING_HEADING.search(title):
+            # Bullets right under the group heading count too.
+            group = title
+        elif not group or not DECLARED_HEADING.search(title) or NOT_RUNNING_HEADING.search(title):
+            continue
+        if any(NOT_RUNNING_HEADING.search(h) for h in path):
+            continue
+        end = headings[index + 1][0] if index + 1 < len(headings) else len(text)
+        district = 0 if office == "S" else _district_at(text, start, at_large)
+        if district is None:
+            continue
+        group_party = party_name(group) if re.search(r"party|libertarian|green|constitution", group, re.I) else None
+        for line in text[start:end].splitlines():
+            if not re.match(r"^\*[^*]", line):
+                continue
+            item = strip_markup(line[1:])
+            label = re.match(r"([^,(]+)(?:\(([^)]*)\))?", item)
+            name = " ".join(label.group(1).split()) if label else ""
+            if not name or len(name.split()) < 2 or len(name.split()) > 5 or "write-in" in item.lower():
+                continue
+            party = group_party or (party_name(label.group(2)) if label and label.group(2) else "Independent")
+            nominees = races.setdefault(district, [])
+            if name_key(name) not in {name_key(n) for n, _ in nominees}:
+                nominees.append((name, party))
     return races
 
 
@@ -555,19 +605,30 @@ def review_notes(state, nominees):
 
 
 def office_races(cycle, office, title, text, cache_dir):
-    """(district -> [(name, party)], websites, districts read from infoboxes)."""
+    """(district -> [(name, party)], websites, districts read from infoboxes).
+
+    An infobox race adds the candidates its article lists outside the
+    major-party primaries, which may not all have qualified for the ballot.
+    """
     texts = [text] + [
         page for _, page in (fetch_wikitext(sub, cache_dir) for sub in sub_articles(text, title)) if page
     ]
     at_large = office == "H" and " election in " in title
-    boxes, infoboxes, websites = {}, {}, {}
+    boxes, infoboxes, others, websites = {}, {}, {}, {}
     for page in texts:
         boxes.update(general_boxes(page, cycle, office, at_large=at_large))
         for district, nominees in infobox_nominees(page, cycle, office, at_large=at_large).items():
             infoboxes.setdefault(district, nominees)
+        for district, candidates in other_candidates(page, office, at_large=at_large).items():
+            others.setdefault(district, candidates)
         for district, sites in campaign_websites(page).items():
             websites.setdefault(district, {}).update(sites)
     from_infobox = set(infoboxes) - set(boxes)
+    for district in from_infobox:
+        listed = {name_key(n) for n, _ in infoboxes[district]}
+        infoboxes[district] = infoboxes[district] + [
+            (name, party) for name, party in others.get(district, ()) if name_key(name) not in listed
+        ]
     return {**{d: infoboxes[d] for d in from_infobox}, **boxes}, websites, from_infobox
 
 
@@ -604,16 +665,64 @@ def state_ballot(cycle, state, cache_dir=None):
             ]
             label = f"{state} Senate" if office == "S" else f"{state}-{district or 'AL'}"
             if district in from_infobox:
-                review.append((label, "from the infobox, no results box yet; third parties may be missing"))
+                review.append((label, "no results box yet: infobox nominees plus the article's other candidates"))
             for note in review_notes(state, nominees):
                 review.append((label, note))
             races.append({
                 "office": office,
                 "district": district,
+                # A results box lists the whole ballot; an infobox race may not.
+                "complete": district not in from_infobox,
                 "nominees": [{k: v for k, v in n.items() if not k.startswith("_")} for n in nominees],
             })
     source = f"Wikipedia, checked {date.today():%b. %-d, %Y}"
     return {"source": source, "articles": articles, "races": races}, review
+
+
+def regression(old, new):
+    """Why a new read of a state looks worse than the last one, else None.
+
+    A race that disappears usually means an article was reorganized or
+    vandalized, not that the race was cancelled, so keep the last read.
+    """
+    if not old:
+        return None
+    old_keys = {(r["office"], r["district"]) for r in old["races"]}
+    new_keys = {(r["office"], r["district"]) for r in new["races"]}
+    lost = sorted(old_keys - new_keys)
+    if lost:
+        return "lost " + ", ".join(f"{o}-{d}" for o, d in lost)
+    return None
+
+
+def save_snapshots(cycle, ballots, committed):
+    """Upsert ballot_snapshots rows; returns [(state, reason)] left unchanged."""
+    from database import SessionLocal
+    from init_db import ensure_schema
+    from models import BallotSnapshot
+
+    ensure_schema()
+    kept = []
+    session = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        for state, ballot in ballots.items():
+            row = session.get(BallotSnapshot, (cycle, state))
+            previous = {"races": row.races} if row else committed.get(state)
+            reason = regression(previous, ballot)
+            if reason:
+                kept.append((state, reason))
+                continue
+            row = row or BallotSnapshot(cycle=cycle, state=state)
+            row.source = ballot["source"]
+            row.articles = ballot["articles"]
+            row.races = ballot["races"]
+            row.fetched_at = now
+            session.add(row)
+        session.commit()
+    finally:
+        session.close()
+    return kept
 
 
 def main():
@@ -624,29 +733,51 @@ def main():
     parser.add_argument("--include-hand-maintained", action="store_true",
                         help="Also parse states ballot_nominees.py already lists (to compare).")
     parser.add_argument("--out", help="Write here instead of services/ballots_<cycle>.json.")
+    parser.add_argument("--save-db", action="store_true",
+                        help="Save ballot_snapshots rows instead of writing the JSON file.")
+    parser.add_argument("--until-election", action="store_true",
+                        help="Do nothing once the cycle's general election has passed.")
     args = parser.parse_args()
+
+    if args.until_election and date.today() > general_election_date(args.cycle):
+        print(f"The {args.cycle} general election has passed; nothing to do.")
+        return
 
     out_path = Path(args.out) if args.out else OUTPUT_DIR / f"ballots_{args.cycle}.json"
     existing = json.loads(out_path.read_text()) if out_path.exists() else {"states": {}}
     states = [s.upper() for s in args.state] if args.state else sorted(
         s for s in STATE_NAME_BY_ABBR if s not in NON_STATES
     )
-    all_review = []
+    all_review, ballots, failed = [], {}, []
     for state in states:
         if (args.cycle, state) in HAND_MAINTAINED and not args.include_hand_maintained:
             continue
-        ballot, review = state_ballot(args.cycle, state, args.cache)
-        existing["states"][state] = ballot
+        try:
+            ballot, review = state_ballot(args.cycle, state, args.cache)
+        except (requests.RequestException, RateLimited) as exc:
+            failed.append((state, str(exc)))
+            print(f"{state}: failed ({exc})")
+            continue
+        ballots[state] = ballot
         all_review.extend(review)
         print(f"{state}: {len(ballot['races'])} races, {len(review)} to review")
 
-    existing["states"] = dict(sorted(existing["states"].items()))
-    out_path.write_text(json.dumps(existing, indent=1, ensure_ascii=False) + "\n")
-    print(f"\nWrote {out_path}")
+    if args.save_db:
+        kept = save_snapshots(args.cycle, ballots, existing["states"])
+        print(f"\nSaved {len(ballots) - len(kept)} states to ballot_snapshots.")
+        for state, reason in kept:
+            print(f"  {state} kept its last read: {reason}")
+    else:
+        existing["states"].update(ballots)
+        existing["states"] = dict(sorted(existing["states"].items()))
+        out_path.write_text(json.dumps(existing, indent=1, ensure_ascii=False) + "\n")
+        print(f"\nWrote {out_path}")
     if all_review:
         print("\nTo review:")
         for label, note in all_review:
             print(f"  {label}: {note}")
+    if failed:
+        raise SystemExit(f"{len(failed)} states failed: " + ", ".join(s for s, _ in failed))
 
 
 if __name__ == "__main__":

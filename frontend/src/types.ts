@@ -246,6 +246,8 @@ export interface Race {
   // (ballot_source) or campaigns that filed a pre-general report.
   ballot_filtered: boolean
   ballot_source?: string | null
+  // True only when ballot_source lists everyone on the race's ballot.
+  ballot_complete?: boolean
   hidden_count: number
   candidates: RaceCandidate[]
   // Hand-maintained nominees FEC has no filings for; shown by name only.

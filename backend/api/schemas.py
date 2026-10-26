@@ -235,6 +235,10 @@ class RaceOut(BaseModel):
     ballot_filtered: bool = False
     # Set when services/ballot_nominees.py, not FEC, decided the ballot.
     ballot_source: Optional[str] = None
+    # True only when ballot_source lists the race's whole ballot. False for
+    # races decided by FEC filings and for lists that may miss third-party
+    # or independent candidates.
+    ballot_complete: bool = False
     # Filers the default view leaves out (primary losers, tiny campaigns).
     hidden_count: int = 0
     candidates: list[RaceCandidateOut] = Field(default_factory=list)

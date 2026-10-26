@@ -121,6 +121,68 @@ class WikitextTests(unittest.TestCase):
         self.assertEqual(bw.sub_articles(text, title), [f"{title} (districts 1–26)"])
 
 
+class OtherCandidateTests(unittest.TestCase):
+    ARTICLE = "\n".join([
+        "== District 2 ==",
+        "=== Republican primary ===",
+        "==== Declared ====",
+        "*Primary Loser, businessman",
+        "=== Independent candidates ===",
+        "==== Declared ====",
+        "*Bruce Fine<ref name=\"May15\"/>",
+        "*[[Adam Heimerman]], teacher",
+        "==== Withdrawn ====",
+        "*Quit Early",
+        "=== Third-party candidates ===",
+        "==== Filed paperwork ====",
+        "* Demile James (American Independent Party), HR recruiter",
+        "=== Libertarian Party ===",
+        "==== Nominee ====",
+        "*Tom Schmitz, engineer",
+        "=== General election ===",
+        "== District 3 ==",
+        "=== Green Party ===",
+        "*Matthew Arndt",
+    ])
+
+    def test_running_candidates_outside_major_party_primaries(self):
+        self.assertEqual(bw.other_candidates(self.ARTICLE, "H"), {
+            2: [("Bruce Fine", "Independent"), ("Adam Heimerman", "Independent"), ("Tom Schmitz", "Libertarian")],
+            3: [("Matthew Arndt", "Green")],
+        })
+
+    def test_infobox_races_add_other_candidates_and_are_marked_partial(self):
+        text = "\n".join([
+            "{{Infobox election",
+            "| election_name = 2026 Ohio's 2nd congressional district election",
+            "| nominee1 = David Taylor | party1 = Republican Party (United States)",
+            "}}",
+            self.ARTICLE,
+        ])
+        title = "2026 United States House of Representatives elections in Ohio"
+        found, _, partial = bw.office_races(2026, "H", title, text, None)
+        self.assertEqual(found[2], [
+            ("David Taylor", "Republican"), ("Bruce Fine", "Independent"),
+            ("Adam Heimerman", "Independent"), ("Tom Schmitz", "Libertarian"),
+        ])
+        self.assertEqual(partial, {2})
+
+        ballot = ballot_nominees.ballot_from_data("Test", [
+            {"office": "H", "district": 2, "complete": False, "nominees": []},
+            {"office": "H", "district": 3, "complete": True, "nominees": []},
+        ])
+        self.assertEqual(ballot.partial, {("H", 2)})
+        ballots = {(2026, "OH"): ballot}
+        self.assertFalse(ballot_nominees.ballot_for(2026, "OH", "H", 2, ballots)[2])
+        self.assertTrue(ballot_nominees.ballot_for(2026, "OH", "H", 3, ballots)[2])
+
+    def test_a_read_that_loses_a_race_keeps_the_last_one(self):
+        old = {"races": [{"office": "S", "district": 0}, {"office": "H", "district": 1}]}
+        self.assertEqual(bw.regression(old, {"races": [{"office": "H", "district": 1}]}), "lost S-0")
+        self.assertIsNone(bw.regression(old, {"races": old["races"] + [{"office": "H", "district": 2}]}))
+        self.assertIsNone(bw.regression(None, {"races": []}))
+
+
 def fec(candidate_id, name, district="01", raised=True, filed="2025-01-01"):
     return {"candidate_id": candidate_id, "name": name, "district": district,
             "has_raised_funds": raised, "first_file_date": filed}

@@ -215,6 +215,7 @@ describe('HappeningNow', () => {
       ...race('S', 0, [candidate('S1', 'Senate Nominee', { in_general_election: true })]),
       ballot_filtered: true,
       ballot_source: 'Test source',
+      ballot_complete: true,
       unlisted_nominees: [{ name: 'Ted Brown', party: 'Libertarian' }],
     }
     renderNow()
@@ -224,6 +225,26 @@ describe('HappeningNow', () => {
     expect(screen.getByText(/nominees per Test source/)).toBeInTheDocument()
     // District 10 below is still unconfirmed, so the warning stays for it.
     expect(screen.getByText(/hasn’t confirmed who is on the November ballot/)).toBeInTheDocument()
+    // Only District 10's list may be incomplete.
+    expect(screen.getAllByRole('button', { name: 'May be incomplete' })).toHaveLength(1)
+  })
+
+  it('explains why a race’s list may be incomplete when asked', async () => {
+    races[0] = {
+      ...race('S', 0, [candidate('S1', 'Senate Nominee', { in_general_election: true })]),
+      ballot_filtered: true,
+      ballot_source: 'Test source',
+      ballot_complete: false,
+    }
+    races[2] = { ...races[2], ballot_filtered: true, ballot_source: 'Test source', ballot_complete: true }
+    renderNow()
+
+    const toggle = await screen.findByRole('button', { name: 'May be incomplete' })
+    expect(screen.queryByText(/may not include everyone on your ballot/)).not.toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/independent and third-party candidates/)).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'May be incomplete' })).toHaveLength(1)
   })
 
   it('asks for an address when none is saved', async () => {

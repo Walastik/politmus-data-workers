@@ -337,7 +337,7 @@ def _test_database_available() -> bool:
 class CandidateSyncTests(unittest.TestCase):
     CYCLE = 2098
     MEMBER_ID = "ZZCAND01"
-    IDS = ("ZZCAND01", "ZZCAND02", "S8ZZ00001", "S8ZZ00002", "S8ZZ00003", "H8ZZ01001")
+    IDS = ("ZZCAND01", "ZZCAND02", "S8ZZ00001", "S8ZZ00002", "S8ZZ00003", "S8ZZ00004", "H8ZZ01001")
 
     @classmethod
     def setUpClass(cls):
@@ -633,6 +633,67 @@ class CandidateSyncTests(unittest.TestCase):
         self.assertFalse(everyone["ballot_filtered"])
         on_ballot = {c["official_id"]: c["in_general_election"] for c in everyone["candidates"]}
         self.assertEqual(on_ballot[self.MEMBER_ID], False)
+
+    def _file_pre_general(self, *fec_ids):
+        from models import Candidacy
+
+        session = self.SessionLocal()
+        session.query(Candidacy).filter(Candidacy.fec_candidate_id.in_(fec_ids)).update(
+            {Candidacy.in_general_election: True}, synchronize_session=False
+        )
+        session.commit()
+        session.close()
+
+    def _senate(self):
+        return self.client.get(
+            "/api/candidates/races", params={"cycle": self.CYCLE, "state": "TX", "office": "S"}
+        ).json()["items"][0]
+
+    def test_ballot_adds_third_party_filers_and_reports_completeness(self):
+        self._load_race()
+        self._sync([totals_row("S8ZZ00004", "LIBERTY, LARA", 9_000.0, state="TX", party="LIB")])
+        # The member lost the primary but filed a pre-general report anyway.
+        self._file_pre_general("S8ZZ00001", "S8ZZ00002", "S8ZZ00003", "S8ZZ00004")
+        Nominee = ballot_nominees.Nominee
+        races = {("S", 0): (
+            Nominee("S8ZZ00002", "Ken Paxton", "Republican"),
+            Nominee("S8ZZ00001", "James Talarico", "Democratic"),
+        )}
+        partial = ballot_nominees.StateBallot(source="Test", races=races, partial=frozenset({("S", 0)}))
+        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): partial}):
+            senate = self._senate()
+        self.assertEqual([c["official_id"] for c in senate["candidates"]], ["S8ZZ00001", "S8ZZ00002", "S8ZZ00004"])
+        self.assertFalse(senate["ballot_complete"])
+
+        complete = ballot_nominees.StateBallot(source="Test", races=races)
+        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): complete}):
+            self.assertTrue(self._senate()["ballot_complete"])
+        # Races decided by FEC filings alone are never complete.
+        self.assertFalse(self._senate()["ballot_complete"])
+
+    def test_ballot_snapshots_override_the_committed_ballots(self):
+        from models import BallotSnapshot
+
+        self._load_race()
+        session = self.SessionLocal()
+        session.merge(BallotSnapshot(
+            cycle=self.CYCLE, state="TX", source="Snapshot source", articles=[], fetched_at=datetime(2098, 10, 1),
+            races=[{"office": "S", "district": 0, "complete": True, "nominees": [
+                {"fec_candidate_id": "S8ZZ00001", "name": "James Talarico", "party": "Democratic", "website": None},
+            ]}],
+        ))
+        session.commit()
+        ballot_nominees.clear_snapshot_cache()
+        try:
+            senate = self._senate()
+        finally:
+            session.query(BallotSnapshot).filter_by(cycle=self.CYCLE).delete()
+            session.commit()
+            session.close()
+            ballot_nominees.clear_snapshot_cache()
+        self.assertEqual(senate["ballot_source"], "Snapshot source")
+        self.assertEqual([c["official_id"] for c in senate["candidates"]], ["S8ZZ00001"])
+        self.assertTrue(senate["ballot_complete"])
 
     def test_race_cards_carry_background_issues_and_nominee_websites(self):
         from api.routes.candidates import issues_by_official

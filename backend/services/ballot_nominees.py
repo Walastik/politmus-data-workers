@@ -10,18 +10,25 @@ filings for (common for third-party candidates who raise under $5,000) have
 no ID; races still list them by name.
 
 Texas is maintained by hand below. Every other state comes from
-ballots_<cycle>.json, which ballot_wikipedia.py generates from Wikipedia and
-re-runs replace; a state listed by hand here takes precedence over it. Add a
-state's races together, with its source, and re-check them when the state
-certifies its ballot. Write-in candidates are not listed.
+ballot_wikipedia.py, which reads Wikipedia: its daily run saves
+ballot_snapshots rows, and ballots_<cycle>.json is the committed copy used
+when a state has no row. A state listed by hand here takes precedence over
+both. Add a state's races together, with its source, and re-check them when
+the state certifies its ballot. Write-in candidates are not listed.
+
+A race is complete when its source lists the whole ballot. Generated races
+read from an infobox (no results box yet) are not: they may miss
+third-party and independent candidates.
 """
 
 import json
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 GENERATED_CYCLES = (2026,)
+MAJOR_PARTIES = {"Democratic", "Republican"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,8 @@ class Nominee:
 class StateBallot:
     source: str
     races: dict  # (office, district) -> tuple[Nominee, ...]
+    # Races whose list may be missing candidates.
+    partial: frozenset = field(default_factory=frozenset)
 
 
 # Texas, November 3, 2026. Major-party, independent and Green nominees from
@@ -217,6 +226,20 @@ HAND_MAINTAINED = {
 }
 
 
+def ballot_from_data(source, races):
+    """A StateBallot from ballot_wikipedia.py's race dicts."""
+    return StateBallot(
+        source=source,
+        races={
+            (race["office"], race["district"]): tuple(Nominee(**n) for n in race["nominees"])
+            for race in races
+        },
+        partial=frozenset(
+            (race["office"], race["district"]) for race in races if not race.get("complete", True)
+        ),
+    )
+
+
 def load_generated(cycle, path=None):
     """(cycle, state) -> StateBallot from ballots_<cycle>.json, if it exists."""
     path = path or Path(__file__).with_name(f"ballots_{cycle}.json")
@@ -224,13 +247,7 @@ def load_generated(cycle, path=None):
         return {}
     data = json.loads(path.read_text())
     return {
-        (cycle, state): StateBallot(
-            source=ballot["source"],
-            races={
-                (race["office"], race["district"]): tuple(Nominee(**n) for n in race["nominees"])
-                for race in ballot["races"]
-            },
-        )
+        (cycle, state): ballot_from_data(ballot["source"], ballot["races"])
         for state, ballot in data["states"].items()
     }
 
@@ -240,12 +257,38 @@ BALLOTS = {
     **HAND_MAINTAINED,
 }
 
+# Snapshot rows change once a day; re-read them at most this often.
+SNAPSHOT_CACHE_SECONDS = 600
+_snapshot_cache = {"at": None, "ballots": None}
 
-def nominee_websites():
-    """FEC candidate ID -> campaign website, across every hand-maintained ballot."""
+
+def current_ballots(session):
+    """BALLOTS with the latest ballot_snapshots rows over the committed JSON;
+    hand-maintained states still win."""
+    from models import BallotSnapshot
+
+    now = time.monotonic()
+    if _snapshot_cache["at"] is None or now - _snapshot_cache["at"] >= SNAPSHOT_CACHE_SECONDS:
+        snapshots = {
+            (row.cycle, row.state): ballot_from_data(row.source, row.races)
+            for row in session.query(BallotSnapshot).all()
+        }
+        _snapshot_cache.update(at=now, ballots=snapshots)
+    return {
+        **BALLOTS,
+        **{key: ballot for key, ballot in _snapshot_cache["ballots"].items() if key not in HAND_MAINTAINED},
+    }
+
+
+def clear_snapshot_cache():
+    _snapshot_cache.update(at=None, ballots=None)
+
+
+def nominee_websites(ballots=None):
+    """FEC candidate ID -> campaign website, across every listed ballot."""
     return {
         n.fec_candidate_id: n.website
-        for ballot in BALLOTS.values()
+        for ballot in (ballots or BALLOTS).values()
         for nominees in ballot.races.values()
         for n in nominees
         if n.fec_candidate_id and n.website
@@ -260,7 +303,7 @@ def fill_websites(session):
     """
     from models import Candidacy, Official
 
-    websites = nominee_websites()
+    websites = nominee_websites(current_ballots(session))
     rows = (
         session.query(Official)
         .join(Candidacy, Candidacy.official_id == Official.id)
@@ -278,10 +321,13 @@ def fill_websites(session):
     return filled
 
 
-def ballot_for(year, state, office, district):
-    """(nominees, source) for a race on a hand-maintained ballot, else None."""
-    ballot = BALLOTS.get((year, state))
+def ballot_for(year, state, office, district, ballots=None):
+    """(nominees, source, complete) for a race on a listed ballot, else None."""
+    ballot = (ballots or BALLOTS).get((year, state))
     if ballot is None:
         return None
-    nominees = ballot.races.get((office, district if office == "H" else 0))
-    return (nominees, ballot.source) if nominees is not None else None
+    key = (office, district if office == "H" else 0)
+    nominees = ballot.races.get(key)
+    if nominees is None:
+        return None
+    return nominees, ballot.source, key not in ballot.partial

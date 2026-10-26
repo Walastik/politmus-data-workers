@@ -1,0 +1,35 @@
+name: Ballot Nominees
+
+on:
+  schedule:
+    # Daily 09:00 UTC, before FEC Ingestion (09:30), which copies nominee
+    # campaign sites onto candidates. The script does nothing once Election
+    # Day has passed; remove this schedule then.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+# About 100 OpenFEC requests, so it shares FEC Ingestion's key budget.
+concurrency:
+  group: fec-ingest
+  cancel-in-progress: false
+
+jobs:
+  refresh_ballots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_APP: politmus-api
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Re-reads every state's Wikipedia House and Senate articles into
+      # ballot_snapshots, which the API uses over the committed
+      # services/ballots_<cycle>.json. A state whose new read lost a race
+      # keeps its last one.
+      - name: Refresh November ballots from Wikipedia
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/ballot_wikipedia.py --save-db --until-election"
