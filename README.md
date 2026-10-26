@@ -408,6 +408,13 @@ python fec_client.py pacs --candidates --max-requests 200
 python wikidata_client.py --level candidate --max-names 100
 ```
 
+Pre-general filings can't tell primary winners from losers (a sitting member who lost the primary keeps filing them), so races listed in `services/ballot_nominees.py` show only their November nominees instead. Texas is maintained by hand there; every other state comes from `services/ballots_<cycle>.json`, which `ballot_wikipedia.py` generates from each state's Wikipedia House and Senate election articles (the general-election results box, or the race's infobox until one is written), matching each nominee to an FEC candidate ID by race and name and taking campaign websites from the articles' link lists. A run makes about 100 Wikipedia and 100 OpenFEC requests and prints the races to check by hand: nominees with no FEC match, races missing a major party, and infobox-only races, which usually leave out third-party nominees. Re-run it as states certify their ballots and commit the JSON.
+
+```bash
+python ballot_wikipedia.py                    # every state not maintained by hand
+python ballot_wikipedia.py --state OH --state MI
+```
+
 `GET /api/candidates/races` lists races with their candidates, richest first (`state`, `office=S|H`, `district`, `party`, `q`, `all=true` for every filer, `limit`/`offset`). A state lists the Senate race and then districts in order; nationwide lists the most expensive races first. `GET /api/officials/{id}` adds `candidacies`, `bio` and `wikipedia_url`, and `/finance` adds `race_comparison`, the official's race this cycle.
 
 ## Deploy to Fly.io

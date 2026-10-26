@@ -1,4 +1,4 @@
-"""Hand-maintained general-election ballots for races where FEC can't tell us.
+"""General-election ballots for races where FEC can't tell us who is on them.
 
 FEC never records primary results, and its pre-general (12G) filings are a
 poor stand-in: they land late, and a sitting member who lost the primary
@@ -9,12 +9,19 @@ Each nominee is keyed by FEC candidate ID. Nominees FEC has no financial
 filings for (common for third-party candidates who raise under $5,000) have
 no ID; races still list them by name.
 
-Add a state's races together, with its source, and re-check them when the
-state certifies its ballot. Write-in candidates are not listed.
+Texas is maintained by hand below. Every other state comes from
+ballots_<cycle>.json, which ballot_wikipedia.py generates from Wikipedia and
+re-runs replace; a state listed by hand here takes precedence over it. Add a
+state's races together, with its source, and re-check them when the state
+certifies its ballot. Write-in candidates are not listed.
 """
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
+
+GENERATED_CYCLES = (2026,)
 
 
 @dataclass(frozen=True)
@@ -91,7 +98,7 @@ TX_2026 = {
     ),
     ("H", 12): (
         Nominee('H4TX12065', "Craig Goldman", "Republican", 'https://www.craiggoldman.org/'),
-        Nominee(None, "Angela Rodriguez Prilliman", "Democratic"),
+        Nominee('H6TX12169', "Angela Rodriguez Prilliman", "Democratic", 'https://www.helifortexas.com/'),
     ),
     ("H", 13): (
         Nominee('H0TX13228', "Ronny Jackson", "Republican", 'https://ronnyjacksontx.com/'),
@@ -115,7 +122,7 @@ TX_2026 = {
     ),
     ("H", 18): (
         Nominee('H6TX18232', "Christian Menefee", "Democratic", 'https://christianmenefee.com/'),
-        Nominee(None, "Ronald Whitfield", "Republican"),
+        Nominee('H6TX18497', "Ronald Whitfield", "Republican"),
     ),
     ("H", 19): (
         Nominee('H6TX19206', "Tom Sell", "Republican", 'https://www.selltexastrue.com/'),
@@ -153,7 +160,7 @@ TX_2026 = {
     ("H", 27): (
         Nominee('H8TX27049', "Michael Cloud", "Republican", 'https://www.cloudforcongress.com/'),
         Nominee('H4TX27089', "Tanya Lloyd", "Democratic", 'https://www.tanyafortexas.com/'),
-        Nominee(None, "Dan McQueen", "Independent", 'https://mcqueenforcongress.com/'),
+        Nominee('H0TX20124', "Dan McQueen", "Independent", 'https://mcqueenforcongress.com/'),
     ),
     ("H", 28): (
         Nominee('H2TX23082', "Henry Cuellar", "Democratic", 'https://henrycuellar.com/'),
@@ -168,7 +175,7 @@ TX_2026 = {
         Nominee('H6TX30211', "Everett Jackson", "Republican", 'https://jacksonfortexas.com/'),
     ),
     ("H", 31): (
-        Nominee('H2TX31044', "John Carter", "Republican"),
+        Nominee('H2TX31044', "John Carter", "Republican", 'https://www.johncarterforcongress.com/'),
         Nominee('H6TX31094', "Justin Early", "Democratic", 'https://www.votejustinearly.com/'),
     ),
     ("H", 32): (
@@ -177,7 +184,7 @@ TX_2026 = {
     ),
     ("H", 33): (
         Nominee('H8TX32098', "Colin Allred", "Democratic", 'https://colinallred.com/'),
-        Nominee(None, "Patrick Gillespie", "Republican"),
+        Nominee('H2TX33248', "Patrick Gillespie", "Republican", 'https://patrickgillespie4congress33.com/'),
     ),
     ("H", 34): (
         Nominee('H6TX15162', "Vicente Gonzalez", "Democratic", 'https://www.vicentegonzalez.com/'),
@@ -202,11 +209,35 @@ TX_2026 = {
     ),
 }
 
-BALLOTS = {
+HAND_MAINTAINED = {
     (2026, "TX"): StateBallot(
         source="Wikipedia and the Libertarian Party of Texas, checked Oct. 25, 2026",
         races=TX_2026,
     ),
+}
+
+
+def load_generated(cycle, path=None):
+    """(cycle, state) -> StateBallot from ballots_<cycle>.json, if it exists."""
+    path = path or Path(__file__).with_name(f"ballots_{cycle}.json")
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    return {
+        (cycle, state): StateBallot(
+            source=ballot["source"],
+            races={
+                (race["office"], race["district"]): tuple(Nominee(**n) for n in race["nominees"])
+                for race in ballot["races"]
+            },
+        )
+        for state, ballot in data["states"].items()
+    }
+
+
+BALLOTS = {
+    **{key: ballot for cycle in GENERATED_CYCLES for key, ballot in load_generated(cycle).items()},
+    **HAND_MAINTAINED,
 }
 
 
