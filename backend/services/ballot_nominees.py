@@ -16,9 +16,11 @@ when a state has no row. A state listed by hand here takes precedence over
 both. Add a state's races together, with its source, and re-check them when
 the state certifies its ballot. Write-in candidates are not listed.
 
-A race is complete when its source lists the whole ballot. Generated races
-read from an infobox (no results box yet) are not: they may miss
-third-party and independent candidates.
+A race is complete only on a hand-verified ballot. Generated races never
+are: Wikipedia's results boxes can miss minor candidates (they missed two
+Texas Libertarians), and races read from an infobox (no results box yet)
+may miss third-party and independent candidates. We'd rather flag a list
+that turns out to be whole than imply one is whole when it isn't.
 """
 
 import json
@@ -44,8 +46,10 @@ class Nominee:
 class StateBallot:
     source: str
     races: dict  # (office, district) -> tuple[Nominee, ...]
-    # Races whose list may be missing candidates.
+    # Races whose source may be missing candidates.
     partial: frozenset = field(default_factory=frozenset)
+    # Checked by a person against the state's candidate lists.
+    verified: bool = False
 
 
 # Texas, November 3, 2026. Major-party, independent and Green nominees from
@@ -222,6 +226,7 @@ HAND_MAINTAINED = {
     (2026, "TX"): StateBallot(
         source="Wikipedia and the Libertarian Party of Texas, checked Oct. 25, 2026",
         races=TX_2026,
+        verified=True,
     ),
 }
 
@@ -330,4 +335,4 @@ def ballot_for(year, state, office, district, ballots=None):
     nominees = ballot.races.get(key)
     if nominees is None:
         return None
-    return nominees, ballot.source, key not in ballot.partial
+    return nominees, ballot.source, ballot.verified and key not in ballot.partial

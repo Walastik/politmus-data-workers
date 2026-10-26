@@ -172,9 +172,11 @@ class OtherCandidateTests(unittest.TestCase):
             {"office": "H", "district": 3, "complete": True, "nominees": []},
         ])
         self.assertEqual(ballot.partial, {("H", 2)})
+        # Generated ballots are never complete, results box or not.
         ballots = {(2026, "OH"): ballot}
         self.assertFalse(ballot_nominees.ballot_for(2026, "OH", "H", 2, ballots)[2])
-        self.assertTrue(ballot_nominees.ballot_for(2026, "OH", "H", 3, ballots)[2])
+        self.assertFalse(ballot_nominees.ballot_for(2026, "OH", "H", 3, ballots)[2])
+        self.assertTrue(ballot_nominees.ballot_for(2026, "TX", "S", 0, ballot_nominees.HAND_MAINTAINED)[2])
 
     def test_a_read_that_loses_a_race_keeps_the_last_one(self):
         old = {"races": [{"office": "S", "district": 0}, {"office": "H", "district": 1}]}

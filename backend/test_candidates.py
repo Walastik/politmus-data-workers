@@ -665,8 +665,13 @@ class CandidateSyncTests(unittest.TestCase):
         self.assertEqual([c["official_id"] for c in senate["candidates"]], ["S8ZZ00001", "S8ZZ00002", "S8ZZ00004"])
         self.assertFalse(senate["ballot_complete"])
 
-        complete = ballot_nominees.StateBallot(source="Test", races=races)
-        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): complete}):
+        # A generated list with a results box still isn't vouched for...
+        generated = ballot_nominees.StateBallot(source="Test", races=races)
+        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): generated}):
+            self.assertFalse(self._senate()["ballot_complete"])
+        # ...only one a person checked.
+        verified = ballot_nominees.StateBallot(source="Test", races=races, verified=True)
+        with patch.dict(ballot_nominees.BALLOTS, {(self.CYCLE, "TX"): verified}):
             self.assertTrue(self._senate()["ballot_complete"])
         # Races decided by FEC filings alone are never complete.
         self.assertFalse(self._senate()["ballot_complete"])
@@ -693,7 +698,8 @@ class CandidateSyncTests(unittest.TestCase):
             ballot_nominees.clear_snapshot_cache()
         self.assertEqual(senate["ballot_source"], "Snapshot source")
         self.assertEqual([c["official_id"] for c in senate["candidates"]], ["S8ZZ00001"])
-        self.assertTrue(senate["ballot_complete"])
+        # Snapshots are generated, so never complete.
+        self.assertFalse(senate["ballot_complete"])
 
     def test_race_cards_carry_background_issues_and_nominee_websites(self):
         from api.routes.candidates import issues_by_official
