@@ -277,6 +277,8 @@ def ensure_schema():
             "debate_metadata JSONB",
             "debate_status VARCHAR",
             "debate_attempted_at TIMESTAMP",
+            "related_synced_at TIMESTAMP",
+            "related_input VARCHAR",
         ):
             conn.execute(text(f"ALTER TABLE bills ADD COLUMN IF NOT EXISTS {column_sql}"))
         # Bill search (api/routes/bills.py): full text over search_vector,

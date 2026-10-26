@@ -26,8 +26,12 @@ drawer can show them):
   on anything but a high-magnitude provision of a broad bill. High-emphasis
   positions, which name the change, count on any provision;
 - a match on the same policy (target, mechanism, effect direction) as a
-  later vote in the same Congress, so companion bills (a chamber's version
-  and the final one) count once.
+  later vote on a companion bill, so a chamber's version and the final one
+  count once. Companions are bills Congress.gov links as sharing text
+  (bill_relations, filled by bill_relations.py) or bills in one Congress
+  with the same title (the Senate's NDAA and the final NDAA, passed under
+  another bill's number, are not linked); unrelated bills on the same topic
+  each count.
 
 Each vote then scores once: its counted matches net to +1, -1, or 0, so one
 vote on a bill with several matching provisions is one point.
@@ -56,7 +60,7 @@ from services.vote_questions import is_passage_question
 
 # Bump when scoring rules or the stored row shape change; every official is
 # rewritten on the next run.
-ENGINE_VERSION = "accountability-v4"
+ENGINE_VERSION = "accountability-v5"
 
 # Unreviewed target_matches pairs at least this similar count as the same
 # target; reviewed pairs follow their verdict. An exact target match always
@@ -73,6 +77,10 @@ REASON_LOCAL_ON_BROAD = "local_on_broad_bill"
 REASON_UNRELATED_PROVISION = "unrelated_provision"
 REASON_MINOR_PROVISION = "minor_provision"
 REASON_LATER_VOTE = "later_vote"
+
+# Congress.gov relationship types that do not make two bills companions: a
+# rule resolution that sets up debate, and a bill from another Congress.
+NON_COMPANION_RELATIONSHIPS = frozenset({"Procedurally related", "Cross-Congress related bill"})
 
 SCORED_POSITIONS = ("Yes", "No")
 _OPPOSITES = {("increase", "decrease"), ("decrease", "increase")}
@@ -176,28 +184,67 @@ def rule_reason(a: Alignment) -> str | None:
     return None
 
 
-def _congress(bill_id: str) -> str:
-    return bill_id.split("-", 1)[0]
+def companion_pairs(session: Session, bill_ids: Iterable[str]) -> set[frozenset[str]]:
+    """Pairs of these bills (or of these and others) that Congress.gov links
+    as sharing text, from either side of the link, plus pairs of these bills
+    in one Congress with the same title."""
+    bill_ids = list(set(bill_ids))
+    if not bill_ids:
+        return set()
+    linked = session.execute(
+        text(
+            "SELECT bill_id, related_bill_id, relationships FROM bill_relations "
+            "WHERE bill_id = ANY(:ids) OR related_bill_id = ANY(:ids)"
+        ),
+        {"ids": bill_ids},
+    )
+    same_title = session.execute(
+        text(
+            "SELECT a.id, b.id FROM bills a JOIN bills b "
+            "ON a.id < b.id AND split_part(a.id, '-', 1) = split_part(b.id, '-', 1) "
+            "AND lower(trim(a.title)) = lower(trim(b.title)) "
+            "WHERE a.id = ANY(:ids) AND b.id = ANY(:ids)"
+        ),
+        {"ids": bill_ids},
+    )
+    pairs = {
+        frozenset((bill_id, related_id))
+        for bill_id, related_id, relationships in linked
+        if set(relationships or ()) - NON_COMPANION_RELATIONSHIPS
+    }
+    return pairs | {frozenset(row) for row in same_title}
 
 
-def apply_rules(alignments: list[Alignment]) -> list[Alignment]:
-    """One official's matches with counted / reason set (see module doc)."""
+def apply_rules(
+    alignments: list[Alignment], companions: set[frozenset[str]] = frozenset()
+) -> list[Alignment]:
+    """One official's matches with counted / reason set (see module doc).
+    companions holds companion_pairs() for later_vote."""
     out = [replace(a, counted=False, reason=r) if (r := rule_reason(a)) else a for a in alignments]
+
     def policy(a: Alignment) -> tuple:
         # Keyed by the position's target, so companion bills whose intents
         # are named differently but match the same position count once.
-        return (_congress(a.bill_id), a.stance_target_id or a.target_id, a.mechanism, a.compared_direction)
+        return (a.stance_target_id or a.target_id, a.mechanism, a.compared_direction)
 
-    latest: dict[tuple, tuple] = {}
+    def vote(a: Alignment) -> tuple:
+        return (a.vote_date or date.min, a.roll_call_id)
+
+    by_policy: dict[tuple, list[Alignment]] = defaultdict(list)
     for a in out:
         if a.counted:
-            vote = (a.vote_date or date.min, a.roll_call_id)
-            latest[policy(a)] = max(latest.get(policy(a), vote), vote)
-    # Several intents of one vote matching the same position all stay: the
-    # vote nets them into one point anyway.
+            by_policy[policy(a)].append(a)
+
+    def superseded(a: Alignment) -> bool:
+        # Several intents of one vote matching the same position all stay:
+        # the vote nets them into one point anyway.
+        return any(
+            vote(b) > vote(a) and (b.bill_id == a.bill_id or frozenset((a.bill_id, b.bill_id)) in companions)
+            for b in by_policy[policy(a)]
+        )
+
     return [
-        a if not a.counted or (a.vote_date or date.min, a.roll_call_id) == latest[policy(a)]
-        else replace(a, counted=False, reason=REASON_LATER_VOTE)
+        replace(a, counted=False, reason=REASON_LATER_VOTE) if a.counted and superseded(a) else a
         for a in out
     ]
 
@@ -366,8 +413,9 @@ def compute_alignments(
         if points == 0:
             continue
         out[row[0]].append(replace(alignment, points=points))
+    companions = companion_pairs(session, {a.bill_id for rows in out.values() for a in rows})
     return {
-        official_id: sorted(apply_rules(rows), key=Alignment.key)
+        official_id: sorted(apply_rules(rows, companions), key=Alignment.key)
         for official_id, rows in out.items()
     }
 

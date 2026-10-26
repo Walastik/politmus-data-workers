@@ -190,17 +190,25 @@ class RuleTests(unittest.TestCase):
             self.reasons(_alignment(1, stance_emphasis="medium", bill_effect_count=BROAD)), [None]
         )
 
-    def test_same_policy_counts_once_per_congress_on_the_latest_vote(self):
+    def test_companion_bills_count_once_on_the_latest_vote(self):
         senate_version = _alignment(1, bill="119-s-2296", roll_call=1, vote_date=date(2025, 10, 9))
         final = _alignment(-1, bill="119-s-1071", roll_call=2, vote_date=date(2025, 12, 17),
                            vote_position="No")
         other_congress = _alignment(1, bill="118-hr-2670", roll_call=3, vote_date=date(2023, 7, 14))
         cut = _alignment(1, bill="119-hr-4", roll_call=4, effect_direction="decrease",
                          vote_position="No", vote_date=date(2025, 7, 17))
+        companions = {frozenset(("119-s-2296", "119-s-1071"))}
         self.assertEqual(
-            self.reasons(senate_version, final, other_congress, cut),
+            [a.reason for a in apply_rules([senate_version, final, other_congress, cut], companions)],
             [REASON_LATER_VOTE, None, None, None],
         )
+
+    def test_unrelated_bills_on_the_same_policy_each_count(self):
+        # The NDAA and a defense appropriations bill both fund the Pentagon,
+        # but Congress.gov does not link them: two separate votes.
+        ndaa = _alignment(1, bill="119-s-1071", roll_call=1, vote_date=date(2025, 10, 9))
+        appropriations = _alignment(1, bill="119-hr-4016", roll_call=2, vote_date=date(2025, 12, 17))
+        self.assertEqual(self.reasons(ndaa, appropriations), [None, None])
 
     def test_two_intents_of_one_vote_matching_one_position_both_count(self):
         # H.R.22: "Voter Registration Requirements" and "Voter Registration
@@ -241,6 +249,7 @@ class AccountabilityEngineTests(unittest.TestCase):
     BILL_TWICE = "ZZACC-hr2-119"  # Medicaid cut, voted on twice in the House
     BILL_UNCLASSIFIED = "ZZACC-hr3-119"
     BILL_MAINTAIN = "ZZACC-hr4-119"
+    BILL_COMPANION = "ZZACC-hr5-119"  # added by _companion_bill
 
     @classmethod
     def setUpClass(cls):
@@ -266,7 +275,7 @@ class AccountabilityEngineTests(unittest.TestCase):
 
     def _cleanup(self):
         from models import (
-            Bill, BillEffect, Official, OfficialScore, OfficialStance,
+            Bill, BillEffect, BillRelation, Official, OfficialScore, OfficialStance,
             PolicyTarget, RollCall, Vote, VoteAlignment,
         )
 
@@ -277,6 +286,7 @@ class AccountabilityEngineTests(unittest.TestCase):
         session.query(Vote).filter(Vote.official_id.like(pattern)).delete(synchronize_session=False)
         session.query(RollCall).filter(RollCall.bill_id.like(pattern)).delete(synchronize_session=False)
         session.query(BillEffect).filter(BillEffect.bill_id.like(pattern)).delete(synchronize_session=False)
+        session.query(BillRelation).filter(BillRelation.bill_id.like(pattern)).delete(synchronize_session=False)
         session.query(Bill).filter(Bill.id.like(pattern)).delete(synchronize_session=False)
         session.query(OfficialStance).filter(OfficialStance.official_id.like(pattern)).delete(synchronize_session=False)
         session.query(Official).filter(Official.id.like(pattern)).delete(synchronize_session=False)
@@ -408,6 +418,73 @@ class AccountabilityEngineTests(unittest.TestCase):
         )
         self.assertEqual(score.alignment_pct, 100.0)
         self.assertEqual(score.engine_version, ENGINE_VERSION)
+
+    def _companion_bill(self, relationships=None, title="Companion"):
+        """A later bill that also raises Medicaid funding, which Alice votes
+        for; Congress.gov links it to BILL_MIXED with relationships."""
+        from models import Bill, BillEffect, BillRelation, RollCall, Vote
+
+        self.session.add(Bill(
+            id=self.BILL_COMPANION, title=title, policy_area="Health",
+            classification_status="ok", level="federal",
+        ))
+        self.session.flush()
+        self.session.add(BillEffect(
+            bill_id=self.BILL_COMPANION, target_id=self.targets["Medicaid"], mechanism="funding",
+            direction="increase", magnitude="high", rationale="Medicaid increase.",
+        ))
+        rc = RollCall(
+            bill_id=self.BILL_COMPANION, chamber="House", date=date(2026, 8, 1),
+            question="On Passage", result="Passed", source_roll_call_id=f"{self.PREFIX}-companion",
+        )
+        self.session.add(rc)
+        self.session.flush()
+        self.session.add(Vote(roll_call_id=rc.id, official_id=self.ALICE, position="Yes"))
+        if relationships:
+            self.session.add(BillRelation(
+                bill_id=self.BILL_COMPANION, related_bill_id=self.BILL_MIXED,
+                relationships=relationships,
+            ))
+        self.session.commit()
+
+    def _medicaid_reasons(self):
+        from models import VoteAlignment
+
+        self._rescore()
+        self.session.expire_all()
+        return {
+            a.bill_id: a.reason
+            for a in self.session.query(VoteAlignment).filter(
+                VoteAlignment.official_id == self.ALICE,
+                VoteAlignment.target_name == "Zzacc Medicaid",
+                VoteAlignment.bill_id.in_([self.BILL_MIXED, self.BILL_COMPANION]),
+            )
+        }
+
+    def test_unlinked_bills_on_the_same_policy_each_count(self):
+        self._companion_bill()
+        self.assertEqual(self._medicaid_reasons(), {self.BILL_MIXED: None, self.BILL_COMPANION: None})
+
+    def test_a_later_vote_on_a_linked_bill_supersedes_the_earlier_one(self):
+        self._companion_bill(["Related bill"])
+        self.assertEqual(
+            self._medicaid_reasons(),
+            {self.BILL_MIXED: REASON_LATER_VOTE, self.BILL_COMPANION: None},
+        )
+
+    def test_a_bill_with_the_same_title_is_a_companion(self):
+        # The final NDAA passed as S.1071, which CRS does not link to the
+        # Senate's own NDAA, S.2296; both are titled "National Defense
+        # Authorization Act for Fiscal Year 2026".
+        self._companion_bill(title=f"title {self.BILL_MIXED} ")
+        self.assertEqual(
+            self._medicaid_reasons(),
+            {self.BILL_MIXED: REASON_LATER_VOTE, self.BILL_COMPANION: None},
+        )
+
+    def test_a_procedural_link_does_not_make_companions(self):
+        self._companion_bill(["Procedurally related"])
+        self.assertEqual(self._medicaid_reasons(), {self.BILL_MIXED: None, self.BILL_COMPANION: None})
 
     def _near_match(self, similarity, verdict=None):
         """Carol (and Alice, opposite) state positions on "Zzacc Medicaid

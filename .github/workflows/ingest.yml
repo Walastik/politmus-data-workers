@@ -46,6 +46,11 @@ jobs:
       - name: Run Bill Context (Amendments, Floor Speeches)
         run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py context --limit 40"
 
+      # Related bills for voted bills whose latest action changed; scoring
+      # uses them to count companion bills once (bill_relations.py).
+      - name: Run Related Bills
+        run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/congress_client.py related --limit 100"
+
       # New votes change scores; only officials whose inputs changed are rewritten.
       - name: Rescore Officials (Accountability)
         run: .github/scripts/fly-ssh.sh "/usr/local/bin/python /app/score_officials.py"

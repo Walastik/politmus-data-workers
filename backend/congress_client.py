@@ -3056,6 +3056,7 @@ def main():
             "senate-votes",
             "house-votes",
             "context",
+            "related",
             "sponsors",
             "backfill-sponsors",
             "backfill-name-parts",
@@ -3072,6 +3073,8 @@ def main():
         "session or (--all-sessions) the whole congress. "
         "context: amendments, floor speeches, and committee views for "
         "voted bills (bill_context.py). "
+        "related: Congress.gov related bills for voted bills, used by "
+        "scoring to find companion bills (bill_relations.py; --limit 0 for all). "
         "backfill-sponsors: insert missing historical sponsors. "
         "backfill-name-parts: fill first/middle/last name etc. on stored officials. "
         "enrich: fill policy area, CRS summary, dates, sponsorship, "
@@ -3124,7 +3127,7 @@ def main():
     parser.add_argument(
         "--bill-id",
         action="append",
-        help="For context: only this bill (e.g. 119-hr-9340); repeatable.",
+        help="For context and related: only this bill (e.g. 119-hr-9340); repeatable.",
     )
     parser.add_argument("--bill-type", help="Bill type for the votes command, e.g. hr.")
     parser.add_argument("--bill-number", help="Bill number for the votes command, e.g. 1.")
@@ -3177,6 +3180,16 @@ def main():
             f"Bill context: {stats['bills']} synced, {stats['failed']} failed; "
             f"amendments={stats['amendments']} floor_speeches={stats['floor_speeches']} "
             f"committee_views={stats['committee_views']}"
+        )
+        return
+
+    if args.command == "related":
+        from bill_relations import sync_relations
+
+        stats = sync_relations(limit=args.limit, bill_ids=args.bill_id)
+        print(
+            f"Related bills: {stats['bills']} synced ({stats['changed']} changed), "
+            f"{stats['failed']} failed; relations={stats['relations']}"
         )
         return
 
