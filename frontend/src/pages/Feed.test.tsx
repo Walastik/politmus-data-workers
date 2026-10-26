@@ -1,20 +1,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { useEffect, type ReactNode } from 'react'
+import { useEffect } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { FeedItem } from '../types'
 import Feed from './Feed'
-
-const clerk = vi.hoisted(() => ({ signedIn: true }))
-
-vi.mock('@clerk/clerk-react', () => ({
-  SignedIn: ({ children }: { children: ReactNode }) => (clerk.signedIn ? <>{children}</> : null),
-  SignedOut: ({ children }: { children: ReactNode }) => (clerk.signedIn ? null : <>{children}</>),
-  RedirectToSignIn: () => <p>Redirecting to sign in</p>,
-  UserButton: () => null,
-  useAuth: () => ({ isSignedIn: clerk.signedIn }),
-}))
 
 function isoDaysAgo(days: number) {
   const d = new Date()
@@ -142,7 +132,6 @@ describe('Feed page', () => {
   })
 
   afterEach(() => {
-    clerk.signedIn = true
     vi.restoreAllMocks()
   })
 
@@ -206,17 +195,11 @@ describe('Feed page', () => {
     expect(currentSearch).toBe('?show=votes')
   })
 
-  it('opens the bill drawer from a card without adding an Explorer tab', async () => {
+  it('opens the bill drawer from a card', async () => {
     renderFeed()
     fireEvent.click(await screen.findByRole('button', { name: 'Became law: Clean Water Act' }))
 
     await vi.waitFor(() => expect(currentSearch).toBe('?bill=119-hr-12'))
   })
 
-  it('sends signed-out visitors to sign in', () => {
-    clerk.signedIn = false
-    renderFeed()
-    expect(screen.getByText('Redirecting to sign in')).toBeInTheDocument()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-  })
 })

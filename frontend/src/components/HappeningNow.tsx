@@ -6,14 +6,14 @@ import {
   ExternalLink,
   Info,
   MapPin,
-  MapPinHouse,
   Navigation,
-  Pencil,
-  Search,
+  Rss,
   Sparkles,
+  Users,
   Vote,
 } from 'lucide-react'
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 
 import { apiUrl } from '../api'
 import { buildElectionIcs, downloadIcs, formatElectionDate } from '../calendar'
@@ -27,7 +27,8 @@ import {
   type EarlyVotingInfo,
   type EarlyVotingPhase,
 } from '../earlyVoting'
-import { daysUntil } from '../feed'
+import { daysUntil, groupFeed } from '../feed'
+import { FederalRepsStrip } from '../LookupResults'
 import { splitPollingHours } from '../pollingHours'
 import {
   getVoterResources,
@@ -35,7 +36,10 @@ import {
   officialFromRaceCandidate,
   partyBadgeClass,
   partyShort,
+  type Bill,
   type CivicLookup,
+  type FeedItem,
+  type FeedPage,
   type Official,
   type Race,
   type RaceCandidate,
@@ -43,192 +47,152 @@ import {
   type VoterInfo,
   type VoterLocation,
 } from '../types'
-import { sameAddress, useSavedAddress } from '../useSavedAddress'
+import { useCivicLocation, type Load } from '../useCivicLocation'
 import { directionsUrl, formatMiles, locationAddress, rankSites, type RankedSite } from '../votingSites'
 import { formatCompactMoney } from '../campaignFinance'
 import { UnlistedNomineeCard } from './CandidatesPanel'
+import FeedItemCard from './FeedItemCard'
+import LocationBar from './LocationBar'
 import OfficialPhoto from './OfficialPhoto'
+import VotingLocations from './VotingLocations'
 
 const CLOSEST_SITES_SHOWN = 3
+// Within this many days of Election Day the page is about the election; before
+// that it leads with what Congress has been doing.
+const ELECTION_FOCUS_DAYS = 60
 
-type Load<T> = { status: 'idle' } | { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; data: T }
-
-// The landing view after sign-in: what's going on in the voter's election right
-// now (early voting, Election Day), where to vote, and who is on the ballot.
+// The first page after sign-in (and open to everyone): what's going on in the
+// visitor's election right now, where to vote, who is on the ballot, who
+// represents them, and the latest from the feed when no election is close.
 export default function HappeningNow({
   onSelectOfficial,
-  onSeeAllLocations,
-  onSeeCandidates,
+  onSelectBill,
 }: {
   onSelectOfficial: (official: Official) => void
-  onSeeAllLocations: (address: string) => void
-  onSeeCandidates: () => void
+  onSelectBill: (bill: Bill) => void
 }) {
-  const { isLoaded, canSave, savedAddress, saveAddress } = useSavedAddress()
-  const [typedAddress, setTypedAddress] = useState<string | null>(null)
-  const address = typedAddress ?? savedAddress
-  const [editing, setEditing] = useState(false)
+  const location = useCivicLocation()
+  const { address, lookup } = location
 
-  const [lookup, setLookup] = useState<Load<CivicLookup>>({ status: 'idle' })
   const [voterInfo, setVoterInfo] = useState<Load<VoterInfo>>({ status: 'idle' })
   const [races, setRaces] = useState<Load<Race[]>>({ status: 'idle' })
-  const [saving, setSaving] = useState(false)
+  const [showAllSites, setShowAllSites] = useState(false)
 
+  const lookupData = lookup.status === 'ok' ? lookup.data : null
+  const stateCode = lookupData?.normalized_input?.state ?? null
+
+  // Voting sites need a street address; a device location without one only
+  // gets the races and representatives.
   useEffect(() => {
+    setShowAllSites(false)
+    if (!lookupData) {
+      setVoterInfo({ status: lookup.status === 'error' ? 'idle' : lookup.status === 'loading' ? 'loading' : 'idle' })
+      return
+    }
     if (!address) {
-      setLookup({ status: 'idle' })
-      setVoterInfo({ status: 'idle' })
-      setRaces({ status: 'idle' })
+      setVoterInfo({
+        status: 'error',
+        message: 'We couldn’t find a street address for your location. Enter your address to see voting sites.',
+      })
       return
     }
     const controller = new AbortController()
-    const { signal } = controller
-    setLookup({ status: 'loading' })
     setVoterInfo({ status: 'loading' })
-    setRaces({ status: 'loading' })
-
-    async function load(target: string) {
-      let state: string | null | undefined
-      try {
-        const data = await getJson<CivicLookup>(
-          apiUrl(`/api/lookup?address=${encodeURIComponent(target)}`),
-          { signal },
-        )
-        state = data.normalized_input?.state
-        setLookup({ status: 'ok', data })
-      } catch (err) {
-        if (signal.aborted) return
-        setLookup({ status: 'error', message: errorMessage(err, 'Could not look up that address.') })
-      }
-
-      // Both need the state from the lookup; they don't depend on each other.
-      const voter = getJson<VoterInfo>(apiUrl('/api/voter-info'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: target, state: state || undefined }),
-        signal,
+    getJson<VoterInfo>(apiUrl('/api/voter-info'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, state: stateCode || undefined }),
+      signal: controller.signal,
+    })
+      .then((data) => setVoterInfo({ status: 'ok', data }))
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          setVoterInfo({ status: 'error', message: errorMessage(err, 'Voting locations are unavailable.') })
+        }
       })
-        .then((data) => setVoterInfo({ status: 'ok', data }))
-        .catch((err) => {
-          if (!signal.aborted) {
-            setVoterInfo({ status: 'error', message: errorMessage(err, 'Voting locations are unavailable.') })
-          }
-        })
-      const ballot = state
-        ? getJson<RacesPage>(apiUrl(`/api/candidates/races?state=${encodeURIComponent(state)}&limit=100`), {
-            signal,
-          })
-            .then((data) => setRaces({ status: 'ok', data: data.items ?? [] }))
-            .catch((err) => {
-              if (!signal.aborted) {
-                setRaces({ status: 'error', message: errorMessage(err, 'Candidates are unavailable.') })
-              }
-            })
-        : null
-      if (!state) {
-        setRaces({ status: 'error', message: 'We need your state to find your races.' })
-      }
-      await Promise.all([voter, ballot])
-    }
-
-    load(address)
     return () => controller.abort()
-  }, [address])
+    // Keyed on the lookup result and address; the status only matters with no data.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookupData, address])
 
-  const lookupData = lookup.status === 'ok' ? lookup.data : null
+  useEffect(() => {
+    if (!lookupData) {
+      setRaces({ status: lookup.status === 'loading' ? 'loading' : 'idle' })
+      return
+    }
+    if (!stateCode) {
+      setRaces({ status: 'error', message: 'We need your state to find your races.' })
+      return
+    }
+    const controller = new AbortController()
+    setRaces({ status: 'loading' })
+    getJson<RacesPage>(apiUrl(`/api/candidates/races?state=${encodeURIComponent(stateCode)}&limit=100`), {
+      signal: controller.signal,
+    })
+      .then((data) => setRaces({ status: 'ok', data: data.items ?? [] }))
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          setRaces({ status: 'error', message: errorMessage(err, 'Candidates are unavailable.') })
+        }
+      })
+    return () => controller.abort()
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookupData, stateCode])
+
   const voterData = voterInfo.status === 'ok' ? voterInfo.data : null
-  const stateCode = lookupData?.normalized_input?.state ?? null
   const district = houseDistrict(lookupData)
   const today = localToday()
   const electionDate = voterData?.election?.date ?? nextCalendarElection(today)
+  const daysToElection = electionDate ? daysUntil(electionDate) : null
+  const electionFocus = daysToElection !== null && daysToElection >= 0 && daysToElection <= ELECTION_FOCUS_DAYS
   const window = getEarlyVotingWindow(stateCode, electionDate)
   const phase = window ? earlyVotingPhase(window, today) : null
   const ballotRaces =
     races.status === 'ok'
       ? races.data.filter((race) => race.office === 'S' || (race.office === 'H' && race.district === district))
       : []
+  const hasPlace = Boolean(location.place) && lookup.status !== 'error'
 
-  async function saveTypedAddress() {
-    if (!typedAddress) return
-    setSaving(true)
-    try {
-      await saveAddress(typedAddress)
-      setTypedAddress(null)
-    } catch (err) {
-      console.error('Failed to save address:', err)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (!isLoaded) {
+  if (!location.ready) {
     return <p className="text-slate-400">Loading…</p>
   }
 
   return (
     <div className="space-y-6">
-      <ElectionHero
-        electionDate={electionDate}
-        electionName={voterData?.election?.name ?? null}
-        stateCode={stateCode}
-        window={window}
-        phase={phase}
-        today={today}
-      />
-
-      {!address || editing ? (
-        <AddressPrompt
-          initial={address ?? ''}
-          hasAddress={Boolean(address)}
-          onCancel={() => setEditing(false)}
-          onSubmit={(next) => {
-            setEditing(false)
-            setTypedAddress(sameAddress(next, savedAddress) ? null : next)
-          }}
+      {electionFocus ? (
+        <ElectionHero
+          electionDate={electionDate}
+          electionName={voterData?.election?.name ?? null}
+          stateCode={stateCode}
+          window={window}
+          phase={phase}
+          today={today}
         />
       ) : (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-slate-400">
-          <span className="inline-flex items-center gap-1.5">
-            <MapPinHouse className="h-4 w-4 text-slate-500" aria-hidden="true" />
-            For <span className="font-medium text-slate-200">{address}</span>
-            {district !== null && stateCode ? (
-              <span className="text-slate-500">
-                · {stateCode}-{district === 0 ? 'AL' : district}
-              </span>
-            ) : null}
-          </span>
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300"
-          >
-            <Pencil className="h-3 w-3" aria-hidden="true" />
-            Change
-          </button>
-          {typedAddress && canSave ? (
-            <button
-              type="button"
-              onClick={saveTypedAddress}
-              disabled={saving}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300 disabled:opacity-60"
-            >
-              <Check className="h-3 w-3" aria-hidden="true" />
-              {saving ? 'Saving…' : 'Save as my address'}
-            </button>
-          ) : null}
-        </div>
+        <QuietHero placeName={stateCode ? getVoterResources(stateCode).name : null} />
       )}
+
+      <LocationBar
+        prompt={
+          electionFocus
+            ? 'Enter an address, or use your location, to see what’s happening in that community: your voting sites, the candidates on your ballot and who represents you.'
+            : 'Enter an address, or use your location, to see who represents you and what’s on your ballot next.'
+        }
+        submitLabel="Show my election"
+        detail={district !== null && stateCode ? `${stateCode}-${district === 0 ? 'AL' : district}` : null}
+      />
 
       {lookup.status === 'error' ? <p className="text-red-400">{lookup.message}</p> : null}
 
-      {address && lookup.status !== 'error' ? (
+      {hasPlace && electionFocus ? (
         <>
           <WhereToVote
             voterInfo={voterInfo}
             point={lookupData?.point ?? null}
             stateCode={stateCode}
             phase={phase}
-            onSeeAll={() => onSeeAllLocations(address)}
+            expanded={showAllSites}
+            onToggleAll={() => setShowAllSites(!showAllSites)}
           />
           <OnYourBallot
             races={races}
@@ -236,12 +200,96 @@ export default function HappeningNow({
             stateCode={stateCode}
             ballotUrl={voterData?.adminBodies.local?.ballotInfoUrl ?? voterData?.adminBodies.state?.ballotInfoUrl ?? null}
             onSelectOfficial={onSelectOfficial}
-            onSeeCandidates={onSeeCandidates}
           />
           <BeforeYouVote voterInfo={voterData} stateCode={stateCode} />
         </>
       ) : null}
+
+      {hasPlace && lookupData ? (
+        <Section
+          icon={<Users className="h-4 w-4 text-blue-400" aria-hidden="true" />}
+          title="Who represents you"
+          action={<LinkTo to="/reps">All your representatives</LinkTo>}
+        >
+          <FederalRepsStrip lookup={lookupData} onSelectOfficial={onSelectOfficial} />
+        </Section>
+      ) : null}
+
+      <FeedPreview
+        lead={!electionFocus}
+        onSelectBill={onSelectBill}
+        onSelectOfficial={onSelectOfficial}
+      />
     </div>
+  )
+}
+
+function QuietHero({ placeName }: { placeName: string | null }) {
+  return (
+    <section aria-labelledby="happening-now-heading" className="rounded-xl border border-slate-700 bg-slate-800/60 p-5">
+      <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">Happening now</p>
+      <h2 id="happening-now-heading" className="mt-1 text-2xl font-bold tracking-tight text-slate-50">
+        No election coming up{placeName ? ` in ${placeName}` : ''}
+      </h2>
+      <p className="mt-1 text-sm text-slate-300">
+        Here’s what Congress has been doing lately, and how the people who represent you voted.
+      </p>
+    </section>
+  )
+}
+
+const FEED_PREVIEW_SIZE = 5
+
+// The latest feed items, as the next thing to read after the election.
+function FeedPreview({
+  lead,
+  onSelectBill,
+  onSelectOfficial,
+}: {
+  // True when there's no election to show, so the feed is the main event.
+  lead: boolean
+  onSelectBill: (bill: Bill) => void
+  onSelectOfficial: (official: Official) => void
+}) {
+  const [items, setItems] = useState<Load<FeedItem[]>>({ status: 'loading' })
+  useEffect(() => {
+    const controller = new AbortController()
+    getJson<FeedPage>(apiUrl(`/api/feed?limit=${FEED_PREVIEW_SIZE}`), { signal: controller.signal })
+      .then((data) => setItems({ status: 'ok', data: data.items ?? [] }))
+      .catch((err) => {
+        if (!controller.signal.aborted) setItems({ status: 'error', message: errorMessage(err, 'The feed is unavailable.') })
+      })
+    return () => controller.abort()
+  }, [])
+
+  return (
+    <Section
+      icon={<Rss className="h-4 w-4 text-blue-400" aria-hidden="true" />}
+      title={lead ? 'Latest in Congress' : 'Next: catch up on Congress'}
+      action={<LinkTo to="/feed">See the full Feed</LinkTo>}
+    >
+      {items.status === 'loading' || items.status === 'idle' ? (
+        <p className="text-sm text-slate-400">Loading the latest…</p>
+      ) : items.status === 'error' ? (
+        <p className="text-sm text-slate-400">{items.message}</p>
+      ) : items.data.length === 0 ? (
+        <p className="text-sm text-slate-400">Nothing new yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {groupFeed(items.data).flatMap((group) =>
+            group.entries.map(({ item, related }) => (
+              <FeedItemCard
+                key={item.id}
+                item={item}
+                related={related}
+                onSelectBill={onSelectBill}
+                onSelectOfficial={onSelectOfficial}
+              />
+            )),
+          )}
+        </div>
+      )}
+    </Section>
   )
 }
 
@@ -361,81 +409,20 @@ function ElectionHero({
   )
 }
 
-function AddressPrompt({
-  initial,
-  hasAddress,
-  onSubmit,
-  onCancel,
-}: {
-  initial: string
-  hasAddress: boolean
-  onSubmit: (address: string) => void
-  onCancel: () => void
-}) {
-  const [value, setValue] = useState(initial)
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (value.trim()) onSubmit(value.trim())
-  }
-  return (
-    <section className="rounded-xl border border-blue-900/60 bg-blue-950/20 p-4">
-      {hasAddress ? null : (
-        <p className="mb-3 text-sm text-slate-300">
-          Enter your address to see your closest voting locations and the candidates on your ballot.
-        </p>
-      )}
-      <form onSubmit={submit} className="flex flex-col gap-2 sm:flex-row" role="search">
-        <label className="relative min-w-0 flex-1">
-          <span className="sr-only">Your street address</span>
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-            aria-hidden="true"
-          />
-          <input
-            type="text"
-            autoComplete="street-address"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder="1100 Congress Ave, Austin, TX 78701"
-            className="w-full rounded border border-slate-700 bg-slate-800 py-2 pr-3 pl-9 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
-          />
-        </label>
-        <button
-          type="submit"
-          className="rounded bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
-        >
-          Show my election
-        </button>
-        {hasAddress ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
-          >
-            Cancel
-          </button>
-        ) : null}
-      </form>
-      <p className="mt-2 text-xs text-slate-500">
-        Your address is sent to the Census geocoder and Google’s Civic Information API to find your
-        districts and voting sites.
-      </p>
-    </section>
-  )
-}
-
 function WhereToVote({
   voterInfo,
   point,
   stateCode,
   phase,
-  onSeeAll,
+  expanded,
+  onToggleAll,
 }: {
   voterInfo: Load<VoterInfo>
   point: { lat: number; lon: number } | null
   stateCode: string | null
   phase: EarlyVotingPhase | null
-  onSeeAll: () => void
+  expanded: boolean
+  onToggleAll: () => void
 }) {
   const resources = getVoterResources(stateCode)
   const data = voterInfo.status === 'ok' ? voterInfo.data : null
@@ -463,8 +450,8 @@ function WhereToVote({
       title={sorted ? `Closest ${title.toLowerCase()}` : title}
       action={
         data && data.uiState !== 'unavailable' ? (
-          <LinkButton onClick={onSeeAll}>
-            {totalSites > 0 ? `See all ${totalSites} locations` : 'Voting details'}
+          <LinkButton onClick={onToggleAll} expanded={expanded}>
+            {expanded ? 'Show fewer' : totalSites > 0 ? `See all ${totalSites} locations` : 'Voting details'}
           </LinkButton>
         ) : null
       }
@@ -508,6 +495,11 @@ function WhereToVote({
           ) : null}
         </>
       )}
+      {expanded && data ? (
+        <div className="mt-4 border-t border-slate-700 pt-4">
+          <VotingLocations voterInfo={data} loading={false} stateCode={stateCode} />
+        </div>
+      ) : null}
     </Section>
   )
 }
@@ -576,14 +568,12 @@ function OnYourBallot({
   stateCode,
   ballotUrl,
   onSelectOfficial,
-  onSeeCandidates,
 }: {
   races: Load<Race[]>
   ballotRaces: Race[]
   stateCode: string | null
   ballotUrl: string | null
   onSelectOfficial: (official: Official) => void
-  onSeeCandidates: () => void
 }) {
   const awaitingBallot = ballotRaces.some((race) => !race.ballot_filtered)
   const ballotSource = ballotRaces.find((race) => race.ballot_source)?.ballot_source
@@ -591,7 +581,7 @@ function OnYourBallot({
     <Section
       icon={<Vote className="h-4 w-4 text-blue-400" aria-hidden="true" />}
       title="On your ballot"
-      action={<LinkButton onClick={onSeeCandidates}>All candidates</LinkButton>}
+      action={<LinkTo to="/candidates">All candidates</LinkTo>}
     >
       {races.status === 'loading' || races.status === 'idle' ? (
         <p className="text-sm text-slate-400">Loading your races…</p>
@@ -813,16 +803,34 @@ function Section({
   )
 }
 
-function LinkButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+function LinkButton({
+  onClick,
+  expanded,
+  children,
+}: {
+  onClick: () => void
+  expanded?: boolean
+  children: ReactNode
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-expanded={expanded}
       className="inline-flex items-center gap-0.5 text-sm font-semibold text-blue-400 hover:text-blue-300"
     >
       {children}
       <ChevronRight className="h-4 w-4" aria-hidden="true" />
     </button>
+  )
+}
+
+function LinkTo({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="inline-flex items-center gap-0.5 text-sm font-semibold text-blue-400 hover:text-blue-300">
+      {children}
+      <ChevronRight className="h-4 w-4" aria-hidden="true" />
+    </Link>
   )
 }
 

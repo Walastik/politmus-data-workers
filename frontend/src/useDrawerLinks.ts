@@ -3,10 +3,6 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { billStub, officialStub, type Bill, type Official } from './types'
 
-export type ExplorerTab = 'now' | 'lookup' | 'roster' | 'candidates' | 'bills'
-
-const TABS: readonly ExplorerTab[] = ['now', 'lookup', 'roster', 'candidates', 'bills']
-
 // Rows the user clicked, kept in history state so a drawer header renders
 // immediately instead of waiting on its detail fetch. `drawerPush` marks entries
 // we pushed, so closing that drawer can step back instead of adding an entry.
@@ -16,18 +12,15 @@ type LinkState = {
   bill?: Bill
 } | null
 
-// Explorer tab and drawer state lives in the URL so it can be shared,
-// bookmarked and driven by back/forward: ?tab=…&official=<id>&bill=<id>
-export function useExplorerLinks() {
+// Member and bill drawers live in the URL on every page so they can be shared,
+// bookmarked and driven by back/forward: ?official=<id>&bill=<id>. The page's
+// own params (filters, views) are kept alongside them.
+export function useDrawerLinks() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
   const state = location.state as LinkState
 
-  const rawTab = searchParams.get('tab')
-  const tab: ExplorerTab = TABS.includes(rawTab as ExplorerTab)
-    ? (rawTab as ExplorerTab)
-    : 'now'
   const officialId = searchParams.get('official')
   const billId = searchParams.get('bill')
 
@@ -42,42 +35,25 @@ export function useExplorerLinks() {
       : billStub(billId)
     : null
 
-  // Pages without tabs (the feed) reuse the drawer links; leave ?tab off there.
-  const keepTab = useCallback(
-    (params: URLSearchParams) => {
-      if (rawTab !== null || location.pathname === '/dev-explorer') {
-        params.set('tab', tab)
-      }
-    },
-    [location.pathname, rawTab, tab],
-  )
-
-  const setTab = useCallback(
-    (next: ExplorerTab) => setSearchParams({ tab: next }),
-    [setSearchParams],
-  )
-
   const openOfficial = useCallback(
     (next: Official) => {
       const params = new URLSearchParams(searchParams)
-      keepTab(params)
       params.set('official', next.id)
       params.delete('bill')
       setSearchParams(params, { state: { drawerPush: true, official: next } })
     },
-    [keepTab, searchParams, setSearchParams],
+    [searchParams, setSearchParams],
   )
 
   const openBill = useCallback(
     (next: Bill) => {
       const params = new URLSearchParams(searchParams)
-      keepTab(params)
       params.set('bill', next.id)
       setSearchParams(params, {
         state: { official: state?.official, drawerPush: true, bill: next },
       })
     },
-    [keepTab, searchParams, setSearchParams, state],
+    [searchParams, setSearchParams, state],
   )
 
   const closeDrawer = useCallback(
@@ -106,8 +82,6 @@ export function useExplorerLinks() {
   const closeBill = useCallback(() => closeDrawer('bill'), [closeDrawer])
 
   return {
-    tab,
-    setTab,
     official,
     openOfficial,
     closeOfficial,
