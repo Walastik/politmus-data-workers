@@ -135,19 +135,33 @@ def _candidate_out(candidacy, official, positions_count, finance, on_ballot=None
     )
 
 
-def race_out(key, rows, finance_by_key, show_all=False, today=None, issues=None):
-    """rows: (candidacy, official, positions_count) for everyone in the race."""
+def race_out(key, rows, finance_by_key, show_all=False, today=None, issues=None, ballots=None):
+    """rows: (candidacy, official, positions_count) for everyone in the race.
+
+    ballots: ballot_nominees.current_ballots(db); the committed ones if None.
+    """
     year, state, office, district = key
     by_candidacy = {id(candidacy): (official, count) for candidacy, official, count in rows}
     candidacies = [candidacy for candidacy, _, _ in rows]
-    ballot = ballot_nominees.ballot_for(year, state, office, district)
+    ballot = ballot_nominees.ballot_for(year, state, office, district, ballots)
     nominee_ids = None
     websites = {}
     unlisted = []
+    complete = False
     if ballot:
-        nominees, ballot_source = ballot
+        nominees, ballot_source, complete = ballot
         nominee_ids = {n.fec_candidate_id for n in nominees if n.fec_candidate_id}
         websites = {n.fec_candidate_id: n.website for n in nominees if n.fec_candidate_id}
+        # Campaigns that filed a pre-general report are on the ballot, unless
+        # they're from a major party the list already has a nominee for: a
+        # primary loser can keep filing (Cornyn). This picks up third parties
+        # the source left out.
+        listed_major = {n.party for n in nominees} & ballot_nominees.MAJOR_PARTIES
+        nominee_ids |= {
+            c.fec_candidate_id
+            for c in candidacies
+            if c.in_general_election and c.party not in listed_major
+        }
         filed = {c.fec_candidate_id for c in candidacies}
         unlisted = [
             BallotNomineeOut(name=n.name, party=n.party)
@@ -191,6 +205,7 @@ def race_out(key, rows, finance_by_key, show_all=False, today=None, issues=None)
         total_receipts=sum(float(c.receipts or 0) for c in shown),
         ballot_filtered=filtered,
         ballot_source=ballot_source,
+        ballot_complete=complete,
         hidden_count=len(rows) - len(shown),
         candidates=candidates,
         unlisted_nominees=unlisted,
@@ -224,6 +239,7 @@ def race_for(db, candidacy, today=None):
         _finance_by_key(db, [c for c, _, _ in rows]),
         today=today,
         issues=issues_by_official(db, {o.id for _, o, _ in rows}),
+        ballots=ballot_nominees.current_ballots(db),
     )
 
 
@@ -275,8 +291,9 @@ def list_races(
     today = date.today()
     finance_by_key = _finance_by_key(db, [c for race_rows in by_race.values() for c, _, _ in race_rows])
     issues = issues_by_official(db, {o.id for race_rows in by_race.values() for _, o, _ in race_rows})
+    ballots = ballot_nominees.current_ballots(db)
     races = [
-        race_out(key, race_rows, finance_by_key, show_all=show_all, today=today, issues=issues)
+        race_out(key, race_rows, finance_by_key, show_all=show_all, today=today, issues=issues, ballots=ballots)
         for key, race_rows in by_race.items()
     ]
     races = [race for race in races if race.candidates or race.unlisted_nominees]

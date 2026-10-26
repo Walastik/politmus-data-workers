@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  Info,
   MapPin,
   MapPinHouse,
   Navigation,
@@ -609,7 +610,7 @@ function OnYourBallot({
             </p>
           ) : null}
           {ballotRaces.map((race) => (
-            <BallotRace key={race.key} race={race} onSelectOfficial={onSelectOfficial} />
+            <BallotRace key={race.key} race={race} ballotUrl={ballotUrl} onSelectOfficial={onSelectOfficial} />
           ))}
           <p className="text-xs text-slate-500">
             “Full profile” has each candidate’s positions, voting record and campaign finance. These are your
@@ -637,7 +638,15 @@ function OnYourBallot({
 // race can still list a dozen primary candidates.
 const UNCONFIRMED_CANDIDATES_SHOWN = 6
 
-function BallotRace({ race, onSelectOfficial }: { race: Race; onSelectOfficial: (official: Official) => void }) {
+function BallotRace({
+  race,
+  ballotUrl,
+  onSelectOfficial,
+}: {
+  race: Race
+  ballotUrl: string | null
+  onSelectOfficial: (official: Official) => void
+}) {
   const [showAll, setShowAll] = useState(false)
   // FEC sometimes lists one campaign under two candidate IDs; show it once.
   const seen = new Set<string>()
@@ -651,7 +660,10 @@ function BallotRace({ race, onSelectOfficial }: { race: Race; onSelectOfficial: 
   const shown = candidates.slice(0, limit)
   return (
     <div>
-      <h4 className="mb-2 text-sm font-semibold text-slate-200">{race.label}</h4>
+      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h4 className="text-sm font-semibold text-slate-200">{race.label}</h4>
+        {race.ballot_complete ? null : <IncompleteRaceNote race={race} ballotUrl={ballotUrl} />}
+      </div>
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {shown.map((candidate) => (
           <li key={candidate.fec_candidate_id}>
@@ -678,6 +690,43 @@ function BallotRace({ race, onSelectOfficial }: { race: Race; onSelectOfficial: 
         </button>
       ) : null}
     </div>
+  )
+}
+
+// Shown on any race whose list we can't vouch for as the whole ballot.
+function IncompleteRaceNote({ race, ballotUrl }: { race: Race; ballotUrl: string | null }) {
+  const [open, setOpen] = useState(false)
+  const reason = race.ballot_source
+    ? 'We’ve confirmed the major-party nominees, but independent and third-party candidates come from news coverage and FEC filings, so some may be missing.'
+    : 'We haven’t confirmed this race’s nominees yet. This list comes from FEC filings, so it can include candidates who lost a primary and leave out candidates who haven’t filed with the FEC.'
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 rounded-full border border-amber-800/60 px-2 py-0.5 text-[11px] font-medium text-amber-300 transition hover:text-amber-200"
+      >
+        <Info className="h-3 w-3" aria-hidden="true" />
+        May be incomplete
+      </button>
+      {open ? (
+        <p className="basis-full text-xs leading-relaxed text-slate-300">
+          This list may not include everyone on your ballot for this race. {reason}{' '}
+          {ballotUrl ? (
+            <>
+              Your{' '}
+              <a href={ballotUrl} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-300">
+                sample ballot
+              </a>{' '}
+              has the full list.
+            </>
+          ) : (
+            'Your sample ballot has the full list.'
+          )}
+        </p>
+      ) : null}
+    </>
   )
 }
 

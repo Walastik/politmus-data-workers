@@ -724,3 +724,22 @@ class Candidacy(Base):
     detail_coverage_end_date = Column(Date, nullable=True)
 
     official = relationship("Official")
+
+
+class BallotSnapshot(Base):
+    """One state's November ballot as ballot_wikipedia.py last read it.
+
+    The daily run writes these so the API picks up newly written results
+    boxes without a deploy; they take precedence over the committed
+    services/ballots_<cycle>.json (services/ballot_nominees.py).
+    """
+    __tablename__ = "ballot_snapshots"
+
+    cycle = Column(Integer, primary_key=True)
+    state = Column(String, primary_key=True)
+    source = Column(String, nullable=False)
+    # Wikipedia article titles read.
+    articles = Column(JSONB, nullable=True)
+    # [{office, district, complete, nominees: [{fec_candidate_id, name, party, website}]}]
+    races = Column(JSONB, nullable=False)
+    fetched_at = Column(DateTime, nullable=False)

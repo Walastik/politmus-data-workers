@@ -1,4 +1,4 @@
-"""Hand-maintained general-election ballots for races where FEC can't tell us.
+"""General-election ballots for races where FEC can't tell us who is on them.
 
 FEC never records primary results, and its pre-general (12G) filings are a
 poor stand-in: they land late, and a sitting member who lost the primary
@@ -9,12 +9,28 @@ Each nominee is keyed by FEC candidate ID. Nominees FEC has no financial
 filings for (common for third-party candidates who raise under $5,000) have
 no ID; races still list them by name.
 
-Add a state's races together, with its source, and re-check them when the
-state certifies its ballot. Write-in candidates are not listed.
+Texas is maintained by hand below. Every other state comes from
+ballot_wikipedia.py, which reads Wikipedia: its daily run saves
+ballot_snapshots rows, and ballots_<cycle>.json is the committed copy used
+when a state has no row. A state listed by hand here takes precedence over
+both. Add a state's races together, with its source, and re-check them when
+the state certifies its ballot. Write-in candidates are not listed.
+
+A race is complete only on a hand-verified ballot. Generated races never
+are: Wikipedia's results boxes can miss minor candidates (they missed two
+Texas Libertarians), and races read from an infobox (no results box yet)
+may miss third-party and independent candidates. We'd rather flag a list
+that turns out to be whole than imply one is whole when it isn't.
 """
 
-from dataclasses import dataclass
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+GENERATED_CYCLES = (2026,)
+MAJOR_PARTIES = {"Democratic", "Republican"}
 
 
 @dataclass(frozen=True)
@@ -30,6 +46,10 @@ class Nominee:
 class StateBallot:
     source: str
     races: dict  # (office, district) -> tuple[Nominee, ...]
+    # Races whose source may be missing candidates.
+    partial: frozenset = field(default_factory=frozenset)
+    # Checked by a person against the state's candidate lists.
+    verified: bool = False
 
 
 # Texas, November 3, 2026. Major-party, independent and Green nominees from
@@ -91,7 +111,7 @@ TX_2026 = {
     ),
     ("H", 12): (
         Nominee('H4TX12065', "Craig Goldman", "Republican", 'https://www.craiggoldman.org/'),
-        Nominee(None, "Angela Rodriguez Prilliman", "Democratic"),
+        Nominee('H6TX12169', "Angela Rodriguez Prilliman", "Democratic", 'https://www.helifortexas.com/'),
     ),
     ("H", 13): (
         Nominee('H0TX13228', "Ronny Jackson", "Republican", 'https://ronnyjacksontx.com/'),
@@ -115,7 +135,7 @@ TX_2026 = {
     ),
     ("H", 18): (
         Nominee('H6TX18232', "Christian Menefee", "Democratic", 'https://christianmenefee.com/'),
-        Nominee(None, "Ronald Whitfield", "Republican"),
+        Nominee('H6TX18497', "Ronald Whitfield", "Republican"),
     ),
     ("H", 19): (
         Nominee('H6TX19206', "Tom Sell", "Republican", 'https://www.selltexastrue.com/'),
@@ -153,7 +173,7 @@ TX_2026 = {
     ("H", 27): (
         Nominee('H8TX27049', "Michael Cloud", "Republican", 'https://www.cloudforcongress.com/'),
         Nominee('H4TX27089', "Tanya Lloyd", "Democratic", 'https://www.tanyafortexas.com/'),
-        Nominee(None, "Dan McQueen", "Independent", 'https://mcqueenforcongress.com/'),
+        Nominee('H0TX20124', "Dan McQueen", "Independent", 'https://mcqueenforcongress.com/'),
     ),
     ("H", 28): (
         Nominee('H2TX23082', "Henry Cuellar", "Democratic", 'https://henrycuellar.com/'),
@@ -168,7 +188,7 @@ TX_2026 = {
         Nominee('H6TX30211', "Everett Jackson", "Republican", 'https://jacksonfortexas.com/'),
     ),
     ("H", 31): (
-        Nominee('H2TX31044', "John Carter", "Republican"),
+        Nominee('H2TX31044', "John Carter", "Republican", 'https://www.johncarterforcongress.com/'),
         Nominee('H6TX31094', "Justin Early", "Democratic", 'https://www.votejustinearly.com/'),
     ),
     ("H", 32): (
@@ -177,7 +197,7 @@ TX_2026 = {
     ),
     ("H", 33): (
         Nominee('H8TX32098', "Colin Allred", "Democratic", 'https://colinallred.com/'),
-        Nominee(None, "Patrick Gillespie", "Republican"),
+        Nominee('H2TX33248', "Patrick Gillespie", "Republican", 'https://patrickgillespie4congress33.com/'),
     ),
     ("H", 34): (
         Nominee('H6TX15162', "Vicente Gonzalez", "Democratic", 'https://www.vicentegonzalez.com/'),
@@ -202,19 +222,78 @@ TX_2026 = {
     ),
 }
 
-BALLOTS = {
+HAND_MAINTAINED = {
     (2026, "TX"): StateBallot(
         source="Wikipedia and the Libertarian Party of Texas, checked Oct. 25, 2026",
         races=TX_2026,
+        verified=True,
     ),
 }
 
 
-def nominee_websites():
-    """FEC candidate ID -> campaign website, across every hand-maintained ballot."""
+def ballot_from_data(source, races):
+    """A StateBallot from ballot_wikipedia.py's race dicts."""
+    return StateBallot(
+        source=source,
+        races={
+            (race["office"], race["district"]): tuple(Nominee(**n) for n in race["nominees"])
+            for race in races
+        },
+        partial=frozenset(
+            (race["office"], race["district"]) for race in races if not race.get("complete", True)
+        ),
+    )
+
+
+def load_generated(cycle, path=None):
+    """(cycle, state) -> StateBallot from ballots_<cycle>.json, if it exists."""
+    path = path or Path(__file__).with_name(f"ballots_{cycle}.json")
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    return {
+        (cycle, state): ballot_from_data(ballot["source"], ballot["races"])
+        for state, ballot in data["states"].items()
+    }
+
+
+BALLOTS = {
+    **{key: ballot for cycle in GENERATED_CYCLES for key, ballot in load_generated(cycle).items()},
+    **HAND_MAINTAINED,
+}
+
+# Snapshot rows change once a day; re-read them at most this often.
+SNAPSHOT_CACHE_SECONDS = 600
+_snapshot_cache = {"at": None, "ballots": None}
+
+
+def current_ballots(session):
+    """BALLOTS with the latest ballot_snapshots rows over the committed JSON;
+    hand-maintained states still win."""
+    from models import BallotSnapshot
+
+    now = time.monotonic()
+    if _snapshot_cache["at"] is None or now - _snapshot_cache["at"] >= SNAPSHOT_CACHE_SECONDS:
+        snapshots = {
+            (row.cycle, row.state): ballot_from_data(row.source, row.races)
+            for row in session.query(BallotSnapshot).all()
+        }
+        _snapshot_cache.update(at=now, ballots=snapshots)
+    return {
+        **BALLOTS,
+        **{key: ballot for key, ballot in _snapshot_cache["ballots"].items() if key not in HAND_MAINTAINED},
+    }
+
+
+def clear_snapshot_cache():
+    _snapshot_cache.update(at=None, ballots=None)
+
+
+def nominee_websites(ballots=None):
+    """FEC candidate ID -> campaign website, across every listed ballot."""
     return {
         n.fec_candidate_id: n.website
-        for ballot in BALLOTS.values()
+        for ballot in (ballots or BALLOTS).values()
         for nominees in ballot.races.values()
         for n in nominees
         if n.fec_candidate_id and n.website
@@ -229,7 +308,7 @@ def fill_websites(session):
     """
     from models import Candidacy, Official
 
-    websites = nominee_websites()
+    websites = nominee_websites(current_ballots(session))
     rows = (
         session.query(Official)
         .join(Candidacy, Candidacy.official_id == Official.id)
@@ -247,10 +326,13 @@ def fill_websites(session):
     return filled
 
 
-def ballot_for(year, state, office, district):
-    """(nominees, source) for a race on a hand-maintained ballot, else None."""
-    ballot = BALLOTS.get((year, state))
+def ballot_for(year, state, office, district, ballots=None):
+    """(nominees, source, complete) for a race on a listed ballot, else None."""
+    ballot = (ballots or BALLOTS).get((year, state))
     if ballot is None:
         return None
-    nominees = ballot.races.get((office, district if office == "H" else 0))
-    return (nominees, ballot.source) if nominees is not None else None
+    key = (office, district if office == "H" else 0)
+    nominees = ballot.races.get(key)
+    if nominees is None:
+        return None
+    return nominees, ballot.source, ballot.verified and key not in ballot.partial
