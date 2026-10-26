@@ -117,13 +117,13 @@ def list_officials(
     rows = query.order_by(Official.name).limit(limit).all()
     return [
         OfficialOut.model_validate(official).model_copy(
-            update={"positions_status": status, "positions_count": count, **_score_fields(score)}
+            update={"positions_status": status, "positions_count": count, **score_fields(score)}
         )
         for official, status, count, score in rows
     ]
 
 
-def _score_fields(score: Optional[OfficialScore]) -> dict:
+def score_fields(score: Optional[OfficialScore]) -> dict:
     if score is None:
         return {}
     return {
@@ -340,7 +340,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         ],
         stated_positions=[OfficialStanceOut.model_validate(s) for s in stances],
         positions_sync=PositionsSyncOut.model_validate(sync) if sync else None,
-        **_score_fields(score),
+        **score_fields(score),
         accountability=AccountabilityScoreOut.model_validate(score) if score else None,
         alignments=[
             VoteAlignmentOut.model_validate(alignment).model_copy(update={"bill_title": title})
