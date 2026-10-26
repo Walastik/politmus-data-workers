@@ -143,6 +143,13 @@ python congress_client.py context --limit 40
 python congress_client.py context --bill-id 119-hr-9340
 ```
 
+**Related bills** (`bill_relations.py`) — for voted bills, stores the bills Congress.gov lists as related (`bill_relations`: the related bill's id and relationship types such as `Related bill`, `Identical bill`, `Public law contains the text`, `Procedurally related`). Accountability scoring uses them to find companion bills (see `later_vote` below). A bill is re-fetched only when its latest action changes, and the voters on bills whose links changed are rescored:
+
+```bash
+python congress_client.py related --limit 0                # every voted bill (backfill)
+python congress_client.py related --bill-id 119-s-1071
+```
+
 **Extract bill effects (superseded)** — the bill classifier (`scripts/classify_bills.py`, below) now writes `bill_effects` from the same run as the drawer's intents; stop this worker's cron once the classifier has run. It sends CRS summaries to a local [Ollama](https://ollama.com/) model and stores normalized policy facts: a growing `policy_targets` catalog (the nouns, e.g. ICE, Voting Eligibility) and one `bill_effects` row per fact (`mechanism`, `direction`, `magnitude`, `rationale`). Only bills with a summary and no effects yet are processed, unless you pass `--force`. Extraction rules live in `extraction_guidelines` so you can update the prompt in Postgres without changing worker code.
 
 Requires a running Ollama instance (default `http://localhost:11434`) and a pulled model such as `qwen2.5-coder:32b`. The worker is meant to run on the Mac Mini that hosts Ollama, pointed at the same `DATABASE_URL` as the rest of the pipeline.
@@ -290,7 +297,7 @@ Not every match counts. A match is kept (with a `reason`, shown in the drawer) b
 - the position is `low` emphasis (`low_emphasis`);
 - the position is `local` and the bill is broad, 10 or more effects (`local_on_broad_bill`);
 - the position is not `high` emphasis and the effect is an unrelated add-on, `relation = secondary` (`unrelated_provision`), or anything but a `high`-magnitude effect of a broad bill (`minor_provision`). High-emphasis positions name the change, so they count on any provision; a counted secondary effect is labelled "via an unrelated provision";
-- a later vote in the same Congress matched the same policy (target, mechanism, and effect direction), so a chamber's version and the final bill count once (`later_vote`).
+- a later vote on a companion bill matched the same policy (target, mechanism, and effect direction), so a chamber's version and the final bill count once (`later_vote`). Companions are bills Congress.gov links in `bill_relations` by anything but `Procedurally related` (a rule resolution) or `Cross-Congress related bill`, plus bills in the same Congress with the same title (the final NDAA passed as S.1071, which is not linked to the Senate's S.2296). Unrelated bills on the same policy, such as the NDAA and a defense appropriations bill, each count.
 
 Each vote then scores once: its counted matches net to +1, −1, or 0, so a vote touching several matching intents is one point, and one whose matches cancel out is neither aligned nor conflicting. Not Voting and Present never score. Only passage-type votes count (On Passage, Suspend the Rules and Pass/Agree, Agreeing to the Resolution, conference reports, concurring in the other chamber's amendment, veto overrides); procedural motions (recommit, previous question, cloture, table, …) and amendment votes do not. When a bill has several passage votes in one chamber, only the official's latest Yes/No counts. Bills must have `classification_status = ok`.
 
@@ -475,6 +482,7 @@ fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.p
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py senate-votes --congress 119 --all-sessions"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py house-votes --congress 119 --all-sessions"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py context --limit 200"
+fly ssh console -a politmus-api -C "/usr/local/bin/python /app/congress_client.py related --limit 0"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/openstates_client.py members --all-states"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py crosswalk"
 fly ssh console -a politmus-api -C "/usr/local/bin/python /app/fec_client.py candidates"
