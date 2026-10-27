@@ -11,7 +11,7 @@ export function formatPoints(points: number) {
 }
 
 export function formatPct(pct: number | null | undefined) {
-  return pct == null ? 'N/A' : `${Math.round(pct)}%`
+  return pct == null ? '—' : `${Math.round(pct)}%`
 }
 
 export function hasReliablePct(matches: number | null | undefined, pct: number | null | undefined) {

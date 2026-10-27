@@ -73,16 +73,16 @@ export function partyBarClass(party: string | null | undefined) {
 }
 
 export function formatMoney(value: number | null | undefined) {
-  return value == null ? 'N/A' : money.format(value)
+  return value == null ? '—' : money.format(value)
 }
 
 export function formatCompactMoney(value: number | null | undefined) {
-  return value == null ? 'N/A' : compactMoney.format(value)
+  return value == null ? '—' : compactMoney.format(value)
 }
 
 export function formatShare(value: number | null | undefined) {
   if (value == null) {
-    return 'N/A'
+    return '—'
   }
   const percent = value * 100
   if (percent > 0 && percent < 1) {
