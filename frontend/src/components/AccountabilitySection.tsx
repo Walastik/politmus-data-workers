@@ -149,7 +149,7 @@ function VoteItem({
             className={`rounded border px-1.5 py-0.5 text-xs font-bold ${pointsBadgeClass(vote.result ?? 0)}`}
             aria-label={resultLabel(vote.result)}
           >
-            {vote.result === null ? '—' : formatPoints(vote.result)}
+            {vote.result === null ? 'N/A' : formatPoints(vote.result)}
           </span>
         </div>
       </div>

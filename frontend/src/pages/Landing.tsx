@@ -44,7 +44,7 @@ function HeroSection({ onScroll }: { onScroll: () => void }) {
 
         <p className="mx-auto max-w-xl text-lg leading-relaxed text-slate-300 sm:text-xl">
           Hold your representatives accountable. Politmus grades politicians on
-          how they actually vote — so you can see if they keep their promises.
+          how they actually vote, so you can see if they keep their promises.
         </p>
 
         <div className="mt-10 w-full max-w-2xl text-left">
@@ -118,7 +118,7 @@ function GradingSection() {
           <GradingStep
             step="1"
             title="Extract Positions"
-            description="We crawl each legislator's official website and use AI to identify their stated policy positions — what they claim to support or oppose."
+            description="We crawl each legislator's official website and use AI to identify their stated policy positions: what they claim to support or oppose."
             icon={<Sparkles className="h-5 w-5 text-purple-400" />}
           />
           <GradingStep
@@ -238,7 +238,7 @@ function LookupSection() {
           <FeatureCard
             icon={<Users className="h-5 w-5 text-blue-400" />}
             title="Federal & State"
-            description="See senators, house members, your governor, and state legislators — all in one lookup."
+            description="See senators, house members, your governor, and state legislators, all in one lookup."
           />
           <FeatureCard
             icon={<MapPin className="h-5 w-5 text-emerald-400" />}
@@ -275,7 +275,7 @@ function BillsSection() {
           <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-400">
             Congressional bills are dense. Politmus gives you AI-generated TL;DR
             summaries and "Explain Like I'm 5" breakdowns so you know what's
-            actually being voted on — without the legal jargon.
+            actually being voted on, without the legal jargon.
           </p>
         </div>
 
@@ -568,7 +568,7 @@ export default function Landing() {
       {/* footer */}
       <footer className="border-t border-slate-800 bg-slate-950 px-6 py-10 text-center text-xs text-slate-500">
         <p>
-          Politmus — open data, transparent scoring. Built with public
+          Politmus: open data, transparent scoring. Built with public
           congressional data from Congress.gov, Google Civic Information API,
           and OpenStates.
         </p>

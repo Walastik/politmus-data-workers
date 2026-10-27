@@ -71,7 +71,7 @@ describe('formatShare', () => {
     expect(formatShare(0.2732)).toBe('27%')
     expect(formatShare(0.004)).toBe('<1%')
     expect(formatShare(0)).toBe('0%')
-    expect(formatShare(null)).toBe('—')
+    expect(formatShare(null)).toBe('N/A')
   })
 })
 

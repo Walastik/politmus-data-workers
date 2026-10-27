@@ -73,7 +73,7 @@ describe('ScoreHeadline', () => {
   it('holds back the percentage until there are enough scored votes', () => {
     render(<ScoreHeadline points={-2} pct={0} matches={2} />)
     expect(screen.queryByText('0%')).not.toBeInTheDocument()
-    expect(screen.queryByText('—')).not.toBeInTheDocument()
+    expect(screen.queryByText('N/A')).not.toBeInTheDocument()
     expect(screen.getByText('Politmus Score')).toBeInTheDocument()
     expect(screen.getByText('−2')).toBeInTheDocument()
     expect(screen.getByText(/% after 5/)).toBeInTheDocument()

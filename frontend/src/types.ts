@@ -804,7 +804,7 @@ export function voteShort(position: string | null | undefined) {
   if (position === 'No') return 'N'
   if (position === 'Present') return 'P'
   if (position === 'Not Voting') return 'NV'
-  return position || '—'
+  return position || 'N/A'
 }
 
 export function voteTextClass(position: string | null | undefined) {

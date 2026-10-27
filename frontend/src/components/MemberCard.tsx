@@ -80,7 +80,7 @@ export function ScoreChip({ official }: { official: Pick<Official, 'score_points
   if (points == null || !matches) {
     return (
       <span className="shrink-0 text-[11px] text-slate-600" title="Not scored yet">
-        —
+        N/A
       </span>
     )
   }

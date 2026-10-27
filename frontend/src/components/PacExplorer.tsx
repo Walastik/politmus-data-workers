@@ -367,7 +367,7 @@ function PacGifts({
     <ul className="ml-6 mt-1.5 space-y-0.5 text-[11px]">
       {gifts.map((gift) => (
         <li key={gift.sub_id} className="flex items-center gap-3 text-slate-300">
-          <span className="w-20 tabular-nums text-slate-400">{gift.receipt_date ?? '—'}</span>
+          <span className="w-20 tabular-nums text-slate-400">{gift.receipt_date ?? 'N/A'}</span>
           <span className="w-16 text-right tabular-nums">{formatMoney(gift.amount)}</span>
           {gift.pdf_url ? (
             <a
