@@ -12,8 +12,9 @@ from api.schemas import (
     CivicRepresentativeOut,
     GeoPointOut,
 )
+from api.routes.officials import score_fields
 from database import get_db
-from models import Official
+from models import Official, OfficialScore
 
 router = APIRouter()
 
@@ -258,6 +259,8 @@ def _lookup_for_match(db: Session, match: CensusMatch) -> CivicLookupOut:
             for official in state_reps
         )
 
+    representatives = _with_scores(db, representatives)
+
     return CivicLookupOut(
         normalized_input=CivicAddressOut(
             line1=match.line1,
@@ -273,3 +276,17 @@ def _lookup_for_match(db: Session, match: CensusMatch) -> CivicLookupOut:
         divisions=divisions,
         representatives=representatives,
     )
+
+
+def _with_scores(db: Session, representatives: list[CivicRepresentativeOut]) -> list[CivicRepresentativeOut]:
+    ids = [rep.id for rep in representatives if rep.id]
+    if not ids:
+        return representatives
+    scores = {
+        score.official_id: score
+        for score in db.query(OfficialScore).filter(OfficialScore.official_id.in_(ids))
+    }
+    return [
+        rep.model_copy(update=score_fields(scores.get(rep.id))) if rep.id in scores else rep
+        for rep in representatives
+    ]

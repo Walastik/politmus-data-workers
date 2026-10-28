@@ -619,6 +619,9 @@ export interface CivicRepresentative {
   photo_url: string | null
   addresses: CivicAddress[]
   channels: { type: string | null; id: string | null }[]
+  score_points?: number | null
+  score_pct?: number | null
+  score_matches?: number | null
 }
 
 export interface CivicLookup {
@@ -1191,6 +1194,9 @@ export function civicRepresentativeToOfficial(
     photo_url: rep.photo_url ?? null,
     level: isCivicStateLevel(rep) ? 'state' : 'federal',
     openstates_id: isCivicStateLevel(rep) ? rep.id : null,
+    score_points: rep.score_points ?? null,
+    score_pct: rep.score_pct ?? null,
+    score_matches: rep.score_matches ?? null,
   }
 }
 

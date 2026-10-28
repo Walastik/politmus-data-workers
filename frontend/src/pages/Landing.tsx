@@ -1,26 +1,31 @@
+import { SignUpButton } from '@clerk/clerk-react'
 import { useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   BookOpen,
+  Check,
   ChevronDown,
   Globe,
+  Landmark,
   MapPin,
   Phone,
+  Radio,
   Scale,
   ScrollText,
-  Search,
   Sparkles,
   Users,
 } from 'lucide-react'
 
+import LocationPicker from '../components/LocationPicker'
 import AsciiAnimation from './AsciiAnimation'
 
 // ─── Fold 1 · Hero ────────────────────────────────────────────────────────────
 
 function HeroSection({ onScroll }: { onScroll: () => void }) {
+  const navigate = useNavigate()
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center bg-slate-900 px-6 py-24 text-center">
+    <section className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center bg-slate-900 px-6 py-24 text-center">
       {/* subtle radial glow behind the ASCII art */}
       <div
         className="pointer-events-none absolute inset-0 opacity-30"
@@ -39,16 +44,35 @@ function HeroSection({ onScroll }: { onScroll: () => void }) {
 
         <p className="mx-auto max-w-xl text-lg leading-relaxed text-slate-300 sm:text-xl">
           Hold your representatives accountable. Politmus grades politicians on
-          how they actually vote — so you can see if they keep their promises.
+          how they actually vote, so you can see if they keep their promises.
         </p>
 
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+        <div className="mt-10 w-full max-w-2xl text-left">
+          <p className="mb-2 text-center text-sm font-semibold text-slate-200">See who represents you</p>
+          <LocationPicker submitLabel="Find my reps" onDone={() => navigate('/reps')} />
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            to="/now"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/80 px-5 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-slate-500"
+          >
+            <Radio className="h-4 w-4 text-emerald-400" />
+            What’s happening near me
+          </Link>
+          <Link
+            to="/congress"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/80 px-5 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-slate-500"
+          >
+            <Landmark className="h-4 w-4 text-blue-400" />
+            Browse Congress
+          </Link>
           <button
             type="button"
             onClick={onScroll}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500"
+            className="inline-flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-slate-300 transition hover:text-white"
           >
-            See how it works
+            How it works
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>
@@ -94,7 +118,7 @@ function GradingSection() {
           <GradingStep
             step="1"
             title="Extract Positions"
-            description="We crawl each legislator's official website and use AI to identify their stated policy positions — what they claim to support or oppose."
+            description="We crawl each legislator's official website and use AI to identify their stated policy positions: what they claim to support or oppose."
             icon={<Sparkles className="h-5 w-5 text-purple-400" />}
           />
           <GradingStep
@@ -127,7 +151,7 @@ function GradingSection() {
             </div>
             <div className="text-right">
               <p className="text-3xl font-extrabold text-emerald-400">+12</p>
-              <p className="text-xs text-slate-400">Accountability Score</p>
+              <p className="text-xs text-slate-400">Politmus Score</p>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -199,30 +223,14 @@ function LookupSection() {
           </h2>
 
           <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-400">
-            Enter your address and instantly see every elected official who
-            represents you — from the White House to your state legislature.
-            Phone numbers, office addresses, and websites included.
+            Enter your address and instantly see who represents you in Congress
+            and your state legislature, with their Politmus Score. Phone numbers,
+            office addresses, and websites included.
           </p>
         </div>
 
-        {/* CTA mock search bar */}
         <div className="mx-auto mt-12 max-w-2xl">
-          <button
-            type="button"
-            onClick={() => navigate('/dev-explorer')}
-            className="flex w-full items-center gap-3 rounded-xl border border-slate-700 bg-slate-800 px-5 py-4 text-left shadow-lg transition hover:border-blue-500/60 hover:bg-slate-800/80"
-          >
-            <Search className="h-5 w-5 text-slate-500" />
-            <span className="flex-1 text-sm text-slate-400">
-              1600 Pennsylvania Avenue NW, Washington, DC
-            </span>
-            <span className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white">
-              Find my reps
-            </span>
-          </button>
-          <p className="mt-3 text-center text-xs text-slate-500">
-            Your location is only used for this search. It isn't saved.
-          </p>
+          <LocationPicker submitLabel="Find my reps" onDone={() => navigate('/reps')} />
         </div>
 
         {/* feature preview cards */}
@@ -230,7 +238,7 @@ function LookupSection() {
           <FeatureCard
             icon={<Users className="h-5 w-5 text-blue-400" />}
             title="Federal & State"
-            description="See senators, house members, your governor, and state legislators — all in one lookup."
+            description="See senators, house members, your governor, and state legislators, all in one lookup."
           />
           <FeatureCard
             icon={<MapPin className="h-5 w-5 text-emerald-400" />}
@@ -267,7 +275,7 @@ function BillsSection() {
           <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-400">
             Congressional bills are dense. Politmus gives you AI-generated TL;DR
             summaries and "Explain Like I'm 5" breakdowns so you know what's
-            actually being voted on — without the legal jargon.
+            actually being voted on, without the legal jargon.
           </p>
         </div>
 
@@ -435,10 +443,10 @@ function ProfilesSection() {
         <div className="mt-12 flex justify-center">
           <button
             type="button"
-            onClick={() => navigate('/dev-explorer')}
+            onClick={() => navigate('/congress')}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500"
           >
-            Explore the full app
+            Browse Congress
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>
@@ -474,6 +482,47 @@ function VoteTeaser({
   )
 }
 
+// ─── Fold 6 · Sign up ─────────────────────────────────────────────────────────
+
+function SignUpSection() {
+  return (
+    <section className="bg-slate-950 px-6 py-24">
+      <div className="mx-auto max-w-3xl rounded-2xl border border-blue-900/60 bg-blue-950/20 p-8 text-center sm:p-12">
+        <h2 className="text-3xl font-bold text-white sm:text-4xl">Make it yours</h2>
+        <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-slate-400">
+          Everything on Politmus is free to browse. A free account remembers your address, so every visit
+          opens on what matters to you.
+        </p>
+        <ul className="mx-auto mt-8 max-w-md space-y-3 text-left text-sm text-slate-300">
+          {[
+            'Open straight to your election: voting sites, dates and your ballot',
+            'Your representatives and their scores, one click away',
+            'The latest bills and votes from Congress in your feed',
+          ].map((item) => (
+            <li key={item} className="flex items-start gap-2">
+              <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+              {item}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+          <SignUpButton mode="modal">
+            <button
+              type="button"
+              className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500"
+            >
+              Create a free account
+            </button>
+          </SignUpButton>
+          <Link to="/now" className="px-4 py-3 text-sm font-semibold text-slate-300 hover:text-white">
+            Keep browsing
+          </Link>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 function FeatureCard({
@@ -506,7 +555,7 @@ export default function Landing() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
+    <div className="bg-slate-900 text-slate-100">
       <HeroSection onScroll={scrollToContent} />
       <div ref={secondFold}>
         <GradingSection />
@@ -514,11 +563,12 @@ export default function Landing() {
       <LookupSection />
       <BillsSection />
       <ProfilesSection />
+      <SignUpSection />
 
       {/* footer */}
       <footer className="border-t border-slate-800 bg-slate-950 px-6 py-10 text-center text-xs text-slate-500">
         <p>
-          Politmus — open data, transparent scoring. Built with public
+          Politmus: open data, transparent scoring. Built with public
           congressional data from Congress.gov, Google Civic Information API,
           and OpenStates.
         </p>

@@ -1,17 +1,33 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { CivicLookup, Race, RaceCandidate, VoterInfo, VoterLocation } from '../types'
+import { clerkState, resetClerkState } from '../clerkMock'
+import type { CivicLookup, CivicRepresentative, FeedItem, Race, RaceCandidate, VoterInfo, VoterLocation } from '../types'
+import { CivicLocationProvider } from '../useCivicLocation'
 import HappeningNow from './HappeningNow'
 
-const clerk = vi.hoisted(() => ({ savedAddress: null as string | null }))
+vi.mock('@clerk/clerk-react', async () => (await import('../clerkMock')).clerkMock())
 
-vi.mock('@clerk/clerk-react', () => ({
-  useUser: () => ({
-    user: clerk.savedAddress ? { unsafeMetadata: { savedAddress: clerk.savedAddress } } : null,
-    isLoaded: true,
-  }),
-}))
+function rep(id: string, name: string, office: string, extra: Partial<CivicRepresentative> = {}): CivicRepresentative {
+  return {
+    id,
+    name,
+    office,
+    division_id: 'ocd-division/country:us/state:tx',
+    division_name: 'Texas',
+    party: 'Republican',
+    levels: ['country'],
+    roles: [office === 'Senator' ? 'legislatorUpperBody' : 'legislatorLowerBody'],
+    phones: [],
+    emails: [],
+    urls: [],
+    photo_url: null,
+    addresses: [],
+    channels: [],
+    ...extra,
+  }
+}
 
 const lookup: CivicLookup = {
   normalized_input: { line1: '1100 CONGRESS AVE', line2: null, line3: null, city: 'AUSTIN', state: 'TX', zip: '78701' },
@@ -20,7 +36,26 @@ const lookup: CivicLookup = {
     { ocd_id: 'ocd-division/country:us/state:tx', name: 'Texas' },
     { ocd_id: 'ocd-division/country:us/state:tx/cd:10', name: 'Congressional District 10' },
   ],
-  representatives: [],
+  representatives: [
+    rep('C001056', 'John Cornyn', 'Senator', { score_points: 2, score_pct: 100, score_matches: 2 }),
+    rep('C001098', 'Ted Cruz', 'Senator'),
+  ],
+}
+
+const feedItem: FeedItem = {
+  id: 1,
+  kind: 'bill_introduced',
+  occurred_at: '2026-10-20',
+  detected_at: '2026-10-20T12:00:00Z',
+  headline: 'Clean Water Act',
+  subline: null,
+  level: 'federal',
+  state: null,
+  bill: null,
+  official: null,
+  roll_call: null,
+  tally_by_party: null,
+  payload: null,
 }
 
 function site(name: string, latitude: number, longitude: number): VoterLocation {
@@ -120,8 +155,9 @@ beforeEach(() => {
   races = baseRaces()
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date(2026, 9, 25, 12))
-  clerk.savedAddress = '1100 Congress Ave, Austin, TX 78701'
+  clerkState.savedAddress = '1100 Congress Ave, Austin, TX 78701'
   fetchMock.mockImplementation((url: string) => {
+    if (url.startsWith('/api/feed')) return respond({ items: [feedItem], next_cursor: null })
     if (url.startsWith('/api/lookup')) return respond(lookup)
     if (url.startsWith('/api/voter-info')) return respond(voterInfo)
     if (url.startsWith('/api/candidates/races')) return respond({ total_count: races.length, items: races })
@@ -134,24 +170,29 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   fetchMock.mockReset()
+  resetClerkState()
+  window.localStorage.clear()
 })
 
 function renderNow() {
-  const onSeeAllLocations = vi.fn()
   const onSelectOfficial = vi.fn()
   render(
-    <HappeningNow
-      onSelectOfficial={onSelectOfficial}
-      onSeeAllLocations={onSeeAllLocations}
-      onSeeCandidates={vi.fn()}
-    />,
+    <MemoryRouter>
+      <CivicLocationProvider>
+        <HappeningNow onSelectOfficial={onSelectOfficial} onSelectBill={vi.fn()} />
+      </CivicLocationProvider>
+    </MemoryRouter>,
   )
-  return { onSeeAllLocations, onSelectOfficial }
+  return { onSelectOfficial }
+}
+
+function calledUrls() {
+  return fetchMock.mock.calls.map(([url]) => String(url))
 }
 
 describe('HappeningNow', () => {
   it('says early voting is open and lists the three closest sites', async () => {
-    const { onSeeAllLocations } = renderNow()
+    renderNow()
 
     expect(await screen.findByRole('heading', { name: 'Early voting is open in Texas' })).toBeInTheDocument()
     expect(screen.getByText('9 days away')).toBeInTheDocument()
@@ -164,8 +205,10 @@ describe('HappeningNow', () => {
     expect(names).toEqual(['Capitol Annex', 'Rec Center', 'UT Union'])
     expect(within(section).getAllByText('Sun, Oct 25: 12 pm - 6 pm')).toHaveLength(3)
 
+    expect(within(section).queryByText('Far Library')).not.toBeInTheDocument()
     fireEvent.click(within(section).getByRole('button', { name: /See all 4 locations/i }))
-    expect(onSeeAllLocations).toHaveBeenCalledWith('1100 Congress Ave, Austin, TX 78701')
+    expect(within(section).getByText('Far Library')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: /Show fewer/i })).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('shows the Senate race and only the voter’s House district, once per candidate', async () => {
@@ -248,17 +291,50 @@ describe('HappeningNow', () => {
   })
 
   it('asks for an address when none is saved', async () => {
-    clerk.savedAddress = null
+    clerkState.savedAddress = null
     renderNow()
 
-    expect(screen.getByRole('heading', { name: /Early voting is open in \d+ states/ })).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: /Early voting is open in \d+ states/ })).toBeInTheDocument()
+    expect(screen.getByText(/to see what’s happening in that community/)).toBeInTheDocument()
+    expect(calledUrls().some((url) => url.startsWith('/api/lookup'))).toBe(false)
 
-    fireEvent.change(screen.getByLabelText('Your street address'), {
+    fireEvent.change(screen.getByLabelText('Street address'), {
       target: { value: '1100 Congress Ave, Austin, TX 78701' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Show my election' }))
 
     expect(await screen.findByRole('heading', { name: 'Early voting is open in Texas' })).toBeInTheDocument()
+    expect(window.localStorage.getItem('politmus:address')).toBe('1100 Congress Ave, Austin, TX 78701')
+  })
+
+  it('shows who represents the voter, with scores', async () => {
+    const { onSelectOfficial } = renderNow()
+
+    const heading = await screen.findByRole('heading', { name: /Who represents you/i })
+    const section = heading.closest('section')!
+    expect(await within(section).findByText('John Cornyn')).toBeInTheDocument()
+    expect(within(section).getByText('+2 pts')).toBeInTheDocument()
+    expect(within(section).getByRole('link', { name: /All your representatives/ })).toHaveAttribute('href', '/reps')
+
+    fireEvent.click(within(section).getByRole('button', { name: /Ted Cruz/ }))
+    expect(onSelectOfficial).toHaveBeenCalledWith(expect.objectContaining({ id: 'C001098' }))
+  })
+
+  it('points to the feed next during an election', async () => {
+    renderNow()
+
+    const next = (await screen.findByRole('heading', { name: /Next: catch up on Congress/i })).closest('section')!
+    expect(await within(next).findByText('Clean Water Act')).toBeInTheDocument()
+    expect(within(next).getByRole('link', { name: /See the full Feed/ })).toHaveAttribute('href', '/feed')
+  })
+
+  it('leads with the feed when no election is coming up', async () => {
+    vi.setSystemTime(new Date(2027, 2, 10, 12))
+    renderNow()
+
+    expect(await screen.findByRole('heading', { name: 'No election coming up in Texas' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Latest in Congress/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /On your ballot/i })).not.toBeInTheDocument()
+    expect(calledUrls().some((url) => url.startsWith('/api/voter-info'))).toBe(true)
   })
 })

@@ -631,6 +631,10 @@ class CivicRepresentativeOut(BaseModel):
     photo_url: Optional[str] = None
     addresses: list[CivicAddressOut] = Field(default_factory=list)
     channels: list[CivicChannelOut] = Field(default_factory=list)
+    # Accountability score, as on OfficialOut; None when unscored.
+    score_points: Optional[int] = None
+    score_pct: Optional[float] = None
+    score_matches: Optional[int] = None
 
 
 class GeoPointOut(BaseModel):

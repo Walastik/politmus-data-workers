@@ -1,12 +1,14 @@
-import { Globe, Phone } from 'lucide-react'
+import { ChevronRight, Globe, Phone } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { ScoreChip } from './components/MemberCard'
 import OfficialPhoto from './components/OfficialPhoto'
+import ScoreHeadline from './components/ScoreHeadline'
 
 import {
   civicRepresentativeToOfficial,
-  formatCivicAddress,
   groupCivicRepresentatives,
+  isCivicStateLevel,
   officialName,
   partyBadgeClass,
   partyShort,
@@ -16,82 +18,43 @@ import {
   type Official,
 } from './types'
 
+// Everyone who represents a looked-up place: Congress first, then the state.
 export default function LookupResults({
   lookup,
   onSelectOfficial,
-  locationLabel,
 }: {
   lookup: CivicLookup
   onSelectOfficial: (official: Official) => void
-  // For a location lookup: the nearby address (or a generic label), since a
-  // point lookup has no matched street address.
-  locationLabel?: string | null
 }) {
   const grouped = groupCivicRepresentatives(lookup.representatives)
-  const matchedAddress = locationLabel || formatCivicAddress(lookup.normalized_input)
   const fallbackState = stateNameFromAbbr(lookup.normalized_input?.state)
+  const federal = [...grouped.senators, ...grouped.house]
+  const state = [...grouped.governors, ...grouped.stateSenators, ...grouped.stateHouse]
 
   return (
-    <div>
-      {matchedAddress ? (
-        <p className="mb-8 text-sm text-slate-400">
-          Showing representation for{' '}
-          <span className="text-slate-200">{matchedAddress}</span>
-        </p>
-      ) : null}
-
-      <OfficeSection title="United States Senate">
-        {grouped.senators.length ? (
+    <div className="space-y-10">
+      <OfficeSection
+        title="In Washington"
+        description="Your two U.S. senators and your member of the House. Their Politmus Score compares how they vote with what they say they stand for."
+      >
+        {federal.length ? (
           <RepresentativeGrid
-            representatives={grouped.senators}
+            representatives={federal}
             fallbackState={fallbackState}
             onSelectOfficial={onSelectOfficial}
           />
         ) : (
-          <p className="text-sm text-slate-500">
-            No senators found for this address.
-          </p>
+          <p className="text-sm text-slate-500">No members of Congress found for this address.</p>
         )}
       </OfficeSection>
 
-      <OfficeSection title="House of Representatives">
-        {grouped.house.length ? (
+      {state.length ? (
+        <OfficeSection
+          title={`In ${fallbackState || 'your state'}`}
+          description="Your governor and state legislators. We don’t score state officials yet."
+        >
           <RepresentativeGrid
-            representatives={grouped.house}
-            fallbackState={fallbackState}
-            onSelectOfficial={onSelectOfficial}
-          />
-        ) : (
-          <p className="text-sm text-slate-500">
-            No House member found for this address.
-          </p>
-        )}
-      </OfficeSection>
-
-      {grouped.governors.length ? (
-        <OfficeSection title="Governor">
-          <RepresentativeGrid
-            representatives={grouped.governors}
-            fallbackState={fallbackState}
-            onSelectOfficial={onSelectOfficial}
-          />
-        </OfficeSection>
-      ) : null}
-
-      {grouped.stateSenators.length ? (
-        <OfficeSection title="State Senate">
-          <RepresentativeGrid
-            representatives={grouped.stateSenators}
-            fallbackState={fallbackState}
-            onSelectOfficial={onSelectOfficial}
-          />
-        </OfficeSection>
-      ) : null}
-
-      {grouped.stateHouse.length ? (
-        <OfficeSection title="State House">
-          <RepresentativeGrid
-            representatives={grouped.stateHouse}
+            representatives={state}
             fallbackState={fallbackState}
             onSelectOfficial={onSelectOfficial}
           />
@@ -111,19 +74,62 @@ export default function LookupResults({
   )
 }
 
+// One line per federal member, for a quick look on other pages.
+export function FederalRepsStrip({
+  lookup,
+  onSelectOfficial,
+}: {
+  lookup: CivicLookup
+  onSelectOfficial: (official: Official) => void
+}) {
+  const grouped = groupCivicRepresentatives(lookup.representatives)
+  const fallbackState = stateNameFromAbbr(lookup.normalized_input?.state)
+  const federal = [...grouped.senators, ...grouped.house]
+  if (federal.length === 0) return null
+  return (
+    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      {federal.map((rep) => {
+        const official = civicRepresentativeToOfficial(rep, officialState(rep, fallbackState))
+        const name = officialName(rep)
+        return (
+          <li key={`${rep.id ?? rep.name}-${rep.office}`}>
+            <button
+              type="button"
+              disabled={!official}
+              onClick={() => official && onSelectOfficial(official)}
+              className="flex w-full items-center gap-2.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-left transition hover:border-slate-500 disabled:cursor-default"
+            >
+              <OfficialPhoto url={rep.photo_url} name={name} party={rep.party} size="sm" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-100">{name}</span>
+                <span className="block truncate text-[11px] text-slate-400">
+                  {rep.party ? `${partyShort(rep.party)} · ` : ''}
+                  {rep.office}
+                </span>
+              </span>
+              <ScoreChip official={rep} />
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 function OfficeSection({
   title,
+  description,
   children,
 }: {
   title: string
+  description?: string
   children: ReactNode
 }) {
   return (
-    <section className="mb-10">
-      <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
-        {title}
-      </h2>
-      {children}
+    <section>
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">{title}</h2>
+      {description ? <p className="mt-1 text-sm text-slate-400">{description}</p> : null}
+      <div className="mt-4">{children}</div>
     </section>
   )
 }
@@ -138,7 +144,7 @@ function RepresentativeGrid({
   onSelectOfficial: (official: Official) => void
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {representatives.map((representative) => (
         <RepresentativeCard
           key={`${representative.id ?? representative.name}-${representative.office}`}
@@ -165,77 +171,77 @@ function RepresentativeCard({
   const website = representative.urls[0]
   const stateLabel = officialState(representative, fallbackState)
   const official = civicRepresentativeToOfficial(representative, stateLabel)
+  const name = officialName(representative)
+  const district =
+    representative.division_name &&
+    (representative.division_id?.includes('/cd:') ||
+      representative.division_id?.includes('/sldu:') ||
+      representative.division_id?.includes('/sldl:'))
+      ? representative.division_name
+      : null
 
-  const content = (
-    <>
+  return (
+    <article className="flex h-full flex-col rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm">
       <div className="flex items-center gap-3">
-        {representative.photo_url ? (
-          <OfficialPhoto
-            url={representative.photo_url}
-            name={officialName(representative)}
-            party={party}
-          />
-        ) : null}
+        <OfficialPhoto url={representative.photo_url} name={name} party={party} size="md" />
         <div className="min-w-0 flex-1">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
             {party ? (
-              <span
-                className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(party)}`}
-              >
+              <span className={`rounded px-2 py-0.5 text-xs font-bold ${partyBadgeClass(party)}`}>
                 {partyShort(party)}
               </span>
             ) : null}
-            <span>{officialName(representative)}</span>
+            <span>{name}</span>
           </h3>
           <p className="mt-1 text-xs text-slate-400">
             {representative.office}
-            {representative.division_name &&
-            (representative.division_id?.includes('/cd:') ||
-              representative.division_id?.includes('/sldu:') ||
-              representative.division_id?.includes('/sldl:'))
-              ? ` · ${representative.division_name}`
-              : ''}
+            {district ? ` · ${district}` : stateLabel ? ` · ${stateLabel}` : ''}
           </p>
         </div>
-        {stateLabel ? (
-          <span className="self-start text-xs text-slate-400">{stateLabel}</span>
+      </div>
+
+      {isCivicStateLevel(representative) ? null : (
+        <ScoreHeadline
+          points={representative.score_points}
+          pct={representative.score_pct}
+          matches={representative.score_matches}
+        />
+      )}
+      {!isCivicStateLevel(representative) && representative.score_matches == null ? (
+        <p className="mt-3 text-[11px] text-slate-500">Politmus Score: no stated positions to score yet</p>
+      ) : null}
+
+      <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-3 text-xs">
+        {phone ? (
+          <a href={`tel:${phone}`} className="inline-flex items-center gap-1.5 text-slate-300 hover:text-blue-300">
+            <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {phone}
+          </a>
+        ) : null}
+        {website ? (
+          <a
+            href={website}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-w-0 items-center gap-1.5 text-slate-300 hover:text-blue-300"
+          >
+            <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{websiteLabel(website)}</span>
+          </a>
+        ) : null}
+        {official ? (
+          <button
+            type="button"
+            onClick={() => onSelectOfficial(official)}
+            aria-label={`Full profile: ${name}`}
+            className="ml-auto inline-flex items-center gap-0.5 font-semibold text-blue-400 hover:text-blue-300"
+          >
+            Full profile
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         ) : null}
       </div>
-      {phone || website ? (
-        <ul className="mt-3 space-y-1.5 text-xs text-slate-400">
-          {phone ? (
-            <li className="flex items-center gap-1.5">
-              <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>{phone}</span>
-            </li>
-          ) : null}
-          {website ? (
-            <li className="flex items-center gap-1.5">
-              <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{websiteLabel(website)}</span>
-            </li>
-          ) : null}
-        </ul>
-      ) : null}
-    </>
-  )
-
-  if (!official) {
-    return (
-      <div className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-left shadow-sm">
-        {content}
-      </div>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelectOfficial(official)}
-      className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-left shadow-sm transition hover:border-slate-500 hover:bg-slate-800/80"
-    >
-      {content}
-    </button>
+    </article>
   )
 }
 

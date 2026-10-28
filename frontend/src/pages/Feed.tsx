@@ -1,41 +1,18 @@
-import { ArrowRight, Rss } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { RedirectToSignIn, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
+import { useSearchParams } from 'react-router-dom'
 
 import { apiUrl } from '../api'
-import BillDrawer from '../BillDrawer'
 import FeedItemCard from '../components/FeedItemCard'
+import PageHeader, { PageContainer } from '../components/PageHeader'
 import UpcomingElections from '../components/UpcomingElections'
-import MemberDrawer from '../MemberDrawer'
-import { useExplorerLinks } from '../useExplorerLinks'
+import { useDrawerLinks } from '../useDrawerLinks'
 import { FEED_FILTERS, FEED_LEVELS, groupFeed } from '../feed'
 import type { FeedItem, FeedPage } from '../types'
 
 const PAGE_SIZE = 30
 
 export default function Feed() {
-  return (
-    <>
-      <SignedIn>
-        <FeedPageContent />
-      </SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </>
-  )
-}
-
-function FeedPageContent() {
-  const {
-    official: selectedOfficial,
-    openOfficial,
-    closeOfficial,
-    bill: selectedBill,
-    openBill,
-    closeBill,
-  } = useExplorerLinks()
+  const { openOfficial, openBill } = useDrawerLinks()
   const [searchParams, setSearchParams] = useSearchParams()
   const filterKey = FEED_FILTERS.some((f) => f.key === searchParams.get('show'))
     ? (searchParams.get('show') as string)
@@ -125,30 +102,12 @@ function FeedPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <header className="border-b border-slate-800">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-4">
-          <div className="flex items-center gap-2">
-            <Rss className="h-5 w-5 text-blue-400" aria-hidden="true" />
-            <h1 className="text-xl font-bold tracking-tight">Feed</h1>
-            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              Preview
-            </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link
-              to="/dev-explorer"
-              className="inline-flex items-center gap-1 text-sm text-slate-300 transition hover:text-blue-300"
-            >
-              Explorer
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </Link>
-            <UserButton />
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-6">
+    <PageContainer narrow>
+      <PageHeader
+        title="Feed"
+        description="The latest from Congress: bills introduced and passed, how members voted, and elections coming up."
+      />
+      <div className="space-y-6">
         <UpcomingElections />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -186,7 +145,7 @@ function FeedPageContent() {
           <div className="space-y-6">
             {groupFeed(items).map((group, index) => (
               <section key={`${group.label}-${index}`} aria-label={group.label}>
-                <h2 className="sticky top-0 z-10 -mx-4 mb-2 bg-slate-900/95 px-4 py-1 text-xs font-semibold uppercase tracking-wider text-slate-500 backdrop-blur">
+                <h2 className="sticky top-14 z-10 -mx-4 mb-2 bg-slate-900/95 px-4 py-1 text-xs font-semibold uppercase tracking-wider text-slate-500 backdrop-blur">
                   {group.label}
                 </h2>
                 <div className="space-y-3">
@@ -217,20 +176,8 @@ function FeedPageContent() {
             ) : null}
           </div>
         )}
-      </main>
-
-      {selectedOfficial ? (
-        <MemberDrawer
-          official={selectedOfficial}
-          onClose={closeOfficial}
-          selectedBill={selectedBill}
-          onSelectBill={openBill}
-          onCloseBill={closeBill}
-        />
-      ) : selectedBill ? (
-        <BillDrawer bill={selectedBill} onClose={closeBill} />
-      ) : null}
-    </div>
+      </div>
+    </PageContainer>
   )
 }
 

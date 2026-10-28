@@ -655,6 +655,26 @@ class AccountabilityEngineTests(unittest.TestCase):
         self.assertEqual(listing[self.BOB]["score_matches"], 0)
         self.assertIsNone(listing[self.CAROL]["score_points"])
 
+    def test_address_lookup_carries_scores(self):
+        from unittest.mock import patch
+
+        from api.census import CensusMatch
+
+        self._rescore()
+        match = CensusMatch(
+            line1="1 Main St", city="Columbus", state_abbr="OH", state_name="Ohio",
+            zip="43215", district=1, district_label="Congressional District 1",
+        )
+        with patch("api.routes.lookup.geocode_address", return_value=match):
+            body = self.client.get("/api/lookup", params={"address": "1 Main St, Columbus, OH"}).json()
+
+        reps = {rep["id"]: rep for rep in body["representatives"]}
+        self.assertEqual(
+            (reps[self.ALICE]["score_points"], reps[self.ALICE]["score_pct"], reps[self.ALICE]["score_matches"]),
+            (1, 100.0, 1),
+        )
+        self.assertIsNone(reps[self.CAROL]["score_points"])
+
 
 if __name__ == "__main__":
     unittest.main()
