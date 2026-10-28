@@ -1,6 +1,6 @@
 import { formatRelativeTime, type OfficialStance, type PositionsSync } from './types'
 
-export const INITIAL_POSITIONS_SHOWN = 10
+export const INITIAL_ISSUES_SHOWN = 10
 const ERROR_PREVIEW_LENGTH = 140
 
 const EMPHASIS_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
@@ -92,7 +92,14 @@ export function sourceLabel(url: string) {
 // source render once above all of them.
 export type EvidenceBlock = { positions: OfficialStance[] }
 
-type PositionGroup = { area: string; blocks: EvidenceBlock[] }
+// One policy area: its positions grouped by shared evidence, plus the counts it
+// ranks by.
+export type PositionGroup = {
+  area: string
+  count: number
+  highCount: number
+  blocks: EvidenceBlock[]
+}
 
 // Case, whitespace and surrounding quote marks don't make a passage distinct.
 function normalizeQuote(quote: string | null) {
@@ -126,9 +133,11 @@ function evidenceBlocks(positions: OfficialStance[]): EvidenceBlock[] {
   return blocks
 }
 
-// Groups by policy area, then by shared evidence within an area. Groups keep the
-// API's order (emphasis first), so the area holding the most emphasized position
-// comes first, and a shared quote sits where its most emphasized position would.
+// Groups by policy area, then by shared evidence within an area. Areas rank by
+// how many positions the official states in them (what they talk about most),
+// then by how many of those state the change directly, then the API's order.
+// Within an area positions sort by emphasis, so a shared quote sits where its
+// most emphasized position would.
 export function groupPositions(positions: OfficialStance[]): PositionGroup[] {
   const groups = new Map<string, OfficialStance[]>()
   for (const position of positions) {
@@ -142,10 +151,25 @@ export function groupPositions(positions: OfficialStance[]): PositionGroup[] {
   }
   return Array.from(groups, ([area, items]) => ({
     area,
+    count: items.length,
+    highCount: items.filter((item) => item.emphasis === 'high').length,
     blocks: evidenceBlocks(
       [...items].sort(
         (a, b) => (EMPHASIS_RANK[a.emphasis ?? ''] ?? 3) - (EMPHASIS_RANK[b.emphasis ?? ''] ?? 3),
       ),
     ),
-  }))
+  })).sort((a, b) => b.count - a.count || b.highCount - a.highCount)
+}
+
+// "Medicaid, Medicare, VA care +4 more": what the area's positions are about.
+export function targetPreview(group: PositionGroup, shown = 3) {
+  const names = Array.from(
+    new Set(
+      group.blocks.flatMap((block) =>
+        block.positions.map((position) => position.target_name).filter(Boolean),
+      ),
+    ),
+  ) as string[]
+  const rest = names.length - shown
+  return names.slice(0, shown).join(', ') + (rest > 0 ? ` +${rest} more` : '')
 }
