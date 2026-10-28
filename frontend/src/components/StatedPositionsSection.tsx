@@ -3,11 +3,13 @@ import { useMemo, useState } from 'react'
 
 import {
   DIRECTION_LABELS,
-  INITIAL_POSITIONS_SHOWN,
+  INITIAL_ISSUES_SHOWN,
   groupPositions,
   positionsStatusMessage,
   sourceLabel,
   stanceLine,
+  targetPreview,
+  type PositionGroup,
 } from '../positions'
 import {
   directionBadgeClass,
@@ -27,18 +29,9 @@ export default function StatedPositionsSection({
   const [showRaw, setShowRaw] = useState(false)
   const [open, setOpen] = useState(false)
 
-  // Display order, so "Show fewer" cuts at the same place the list reads.
-  const ordered = useMemo(
-    () =>
-      groupPositions(positions).flatMap((group) =>
-        group.blocks.flatMap((block) => block.positions),
-      ),
-    [positions],
-  )
-  const visibleGroups = useMemo(
-    () => groupPositions(showAll ? ordered : ordered.slice(0, INITIAL_POSITIONS_SHOWN)),
-    [ordered, showAll],
-  )
+  const issues = useMemo(() => groupPositions(positions), [positions])
+  const visible = showAll ? issues : issues.slice(0, INITIAL_ISSUES_SHOWN)
+  const maxCount = issues[0]?.count ?? 0
   const models = useMemo(
     () => Array.from(new Set(positions.map((p) => p.model).filter(Boolean))) as string[],
     [positions],
@@ -84,34 +77,34 @@ export default function StatedPositionsSection({
             {statusMessage}
           </p>
 
-          {ordered.length > 0 ? (
+          {issues.length > 0 ? (
             <div className="mt-3 space-y-4">
-              {visibleGroups.map((group) => (
-                <div key={group.area}>
-                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                    {group.area}
-                  </h4>
-                  <div className="mt-2 space-y-2.5">
-                    {group.blocks.map((block, idx) =>
-                      block.positions.length > 1 ? (
-                        <SharedEvidenceBlock key={idx} positions={block.positions} />
-                      ) : (
-                        <ul key={idx}>
-                          <PositionItem position={block.positions[0]} />
-                        </ul>
-                      ),
-                    )}
-                  </div>
-                </div>
-              ))}
+              <div>
+                <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Top issues
+                </h4>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Ranked by how many positions they state on each. Click an issue for the details.
+                </p>
+                <ol className="mt-2 space-y-1.5" aria-label="Top issues">
+                  {visible.map((group, idx) => (
+                    <IssueItem
+                      key={group.area}
+                      rank={idx + 1}
+                      group={group}
+                      maxCount={maxCount}
+                    />
+                  ))}
+                </ol>
+              </div>
 
-              {ordered.length > INITIAL_POSITIONS_SHOWN ? (
+              {issues.length > INITIAL_ISSUES_SHOWN ? (
                 <button
                   type="button"
                   onClick={() => setShowAll(!showAll)}
                   className="text-xs font-medium text-purple-300 hover:text-purple-200"
                 >
-                  {showAll ? 'Show fewer' : `Show all ${ordered.length}`}
+                  {showAll ? 'Show fewer' : `Show all ${issues.length} issues`}
                 </button>
               ) : null}
 
@@ -135,6 +128,68 @@ export default function StatedPositionsSection({
         </div>
       ) : null}
     </section>
+  )
+}
+
+// One ranked issue: name, position count and a bar against the top issue. Opens
+// to the positions behind the count.
+function IssueItem({
+  rank,
+  group,
+  maxCount,
+}: {
+  rank: number
+  group: PositionGroup
+  maxCount: number
+}) {
+  const [open, setOpen] = useState(false)
+  const bodyId = `issue-${rank}-positions`
+  const preview = targetPreview(group)
+  return (
+    <li className="rounded-lg border border-slate-800 bg-slate-900/60">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-controls={bodyId}
+        className="w-full px-3 py-2 text-left transition hover:bg-slate-800/60"
+      >
+        <span className="flex items-center gap-2">
+          <span className="w-5 shrink-0 text-right font-mono text-xs text-slate-500">{rank}.</span>
+          <span className="min-w-0 flex-1 text-sm font-semibold text-slate-100">
+            {group.area}{' '}
+            <span className="font-normal text-slate-400">({group.count})</span>
+          </span>
+          {open ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+          )}
+        </span>
+        <span className="mt-1.5 ml-7 block h-1 rounded-full bg-slate-800" aria-hidden="true">
+          <span
+            className="block h-1 rounded-full bg-purple-500/70"
+            style={{ width: `${maxCount ? (group.count / maxCount) * 100 : 0}%` }}
+          />
+        </span>
+        {preview ? (
+          <span className="mt-1 ml-7 block truncate text-[11px] text-slate-500">{preview}</span>
+        ) : null}
+      </button>
+      {open ? (
+        <div id={bodyId} className="space-y-2.5 border-t border-slate-800 p-3">
+          {group.blocks.map((block, idx) =>
+            block.positions.length > 1 ? (
+              <SharedEvidenceBlock key={idx} positions={block.positions} />
+            ) : (
+              <ul key={idx}>
+                <PositionItem position={block.positions[0]} />
+              </ul>
+            ),
+          )}
+        </div>
+      ) : null}
+    </li>
   )
 }
 

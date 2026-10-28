@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import MemberDrawer from '../MemberDrawer'
-import { groupPositions, positionsStatusMessage } from '../positions'
+import { groupPositions, positionsStatusMessage, targetPreview } from '../positions'
 import type { Official, OfficialDetail, OfficialStance, PositionsSync } from '../types'
 import StatedPositionsSection from './StatedPositionsSection'
 
@@ -50,6 +50,17 @@ function expand() {
   fireEvent.click(screen.getByRole('button', { name: 'Stated Positions (AI)' }))
 }
 
+// Opens one ranked issue to its positions.
+function openIssue(area: string) {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^\\d+\\.\\s*${area} \\(`) }))
+}
+
+function issueRows() {
+  return within(screen.getByRole('list', { name: 'Top issues' }))
+    .getAllByRole('button')
+    .map((button) => button.querySelector('.flex-1')?.textContent)
+}
+
 describe('StatedPositionsSection', () => {
   it('starts collapsed, showing only the header and model', () => {
     render(<StatedPositionsSection sync={okSync} positions={[stance()]} />)
@@ -89,13 +100,17 @@ describe('StatedPositionsSection', () => {
 
     expect(screen.getByText('Stated Positions (AI)')).toBeInTheDocument()
     expect(screen.getByText('qwen3.6:27b')).toBeInTheDocument()
+    expect(issueRows()).toEqual(['Health (2)', 'Immigration (1)'])
+    expect(screen.getByText('Medicaid, Community health centers')).toBeInTheDocument()
+    expect(screen.queryByText('opposes a funding decrease')).not.toBeInTheDocument()
 
-    const health = screen.getByText('Health').parentElement as HTMLElement
+    openIssue('Health')
+    const health = document.getElementById('issue-1-positions') as HTMLElement
     const healthTargets = within(health)
       .getAllByRole('listitem')
       .map((item) => item.querySelector('span')?.textContent)
     expect(healthTargets).toEqual(['Medicaid', 'Community health centers'])
-    expect(screen.getByText('Immigration')).toBeInTheDocument()
+    openIssue('Immigration')
 
     expect(screen.getAllByText('opposes a funding decrease')).toHaveLength(2)
     expect(screen.getByText('supports a funding increase')).toBeInTheDocument()
@@ -106,20 +121,41 @@ describe('StatedPositionsSection', () => {
     expect(links[0]).toHaveAttribute('href', 'https://www.example.house.gov/issues/health-care/')
     expect(links[0]).toHaveAttribute('target', '_blank')
     expect(links[0]).toHaveAttribute('rel', 'noopener noreferrer')
+
+    openIssue('Health')
+    expect(screen.queryByText('Community health centers')).not.toBeInTheDocument()
   })
 
-  it('shows the first 10 positions, then all on request', () => {
+  it('ranks issues by position count, breaking ties on direct statements', () => {
+    render(
+      <StatedPositionsSection
+        sync={okSync}
+        positions={[
+          stance({ policy_area: 'Taxation', emphasis: 'low' }),
+          stance({ policy_area: 'Energy', emphasis: 'low' }),
+          stance({ policy_area: 'Energy' }),
+          stance({ policy_area: 'Education' }),
+          stance({ policy_area: 'Energy', emphasis: 'medium' }),
+          stance({ policy_area: null }),
+        ]}
+      />,
+    )
+    expand()
+    expect(issueRows()).toEqual(['Energy (3)', 'Education (1)', 'Other (1)', 'Taxation (1)'])
+  })
+
+  it('shows the top 10 issues, then all on request', () => {
     const positions = Array.from({ length: 13 }, (_, i) =>
-      stance({ target_name: `Target ${i + 1}`, policy_area: i % 2 ? 'Health' : 'Taxation' }),
+      stance({ target_name: `Target ${i + 1}`, policy_area: `Area ${i + 1}` }),
     )
     render(<StatedPositionsSection sync={okSync} positions={positions} />)
     expand()
 
-    expect(screen.getAllByRole('listitem')).toHaveLength(10)
-    fireEvent.click(screen.getByRole('button', { name: 'Show all 13' }))
-    expect(screen.getAllByRole('listitem')).toHaveLength(13)
+    expect(issueRows()).toHaveLength(10)
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 13 issues' }))
+    expect(issueRows()).toHaveLength(13)
     fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }))
-    expect(screen.getAllByRole('listitem')).toHaveLength(10)
+    expect(issueRows()).toHaveLength(10)
   })
 
   it('shows a quote shared by several positions once, with them listed under it', () => {
@@ -139,12 +175,14 @@ describe('StatedPositionsSection', () => {
       />,
     )
     expand()
+    openIssue('Health')
 
     expect(screen.getAllByText('“I will fight every cut to Medicaid.”')).toHaveLength(1)
     expect(screen.getByText('Supports 3 positions')).toBeInTheDocument()
     expect(screen.getByText('“Clinics need funding.”')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: /^Source:/ })).toHaveLength(2)
-    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    const body = document.getElementById('issue-1-positions') as HTMLElement
+    expect(within(body).getAllByRole('listitem')).toHaveLength(4)
   })
 
   it('toggles the raw JSON', () => {
@@ -182,6 +220,15 @@ describe('groupPositions', () => {
     expect(
       health.blocks.map((block) => block.positions.map((position) => position.target_name)),
     ).toEqual([['A', 'C'], ['B'], ['D'], ['E']])
+  })
+})
+
+describe('targetPreview', () => {
+  it('lists the first few distinct targets and counts the rest', () => {
+    const [group] = groupPositions(
+      ['A', 'B', 'A', 'C', 'D', 'E', null].map((name) => stance({ target_name: name, evidence_quote: null })),
+    )
+    expect(targetPreview(group)).toBe('A, B, C +2 more')
   })
 })
 
