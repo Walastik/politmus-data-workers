@@ -9,6 +9,8 @@ import Feed from './pages/Feed'
 import Landing from './pages/Landing'
 import Now from './pages/Now'
 import Reps from './pages/Reps'
+import WipLanding from './pages/WipLanding'
+import { HOME_PATH } from './homePath'
 import { CivicLocationProvider } from './useCivicLocation'
 
 export default function App() {
@@ -23,8 +25,9 @@ export function AppRoutes() {
   return (
     <CivicLocationProvider>
       <Routes>
+        {HOME_PATH !== '/' ? <Route path="/" element={<WipLanding />} /> : null}
         <Route element={<AppShell />}>
-          <Route path="/" element={<Home />} />
+          <Route path={HOME_PATH} element={<Home />} />
           <Route path="/now" element={<Now />} />
           <Route path="/feed" element={<Feed />} />
           <Route path="/reps" element={<Reps />} />
@@ -33,8 +36,8 @@ export function AppRoutes() {
           <Route path="/candidates" element={<Candidates />} />
         </Route>
         <Route path="/dev-explorer" element={<LegacyExplorerRedirect />} />
-        <Route path="/landing" element={<Navigate to="/" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/landing" element={<Navigate to={HOME_PATH} replace />} />
+        <Route path="*" element={<Navigate to={HOME_PATH} replace />} />
       </Routes>
     </CivicLocationProvider>
   )

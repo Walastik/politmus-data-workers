@@ -4,6 +4,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 import BillDrawer from '../BillDrawer'
 import MemberDrawer from '../MemberDrawer'
+import { HOME_PATH } from '../homePath'
 import { useDrawerLinks } from '../useDrawerLinks'
 import LocationSettings from './LocationSettings'
 
@@ -24,7 +25,7 @@ export default function AppShell() {
     <div className="min-h-screen bg-slate-900 pb-16 text-slate-100 md:pb-0">
       <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
-          <NavLink to="/" className="flex items-center gap-2 text-lg font-bold tracking-tight text-slate-50">
+          <NavLink to={HOME_PATH} className="flex items-center gap-2 text-lg font-bold tracking-tight text-slate-50">
             <Landmark className="h-5 w-5 text-blue-400" aria-hidden="true" />
             Politmus
           </NavLink>

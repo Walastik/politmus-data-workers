@@ -1,6 +1,7 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { HOME_PATH } from './homePath'
 import { clerkState, currentUrl, jsonResponse, renderApp, resetClerkState } from './testUtils'
 import type { CivicLookup, CivicRepresentative } from './types'
 
@@ -123,15 +124,21 @@ function at(lat: number, lon: number) {
 }
 
 describe('routes', () => {
+  it('keeps the Work in Progress page at the root until launch', () => {
+    renderApp('/')
+    expect(screen.getByText('Work in Progress')).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).not.toBeInTheDocument()
+  })
+
   it('shows signed-out visitors the landing page', () => {
     clerkState.signedIn = false
-    renderApp('/')
+    renderApp(HOME_PATH)
     expect(screen.getByRole('heading', { level: 1, name: 'Politmus' })).toBeInTheDocument()
     expect(screen.getByText('See who represents you')).toBeInTheDocument()
   })
 
   it('sends signed-in visitors to Happening Now', async () => {
-    renderApp('/')
+    renderApp(HOME_PATH)
     expect(await screen.findByRole('heading', { name: 'Happening Now' })).toBeInTheDocument()
     expect(currentUrl.pathname).toBe('/now')
   })
