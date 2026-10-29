@@ -4,6 +4,7 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import './index.css'
 import App from './App.tsx'
 import { HOME_PATH } from './homePath'
+import { clerkLocalization } from './clerkLocalization'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
@@ -18,6 +19,7 @@ createRoot(document.getElementById('root')!).render(
       afterSignOutUrl={HOME_PATH}
       signInFallbackRedirectUrl="/now"
       signUpFallbackRedirectUrl="/now"
+      localization={clerkLocalization}
     >
       <App />
     </ClerkProvider>
