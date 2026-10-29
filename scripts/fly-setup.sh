@@ -80,7 +80,7 @@ echo "Deploying $API_APP"
 ( cd "$ROOT/backend" && fly deploy --remote-only )
 
 echo "Deploying $WEB_APP"
-( cd "$ROOT" && fly deploy . --config apps/web/fly.toml --dockerfile apps/web/Dockerfile --remote-only )
+( cd "$ROOT" && fly deploy . --config apps/app/fly.toml --dockerfile apps/app/Dockerfile --remote-only )
 
 echo
 echo "Done."

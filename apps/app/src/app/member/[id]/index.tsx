@@ -58,7 +58,7 @@ export default function MemberScreen() {
           headerRight: () => <ShareButton url={profileShareUrl('official', id)} title={name || 'Politmus profile'} />,
         }}
       />
-      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="gap-6 px-5 py-5" keyboardShouldPersistTaps="handled">
+      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="w-full md:max-w-[960px] md:self-center gap-6 px-5 py-5" keyboardShouldPersistTaps="handled">
         {!detail ? (
           <Text className={`text-sm ${official.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {official.isError ? official.error.message : 'Loading…'}

@@ -1,4 +1,4 @@
-import { formatElectionDate, googleCalendarUrl } from '@politmus/core/calendar'
+import { formatElectionDate } from '@politmus/core/calendar'
 import { errorMessage } from '@politmus/core/happeningNow'
 import { splitPollingHours } from '@politmus/core/pollingHours'
 import { formatCivicAddress, getVoterResources, type AdminBody, type VoterInfo, type VoterLocation } from '@politmus/core/types'
@@ -23,6 +23,7 @@ import { useState } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
+import { addToCalendar, CALENDAR_HINT, canAddToCalendar } from '@/lib/calendar'
 import { useCivicLocation } from '@/lib/civicLocation'
 import { openUrl } from '@/lib/links'
 import { useVoterInfo } from '@/lib/queries'
@@ -39,7 +40,7 @@ export default function VotingScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: true, title: 'Voting locations', headerBackTitle: 'Back' }} />
-      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="gap-6 px-4 py-5">
+      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="w-full md:max-w-[960px] md:self-center gap-6 px-4 py-5">
         {!address ? (
           <Text className="text-sm text-slate-400">Enter your street address on Happening Now to see your voting locations.</Text>
         ) : query.isPending ? (
@@ -99,9 +100,9 @@ function VotingInfoView({ voterInfo, stateCode }: { voterInfo: VoterInfo; stateC
 function ElectionCard({ voterInfo, stateCode }: { voterInfo: VoterInfo; stateCode: string | null }) {
   const election = voterInfo.election!
   const resources = getVoterResources(stateCode)
-  const calendarUrl = election.date
-    ? googleCalendarUrl({ ...election, date: election.date }, { infoUrl: resources.pollingPlaceUrl ?? resources.voteGovUrl })
-    : null
+  const infoUrl = resources.pollingPlaceUrl ?? resources.voteGovUrl
+  const calendarElection = election.date ? { ...election, date: election.date } : null
+  const canAdd = calendarElection ? canAddToCalendar(calendarElection, infoUrl) : false
   const dates = earlyVotingDates(voterInfo, stateCode)
   return (
     <View className="rounded-lg border border-slate-700 bg-slate-800/80 p-4">
@@ -109,16 +110,17 @@ function ElectionCard({ voterInfo, stateCode }: { voterInfo: VoterInfo; stateCod
       <Text className="text-lg font-bold text-slate-100">{election.name}</Text>
       {election.date ? (
         <Pressable
-          disabled={!calendarUrl}
-          onPress={() => calendarUrl && openUrl(calendarUrl)}
+          disabled={!canAdd}
+          onPress={() => calendarElection && addToCalendar(calendarElection, infoUrl)}
           accessibilityRole="button"
-          accessibilityLabel={`${formatElectionDate(election.date)}: add to Google Calendar`}
+          accessibilityLabel={`${formatElectionDate(election.date)}: add to calendar`}
           className="mt-2 flex-row items-center gap-1.5 self-start rounded border border-slate-600 px-2.5 py-1"
         >
           <Icons.CalendarPlus size={16} colorClassName="accent-blue-400" />
           <Text className="text-sm text-slate-200">{formatElectionDate(election.date)}</Text>
         </Pressable>
       ) : null}
+      {election.date && CALENDAR_HINT ? <Text className="mt-1 text-xs text-slate-500">{CALENDAR_HINT}</Text> : null}
       {dates ? (
         <View className="mt-4 border-t border-slate-700 pt-4">
           <View className="flex-row flex-wrap items-start justify-between gap-2">

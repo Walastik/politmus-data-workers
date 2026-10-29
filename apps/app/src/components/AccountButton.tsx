@@ -4,7 +4,8 @@ import { Pressable, Text } from 'react-native'
 
 // Sign in through Clerk's hosted page in an in-app browser (works in Expo Go).
 // The web build uses Clerk's own modal instead: AccountButton.web.tsx.
-export default function AccountButton() {
+// `subtle` is for the web Work in Progress page; native ignores it.
+export default function AccountButton(_props: { subtle?: boolean }) {
   const { isLoaded, isSignedIn, signOut } = useAuth()
   const { startHostedAuth } = useHostedAuth()
   if (!isLoaded) return null

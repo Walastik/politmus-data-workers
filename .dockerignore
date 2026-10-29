@@ -1,9 +1,11 @@
-# Only apps/web/Dockerfile builds from the repo root; backend/ has its own context.
+# apps/app/Dockerfile (the website) and apps/web/Dockerfile build from the repo
+# root; backend/ has its own context.
 **/node_modules
 **/dist
+**/.expo
 .git
-.env
-.env.*
+**/.env
+**/.env.*
 **/*.md
 .vscode
 .idea

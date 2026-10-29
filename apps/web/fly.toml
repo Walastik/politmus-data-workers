@@ -1,4 +1,5 @@
-# politmus-web: Vite SPA + nginx. Builds from the repo root (npm workspaces):
+# politmus-web: the previous Vite SPA + nginx, kept for rollback; the live
+# site deploys from apps/app/fly.toml. Builds from the repo root (npm workspaces):
 #   fly deploy . --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 app = "politmus-web"
 primary_region = "ord"

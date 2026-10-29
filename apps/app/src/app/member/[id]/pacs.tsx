@@ -60,6 +60,7 @@ function Explorer({ officialId, election }: { officialId: string; election: Fina
   return (
     <FlatList
       className={`flex-1 bg-slate-900 ${list.isPlaceholderData ? 'opacity-60' : ''}`}
+      contentContainerClassName="w-full md:max-w-[960px] md:self-center"
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
       data={items}

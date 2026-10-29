@@ -42,7 +42,7 @@ export default function BillScreen() {
           headerRight: () => <ShareButton url={profileShareUrl('bill', id)} title={view?.title ?? id} />,
         }}
       />
-      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="gap-6 px-5 py-5">
+      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="w-full md:max-w-[960px] md:self-center gap-6 px-5 py-5">
         {!view ? (
           <Text className={`text-sm ${bill.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {bill.isError ? bill.error.message : 'Loading bill details…'}

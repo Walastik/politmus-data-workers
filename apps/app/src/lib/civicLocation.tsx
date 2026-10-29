@@ -9,7 +9,7 @@ export { useCivicLocation, type Load } from '@politmus/core/civicLocation'
 
 // The signed-in user's lookup address, kept in Clerk unsafeMetadata like the
 // web app, so it follows them between devices.
-function useSavedAddress(): SavedAddress {
+export function useSavedAddress(): SavedAddress {
   const { user, isLoaded } = useUser()
   const raw = user?.unsafeMetadata?.savedAddress
   const savedAddress = typeof raw === 'string' && raw.trim() ? raw.trim() : null

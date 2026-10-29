@@ -17,7 +17,7 @@ export default function VotersScreen() {
       <FlatList
         className="flex-1 bg-slate-900"
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerClassName="px-5 pb-8"
+        contentContainerClassName="w-full md:max-w-[960px] md:self-center px-5 pb-8"
         data={voters.data ?? []}
         keyExtractor={(voter) => voter.official_id}
         ListHeaderComponent={

@@ -11,6 +11,7 @@ import Now from './pages/Now'
 import Reps from './pages/Reps'
 import WipLanding from './pages/WipLanding'
 import { HOME_PATH } from './homePath'
+import { legacyExplorerPath } from '@politmus/core/site'
 import { CivicLocationProvider } from './useCivicLocation'
 
 export default function App() {
@@ -57,24 +58,8 @@ function Home() {
   )
 }
 
-const LEGACY_TABS: Record<string, string> = {
-  now: '/now',
-  lookup: '/reps',
-  roster: '/congress?view=list',
-  candidates: '/candidates',
-  bills: '/bills',
-}
-
 // Old /dev-explorer?tab=… links, keeping any open drawer (?official=, ?bill=).
 function LegacyExplorerRedirect() {
   const { search } = useLocation()
-  const params = new URLSearchParams(search)
-  const [path, query] = (LEGACY_TABS[params.get('tab') ?? ''] ?? '/now').split('?')
-  const next = new URLSearchParams(query)
-  for (const key of ['official', 'bill']) {
-    const value = params.get(key)
-    if (value) next.set(key, value)
-  }
-  const nextSearch = next.toString()
-  return <Navigate to={`${path}${nextSearch ? `?${nextSearch}` : ''}`} replace />
+  return <Navigate to={legacyExplorerPath(search)} replace />
 }

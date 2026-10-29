@@ -69,19 +69,20 @@ export default function LocationBar({
   )
 }
 
-// Address box with suggestions and a "Use my location" button.
-function LocationPicker({
+// Address box with suggestions and a "Use my location" button; `onDone` runs
+// once a place is set (e.g. to leave the landing page).
+export function LocationPicker({
   submitLabel,
-  initial,
+  initial = '',
   onDone,
   onCancel,
-  autoFocus,
+  autoFocus = false,
 }: {
   submitLabel: string
-  initial: string
-  onDone: () => void
+  initial?: string
+  onDone?: () => void
   onCancel?: () => void
-  autoFocus: boolean
+  autoFocus?: boolean
 }) {
   const { setAddress, locateMe, canLocate, locating, locationError } = useCivicLocation()
   const [value, setValue] = useState(initial)
@@ -106,12 +107,12 @@ function LocationPicker({
     setSuggestions([])
     if (!address.trim()) return
     setAddress(address)
-    onDone()
+    onDone?.()
   }
 
   async function locate() {
     setSuggestions([])
-    if (await locateMe()) onDone()
+    if (await locateMe()) onDone?.()
   }
 
   return (

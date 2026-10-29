@@ -69,6 +69,7 @@ export default function CandidatesScreen() {
       <Stack.Screen options={{ headerShown: true, title: 'Candidates', headerBackTitle: 'Back' }} />
       <FlatList
         className="flex-1 bg-slate-900"
+        contentContainerClassName="w-full md:max-w-[960px] md:self-center"
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         data={items}

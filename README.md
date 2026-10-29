@@ -42,7 +42,7 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
      - Enable the **Google Civic Information API** in the [Google Cloud Console](https://console.cloud.google.com/).
      - Create an API key and **restrict the key** under "API restrictions" to only allow calls to the *Google Civic Information API* to minimize risk.
      - Optional: Set `CIVIC_ELECTION_ID_OVERRIDE` to target a specific election ID (such as `2000` for VIP test election).
-     - `CLIENT_IP_HEADER` names the header the voter-info rate limiter trusts for the client IP. Leave it empty locally (the socket peer is used). In production it is set in `backend/fly.toml` to `X-Politmus-Client-IP`, which `apps/web/nginx.conf` overwrites from Fly's `Fly-Client-IP` on every request. This is only safe because the API has no public IP (Flycast only); `X-Forwarded-For` is never trusted.
+     - `CLIENT_IP_HEADER` names the header the voter-info rate limiter trusts for the client IP. Leave it empty locally (the socket peer is used). In production it is set in `backend/fly.toml` to `X-Politmus-Client-IP`, which `apps/app/nginx.conf` overwrites from Fly's `Fly-Client-IP` on every request. This is only safe because the API has no public IP (Flycast only); `X-Forwarded-For` is never trusted.
    - Representative address lookup (`GET /api/lookup`) uses the Census geocoder plus the local `officials` table and does not require Google API credentials.
    - `OLLAMA_*`, `BILL_CLASSIFIER_*` and `OFFICIAL_POSITIONS_*` are only needed on the machine that runs the local Ollama workers.
    - **Privacy Policy Notice**: Addresses entered for voting location lookups are proxied to the Google Civic Information API. Ensure the public privacy policy explicitly discloses that user addresses are sent upstream for polling place resolution.
@@ -68,7 +68,8 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
 
    - `apps/web`: the React web app (Vite, Tailwind, Clerk).
    - `apps/app`: the Expo app for iOS, Android and web (`npm run app:ios` / `app:android` / `app:web`); see `apps/app/README.md`.
-   - `packages/core`: platform-free TypeScript shared by both apps: API types, the API client (`createApiClient`), and the feed, calendar, voting, finance and accountability helpers. Keep DOM and React out of it; put browser-only code in `apps/web`.
+   - `packages/core`: platform-free TypeScript shared by both apps: API types, the API client (`createApiClient`), the shared location provider, and the display rules for every page. Keep DOM and React Native out of it (React is fine); put platform code in the apps.
+   - The website (politmus.com) is the Expo app's web export (`apps/app/Dockerfile`). `apps/web` is the previous Vite site, kept until the Expo site has run in production; its tests still cover the shared core.
 
 ## Scripts
 
@@ -439,7 +440,7 @@ python ballot_wikipedia.py --save-db --until-election   # what the daily job run
 
 ## Deploy to Fly.io
 
-Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Vite SPA). Local Vite proxies `/api` to `localhost:8000`. Production builds bake in `VITE_API_URL` from `apps/web/.env.production` (`https://politmus-api.fly.dev`) so the SPA on [politmus.com](https://politmus.com) can call the API directly. CORS on the API allows `https://politmus.com`, `https://www.politmus.com`, and `https://politmus-web.fly.dev`.
+Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Expo app's static web export, `apps/app/Dockerfile`). The API has no public address: nginx proxies `/api/` to it over Flycast, so the site and the mobile apps call `https://politmus.com/api/...`. The web build bakes in an empty `EXPO_PUBLIC_API_URL` (same origin) and the live Clerk key from `apps/app/fly.toml`.
 
 ### First-time setup
 
@@ -456,7 +457,7 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
    ./scripts/fly-setup.sh
    ```
 
-   That creates the Postgres cluster, both apps, attaches `DATABASE_URL`, allocates a private Flycast IP for the API, and deploys. App names are global; if `politmus-*` is taken, change `app` in `backend/fly.toml` and `apps/web/fly.toml`, plus `API_UPSTREAM` / `CORS_ORIGINS` and the names in `scripts/fly-setup.sh`.
+   That creates the Postgres cluster, both apps, attaches `DATABASE_URL`, allocates a private Flycast IP for the API, and deploys. App names are global; if `politmus-*` is taken, change `app` in `backend/fly.toml` and `apps/app/fly.toml`, plus `API_UPSTREAM` / `CORS_ORIGINS` and the names in `scripts/fly-setup.sh`.
 
 3. After deploy:
 
@@ -467,7 +468,9 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 
 ```bash
 ( cd backend && fly deploy )
-fly deploy . --config apps/web/fly.toml --dockerfile apps/web/Dockerfile  # from the repo root
+fly deploy . --config apps/app/fly.toml --dockerfile apps/app/Dockerfile  # the website, from the repo root
+# Roll back to the previous Vite site:
+# fly deploy . --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 ```
 
 ### GitHub Actions ingest

@@ -40,3 +40,19 @@ uses it too.
 ```bash
 npm run typecheck && npm run lint
 ```
+
+## Website
+
+politmus.com is this app's web export. `app/+html.tsx` is the page shell
+(SDK 58: it must render `headNodes` and `bodyNodes`), `app/index.tsx` and
+`(tabs)/home.tsx` serve the Work in Progress and landing pages on web, and wide
+windows get a side nav and centered column (`lib/layout.ts`). Deploy from the
+repo root:
+
+```bash
+fly deploy . --config apps/app/fly.toml --dockerfile apps/app/Dockerfile
+```
+
+`nginx.conf` maps `/member/<id>`, `/bill/<id>` and their subpages to the
+export's `[id]` pages and proxies `/api/` to the API.
+

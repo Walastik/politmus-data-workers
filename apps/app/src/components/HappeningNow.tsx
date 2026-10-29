@@ -1,5 +1,5 @@
 import { formatCompactMoney } from '@politmus/core/campaignFinance'
-import { formatElectionDate, googleCalendarUrl } from '@politmus/core/calendar'
+import { formatElectionDate } from '@politmus/core/calendar'
 import { formatShortDate, type EarlyVotingInfo, type EarlyVotingPhase } from '@politmus/core/earlyVoting'
 import { daysUntil, groupFeed } from '@politmus/core/feed'
 import {
@@ -33,6 +33,7 @@ import { router } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
+import { addToCalendar, canAddToCalendar } from '@/lib/calendar'
 import { openProfile, openUrl } from '@/lib/links'
 import { useFeedPreview } from '@/lib/queries'
 
@@ -76,13 +77,10 @@ export function ElectionHero({
   const stateName = stateCode ? getVoterResources(stateCode).name : null
   const daysAway = daysAwayLabel(electionDate ? daysUntil(electionDate) : null)
   const { headline, detail, endLabel } = electionHeadline({ window, phase, stateName, openStateCount, electionName })
-  // Native has no .ics download; Google Calendar's template link works everywhere.
-  const calendarUrl = electionDate
-    ? googleCalendarUrl(
-        { id: `general-${electionDate}`, name: electionName ?? 'Election Day', date: electionDate },
-        { infoUrl: getVoterResources(stateCode).pollingPlaceUrl ?? 'https://vote.gov' },
-      )
+  const calendarElection = electionDate
+    ? { id: `general-${electionDate}`, name: electionName ?? 'Election Day', date: electionDate }
     : null
+  const infoUrl = getVoterResources(stateCode).pollingPlaceUrl ?? 'https://vote.gov'
   const open = phase?.phase === 'open'
 
   return (
@@ -111,9 +109,9 @@ export function ElectionHero({
           <Text className="text-xs font-semibold uppercase tracking-wider text-slate-500">Election Day</Text>
           <Text className="text-lg font-bold text-slate-100">{formatElectionDate(electionDate)}</Text>
           {daysAway ? <Text className="text-sm font-semibold text-blue-300">{daysAway}</Text> : null}
-          {calendarUrl ? (
+          {calendarElection && canAddToCalendar(calendarElection, infoUrl) ? (
             <Pressable
-              onPress={() => openUrl(calendarUrl)}
+              onPress={() => addToCalendar(calendarElection, infoUrl)}
               accessibilityRole="button"
               className="mt-2 flex-row items-center gap-1.5 self-start rounded border border-slate-600 px-2.5 py-1"
             >

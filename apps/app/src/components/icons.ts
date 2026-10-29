@@ -1,5 +1,7 @@
 import {
   AlertCircle,
+  ArrowRight,
+  BookOpen,
   Building2,
   Calendar,
   CalendarPlus,
@@ -44,6 +46,8 @@ import { withUniwind } from 'uniwind'
 // Lucide icons take colorClassName="accent-*" through Uniwind.
 export const Icons = {
   AlertCircle: withUniwind(AlertCircle),
+  ArrowRight: withUniwind(ArrowRight),
+  BookOpen: withUniwind(BookOpen),
   Building2: withUniwind(Building2),
   Calendar: withUniwind(Calendar),
   CalendarPlus: withUniwind(CalendarPlus),
