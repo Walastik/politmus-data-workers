@@ -2,20 +2,24 @@ import { ChevronDown, ChevronRight, Sparkles, X } from 'lucide-react'
 import { SignedIn } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 
-import { BROAD_BILL_MIN_EFFECTS } from '@politmus/core/accountability'
+import {
+  LEGAL_FORCE_LABELS,
+  VOTE_KIND_CHIPS,
+  billDates,
+  bipartisanTag,
+  breadthNote,
+  cosponsorLine,
+  legalForceNote,
+  rollCallMeta,
+  sponsorText,
+  voteKindChipClass,
+} from '@politmus/core/billProfile'
 import { apiFetch } from './api'
 import { BillContextSections, DebateSection } from './components/BillContextSections'
 import CopyLinkButton from './components/CopyLinkButton'
 import VotePartyList from './VotePartyList'
 import VoteTallyBar from './VoteTallyBar'
 import {
-  bipartisanTypeFromParties,
-  bipartisanTypeLabel,
-  formatBillDate,
-  formatCosponsorBreakdown,
-  formatVoteVelocity,
-  involvedParties,
-  partyBadgeClass,
   sanitizeCrsHtml,
   billStatusClass,
   directionBadgeClass,
@@ -225,12 +229,6 @@ function ChamberDivergenceNote({ bill }: { bill: Bill }) {
   )
 }
 
-const VOTE_KIND_CHIPS: Record<string, string> = {
-  passage: 'Passage',
-  procedural: 'Procedural',
-  amendment: 'Amendment',
-}
-
 function RollCallList({ rollCalls }: { rollCalls?: BillRollCall[] }) {
   if (!rollCalls || rollCalls.length === 0) {
     return null
@@ -242,13 +240,7 @@ function RollCallList({ rollCalls }: { rollCalls?: BillRollCall[] }) {
       </h3>
       <ul className="mt-3 space-y-2">
         {rollCalls.map((rollCall) => {
-          const when = formatBillDate(rollCall.date)
-          const threshold = rollCall.requires
-            ? `${rollCall.requires} required`
-            : null
-          const meta = [rollCall.chamber, when, threshold]
-            .filter(Boolean)
-            .join(' · ')
+          const meta = rollCallMeta(rollCall)
           return (
             <li
               key={rollCall.id}
@@ -260,11 +252,7 @@ function RollCallList({ rollCalls }: { rollCalls?: BillRollCall[] }) {
                 </p>
                 {rollCall.vote_kind && VOTE_KIND_CHIPS[rollCall.vote_kind] ? (
                   <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-                      rollCall.vote_kind === 'passage'
-                        ? 'border-slate-600 bg-slate-800 text-slate-300'
-                        : 'border-sky-600/50 bg-sky-950/40 text-sky-300'
-                    }`}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${voteKindChipClass(rollCall.vote_kind)}`}
                   >
                     {VOTE_KIND_CHIPS[rollCall.vote_kind]}
                   </span>
@@ -309,28 +297,15 @@ export function PolicyAreaTag({ area }: { area: string | null }) {
 }
 
 export function BipartisanTag({ bill }: { bill: Bill }) {
-  const parties = involvedParties(
-    bill.sponsor_party,
-    bill.cosponsor_party_breakdown,
-  )
-  const type = bipartisanTypeFromParties(parties) ?? bill.bipartisan_type
-  const label = bipartisanTypeLabel(type, parties)
-  if (!label) {
+  const tag = bipartisanTag(bill)
+  if (!tag) {
     return null
   }
-  const color =
-    type === 'tripartisan'
-      ? 'bg-emerald-900/50 text-emerald-300'
-      : type === 'bipartisan'
-        ? 'bg-violet-900/50 text-violet-300'
-        : parties[0]
-          ? partyBadgeClass(parties[0])
-          : 'bg-slate-700/80 text-slate-300'
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${color}`}
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tag.className}`}
     >
-      {label}
+      {tag.label}
     </span>
   )
 }
@@ -342,23 +317,11 @@ function CosponsorLine({
   bill: Bill
   className?: string
 }) {
-  const hasBreakdown = bill.cosponsor_party_breakdown != null
-  const breakdown = formatCosponsorBreakdown(bill.cosponsor_party_breakdown)
-  if (!bill.sponsor_party && !hasBreakdown) {
+  const line = cosponsorLine(bill)
+  if (!line) {
     return null
   }
-  const cosponsorText = hasBreakdown
-    ? breakdown === 'No cosponsors'
-      ? 'No cosponsors'
-      : `Cosponsors ${breakdown}`
-    : null
-  return (
-    <p className={`text-xs text-slate-400 ${className}`.trim()}>
-      {bill.sponsor_party ? `Sponsor ${bill.sponsor_party}` : null}
-      {bill.sponsor_party && cosponsorText ? ' · ' : null}
-      {cosponsorText}
-    </p>
-  )
+  return <p className={`text-xs text-slate-400 ${className}`.trim()}>{line}</p>
 }
 
 export function BillDates({
@@ -368,18 +331,11 @@ export function BillDates({
   bill: Bill
   className?: string
 }) {
-  const introduced = formatBillDate(bill.introduced_date)
-  const voted = formatBillDate(bill.voted_date)
-  const latest = formatBillDate(bill.latest_action_date ?? null)
-  const velocity = formatVoteVelocity(bill.days_to_vote, bill.velocity_bucket)
-  if (!introduced && !voted && !velocity && !bill.latest_action_text) {
+  const { introduced, voted, velocity, latestAction } = billDates(bill)
+  if (!introduced && !voted && !velocity && !latestAction) {
     return null
   }
-  const velocityDescription = velocity
-    ? `${velocity.label}: ${velocity.days} ${
-        velocity.days === 1 || velocity.days === -1 ? 'day' : 'days'
-      } from introduction to vote`
-    : null
+  const velocityDescription = velocity?.description ?? null
 
   return (
     <dl className={`flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400 ${className}`.trim()}>
@@ -403,13 +359,10 @@ export function BillDates({
           </dd>
         </div>
       ) : null}
-      {bill.latest_action_text ? (
+      {latestAction ? (
         <div className="basis-full">
           <dt className="inline text-slate-500">Latest action </dt>
-          <dd className="inline text-slate-300">
-            {latest ? `${latest}: ` : ''}
-            {bill.latest_action_text}
-          </dd>
+          <dd className="inline text-slate-300">{latestAction}</dd>
         </div>
       ) : null}
     </dl>
@@ -417,14 +370,15 @@ export function BillDates({
 }
 
 function SponsorTag({ bill }: { bill: Bill }) {
-  if (!bill.sponsor_name && !bill.sponsor_bioguide_id) {
+  const sponsor = sponsorText(bill)
+  if (!sponsor.name) {
     return <span className="text-xs text-slate-500">No sponsor listed</span>
   }
 
   return (
     <span className="max-w-full truncate text-xs text-slate-400">
-      {bill.sponsor_name || bill.sponsor_bioguide_id}
-      {!bill.sponsor_id && bill.sponsor_bioguide_id ? (
+      {sponsor.name}
+      {sponsor.notInRoster ? (
         <span className="ml-1 text-slate-500">(not in roster)</span>
       ) : null}
     </span>
@@ -452,54 +406,32 @@ function CrsSummary({ text }: { text: string }) {
 // Flags omnibus-style bills: many effects, or add-ons unrelated to the
 // bill's stated purpose (intent relation "secondary").
 function BreadthNote({ intents }: { intents: ClassificationIntent[] }) {
-  const unrelated = intents.filter((intent) => intent.relation === 'secondary')
-  const broad = intents.length >= BROAD_BILL_MIN_EFFECTS
-  if (!broad && unrelated.length === 0) return null
+  const note = breadthNote(intents)
+  if (!note) return null
   return (
     <div className="mt-3 rounded-lg border border-amber-600/40 bg-amber-950/20 p-3 text-xs text-amber-100">
-      {broad ? (
+      {note.broad ? (
         <p>
-          <strong>Broad bill:</strong> {intents.length} separate policy effects. A single yes or
-          no vote on it says little about any one of them.
+          <strong>Broad bill:</strong> {note.broad}
         </p>
       ) : null}
-      {unrelated.length > 0 ? (
-        <p className={broad ? 'mt-1.5' : ''}>
-          <strong>
-            Includes {unrelated.length} provision{unrelated.length === 1 ? '' : 's'} unrelated to
-            its main purpose:
-          </strong>{' '}
-          {unrelated.map((intent) => `${intent.target} (${intent.mechanism})`).join(', ')}.
+      {note.unrelatedLabel ? (
+        <p className={note.broad ? 'mt-1.5' : ''}>
+          <strong>{note.unrelatedLabel}</strong> {note.unrelatedList}
         </p>
       ) : null}
     </div>
   )
 }
 
-// Chip labels for provisions that do not change the law on their own.
-const LEGAL_FORCE_LABELS: Record<string, string> = {
-  conditional: 'Conditional',
-  advisory: 'Advisory',
-  expresses_view: 'Sense of Congress',
-}
-
 // Flags provisions that only ask for a change to be considered, or state a
 // view, so a summary like "states must..." is not read as a mandate.
 function LegalForceNote({ intents }: { intents: ClassificationIntent[] }) {
-  const nonBinding = intents.filter(
-    (intent) => intent.legal_force === 'advisory' || intent.legal_force === 'expresses_view'
-  )
-  if (nonBinding.length === 0) return null
-  const all = nonBinding.length === intents.length
+  const note = legalForceNote(intents)
+  if (!note) return null
   return (
     <div className="mt-3 rounded-lg border border-sky-600/40 bg-sky-950/20 p-3 text-xs text-sky-100">
-      <strong>
-        {all
-          ? 'Non-binding:'
-          : `${nonBinding.length} of ${intents.length} provisions are non-binding:`}
-      </strong>{' '}
-      {all ? 'the bill' : 'they'} ask{all ? 's' : ''} for changes to be considered, studied, or
-      stated as a view, but {all ? 'does' : 'do'} not require them.
+      <strong>{note.label}</strong> {note.text}
     </div>
   )
 }

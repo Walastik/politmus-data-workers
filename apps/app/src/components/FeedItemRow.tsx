@@ -5,6 +5,8 @@ import { useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 import { useResolveClassNames } from 'uniwind'
 
+import { openBill, openProfile } from '@/lib/links'
+
 import { Icons } from './icons'
 
 const FEED_ICONS: Record<FeedIcon, (typeof Icons)[keyof typeof Icons]> = {
@@ -28,42 +30,50 @@ export default function FeedItemRow({ entry }: { entry: FeedEntry }) {
   const toneColor = useResolveClassNames(tone).color
   const official = item.official
   const bill = item.bill
+  const open = bill ? () => openBill(bill) : official ? () => openProfile(official) : undefined
 
   return (
     <View className="mx-4 mb-3 rounded-lg border border-slate-700 bg-slate-800 p-4">
-      <View className="flex-row items-center justify-between gap-2">
-        <View className="flex-1 flex-row items-center gap-1.5">
-          <Icon size={14} color={typeof toneColor === 'string' ? toneColor : undefined} />
-          <Text className={`text-xs font-semibold uppercase tracking-wider ${tone}`} numberOfLines={1}>
-            {label}
-          </Text>
-        </View>
-        <Text className="text-xs text-slate-500">{formatBillDate(item.occurred_at)}</Text>
-      </View>
-
-      <Text className="mt-2 text-base font-semibold leading-snug text-slate-100">{item.headline}</Text>
-      {item.subline ? (
-        <Text className="mt-1 text-sm text-slate-400" numberOfLines={2}>
-          {item.subline}
-        </Text>
-      ) : null}
-
-      {bill || official ? (
-        <View className="mt-2 flex-row flex-wrap items-center gap-2">
-          {bill ? <Text className="font-mono text-xs text-slate-400">{bill.id}</Text> : null}
-          {bill?.policy_area ? (
-            <Text className="rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">{bill.policy_area}</Text>
-          ) : null}
-          {item.level === 'state' ? (
-            <Text className="rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">State</Text>
-          ) : null}
-          {official?.party ? (
-            <Text className={`rounded px-2 py-0.5 text-xs font-semibold ${partyBadgeClass(official.party)}`}>
-              {partyShort(official.party)}
+      <Pressable
+        onPress={open}
+        disabled={!open}
+        accessibilityRole={open ? 'button' : undefined}
+        accessibilityLabel={`${label}: ${item.headline}`}
+      >
+        <View className="flex-row items-center justify-between gap-2">
+          <View className="flex-1 flex-row items-center gap-1.5">
+            <Icon size={14} color={typeof toneColor === 'string' ? toneColor : undefined} />
+            <Text className={`text-xs font-semibold uppercase tracking-wider ${tone}`} numberOfLines={1}>
+              {label}
             </Text>
-          ) : null}
+          </View>
+          <Text className="text-xs text-slate-500">{formatBillDate(item.occurred_at)}</Text>
         </View>
-      ) : null}
+
+        <Text className="mt-2 text-base font-semibold leading-snug text-slate-100">{item.headline}</Text>
+        {item.subline ? (
+          <Text className="mt-1 text-sm text-slate-400" numberOfLines={2}>
+            {item.subline}
+          </Text>
+        ) : null}
+
+        {bill || official ? (
+          <View className="mt-2 flex-row flex-wrap items-center gap-2">
+            {bill ? <Text className="font-mono text-xs text-slate-400">{bill.id}</Text> : null}
+            {bill?.policy_area ? (
+              <Text className="rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">{bill.policy_area}</Text>
+            ) : null}
+            {item.level === 'state' ? (
+              <Text className="rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">State</Text>
+            ) : null}
+            {official?.party ? (
+              <Text className={`rounded px-2 py-0.5 text-xs font-semibold ${partyBadgeClass(official.party)}`}>
+                {partyShort(official.party)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </Pressable>
 
       {related.length > 0 ? (
         <View className="mt-3 border-t border-slate-700 pt-2">

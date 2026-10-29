@@ -7,49 +7,10 @@ import {
   type ChamberVoteSummary,
   type VoteChamber,
 } from '@politmus/core/types'
+import { PARTY_PIES, chamberCounts, voteTotal, votePieDescription, votePieSlices } from '@politmus/core/billProfile'
 import { voteKindNote } from '@politmus/core/voteContext'
 
-const PARTY_PIES = ['Democratic', 'Republican', 'Independent'] as const
-
-const YES_FILL = '#10b981'
-const NO_FILL = '#ef4444'
-const EMPTY_FILL = '#334155'
-
-function chamberTotal(summary: ChamberVoteSummary | undefined) {
-  if (!summary) {
-    return 0
-  }
-  return Object.values(summary).reduce((sum: number, count) => sum + (count ?? 0), 0)
-}
-
-export function voteTotal(summary: Bill['votes_summary'] | undefined) {
-  if (!summary) {
-    return 0
-  }
-  return chamberTotal(summary.house) + chamberTotal(summary.senate)
-}
-
-function polar(cx: number, cy: number, r: number, angleDeg: number) {
-  const rad = (angleDeg * Math.PI) / 180
-  return {
-    x: cx + r * Math.cos(rad),
-    y: cy + r * Math.sin(rad),
-  }
-}
-
-function pieSlicePath(
-  cx: number,
-  cy: number,
-  r: number,
-  startDeg: number,
-  endDeg: number,
-) {
-  const start = polar(cx, cy, r, startDeg)
-  const end = polar(cx, cy, r, endDeg)
-  const delta = ((endDeg - startDeg) % 360 + 360) % 360
-  const largeArc = delta > 180 ? 1 : 0
-  return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y} Z`
-}
+export { voteTotal }
 
 function VotePie({
   yes,
@@ -62,37 +23,11 @@ function VotePie({
   label: string
   decorative?: boolean
 }) {
-  const recorded = yes + no
+  const slices = votePieSlices(yes, no)
+  const description = votePieDescription(label, yes, no)
   const cx = 18
   const cy = 18
   const r = 16
-  const start = -90
-  const yesSweep = recorded === 0 ? 0 : (yes / recorded) * 360
-
-  let slices: { d?: string; fill: string; circle?: boolean }[]
-  if (recorded === 0) {
-    slices = [{ fill: EMPTY_FILL, circle: true }]
-  } else if (yes === 0) {
-    slices = [{ fill: NO_FILL, circle: true }]
-  } else if (no === 0) {
-    slices = [{ fill: YES_FILL, circle: true }]
-  } else {
-    slices = [
-      {
-        d: pieSlicePath(cx, cy, r, start, start + yesSweep),
-        fill: YES_FILL,
-      },
-      {
-        d: pieSlicePath(cx, cy, r, start + yesSweep, start + 360),
-        fill: NO_FILL,
-      },
-    ]
-  }
-
-  const description =
-    recorded === 0
-      ? `${label}: no recorded yes or no votes`
-      : `${label}: ${yes} yes, ${no} no`
 
   return (
     <svg
@@ -200,12 +135,7 @@ function ChamberTally({
   rollCall?: BillRollCall | null
   onPartyClick?: (chamber: VoteChamber, party: string) => void
 }) {
-  const yes = summary?.Yes ?? 0
-  const no = summary?.No ?? 0
-  const present = summary?.Present ?? 0
-  const notVoting = summary?.['Not Voting'] ?? 0
-  const recorded = yes + no
-  const total = recorded + present + notVoting
+  const { yes, no, present, notVoting, total, yesPct, noPct } = chamberCounts(summary)
 
   if (total === 0) {
     return (
@@ -217,9 +147,6 @@ function ChamberTally({
       </div>
     )
   }
-
-  const yesPct = recorded === 0 ? 0 : (yes / recorded) * 100
-  const noPct = recorded === 0 ? 0 : (no / recorded) * 100
 
   return (
     <div>

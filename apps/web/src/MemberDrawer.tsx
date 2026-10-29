@@ -10,11 +10,19 @@ import CopyLinkButton from './components/CopyLinkButton'
 import OfficialPhoto from './components/OfficialPhoto'
 import ScoreHeadline from './components/ScoreHeadline'
 import StatedPositionsSection from './components/StatedPositionsSection'
-import { formatCompactMoney } from '@politmus/core/campaignFinance'
 import {
-  billStub,
-  formatBillDate,
-  incumbencyLabel,
+  activeCandidacies,
+  billFromAlignment,
+  billFromVote,
+  bioRows,
+  candidacyLines,
+  telHref,
+  voteKey,
+  voteMatchesSearch,
+  voteMeta,
+} from '@politmus/core/memberProfile'
+import { websiteLabel } from '@politmus/core/representatives'
+import {
   isCandidate,
   officeLine,
   officialName,
@@ -29,8 +37,6 @@ import {
   type Official,
   type OfficialBio,
   type OfficialDetail,
-  type OfficialVote,
-  type VoteAlignment,
 } from '@politmus/core/types'
 import { useScrolledPast } from './useScrolledPast'
 
@@ -277,7 +283,7 @@ export default function MemberDrawer({
                   ) : (
                     <ul className="mt-3 space-y-3">
                       {filteredVotes.map((vote) => (
-                        <li key={vote.roll_call_id ?? `${vote.bill_id}-${vote.position}`}>
+                        <li key={voteKey(vote)}>
                           <button
                             type="button"
                             onClick={() => onSelectBill(billFromVote(vote))}
@@ -295,12 +301,8 @@ export default function MemberDrawer({
                             <p className="mt-1 text-sm font-medium leading-snug">
                               {vote.bill_title || 'Untitled bill'}
                             </p>
-                            {vote.question || vote.result ? (
-                              <p className="mt-1 text-xs text-slate-400">
-                                {[vote.chamber, vote.result, vote.question]
-                                  .filter(Boolean)
-                                  .join(' · ')}
-                              </p>
+                            {voteMeta(vote) ? (
+                              <p className="mt-1 text-xs text-slate-400">{voteMeta(vote)}</p>
                             ) : null}
                             {vote.sponsor_name ? (
                               <p className="mt-1 text-xs text-slate-500">
@@ -390,15 +392,14 @@ function ContactSection({ official }: { official: Official }) {
 
 // This cycle's races (and any later ones); past candidacies are in the finance section.
 function CandidacySection({ candidacies }: { candidacies: Candidacy[] }) {
-  const thisYear = new Date().getFullYear()
-  const running = candidacies.filter((candidacy) => candidacy.election_year >= thisYear)
+  const running = activeCandidacies(candidacies)
   if (running.length === 0) {
     return null
   }
   return (
     <section className="mb-6 space-y-3" aria-label="Running for office">
       {running.map((candidacy) => {
-        const incumbency = incumbencyLabel(candidacy.incumbent_challenge)
+        const lines = candidacyLines(candidacy)
         return (
           <div
             key={`${candidacy.fec_candidate_id}-${candidacy.election_year}`}
@@ -406,26 +407,10 @@ function CandidacySection({ candidacies }: { candidacies: Candidacy[] }) {
           >
             <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-300">
               <Vote className="h-4 w-4" aria-hidden="true" />
-              Running for {candidacy.race_label} · {stateNameFromAbbr(candidacy.state)}
+              {lines.title}
             </p>
-            <p className="mt-1 text-sm text-slate-300">
-              {[
-                candidacy.election_date
-                  ? `General election ${formatBillDate(candidacy.election_date)}`
-                  : `${candidacy.election_year} election`,
-                incumbency,
-                candidacy.in_general_election ? 'On the November ballot' : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </p>
-            <p className="mt-1 text-xs text-slate-400">
-              Raised {formatCompactMoney(candidacy.receipts)} · Cash on hand{' '}
-              {formatCompactMoney(candidacy.cash_on_hand)}
-              {candidacy.coverage_end_date
-                ? ` · FEC filings through ${formatBillDate(candidacy.coverage_end_date)}`
-                : ''}
-            </p>
+            <p className="mt-1 text-sm text-slate-300">{lines.status}</p>
+            <p className="mt-1 text-xs text-slate-400">{lines.money}</p>
           </div>
         )
       })}
@@ -434,14 +419,7 @@ function CandidacySection({ candidacies }: { candidacies: Candidacy[] }) {
 }
 
 function BackgroundSection({ bio, wikipediaUrl }: { bio: OfficialBio; wikipediaUrl: string | null }) {
-  const born = bio.birth_date ? formatBillDate(bio.birth_date) : null
-  const rows: [string, string][] = [
-    ['Offices held', bio.positions_held.join('; ')],
-    ['Education', bio.education.join('; ')],
-    ['Occupation', bio.occupations.join(', ')],
-    ['Born', born ?? ''],
-  ]
-  const shown = rows.filter(([, value]) => value)
+  const shown = bioRows(bio)
   if (!bio.description && shown.length === 0) {
     return null
   }
@@ -476,118 +454,4 @@ function BackgroundSection({ bio, wikipediaUrl }: { bio: OfficialBio; wikipediaU
       </p>
     </section>
   )
-}
-
-function telHref(phone: string) {
-  const digits = phone.replace(/[^\d+]/g, '')
-  return digits ? `tel:${digits}` : undefined
-}
-
-function websiteLabel(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '')
-  } catch {
-    return url
-  }
-}
-
-function compactAlphanumeric(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
-}
-
-function normalizeSearchText(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-}
-
-function isVotePositionQuery(query: string) {
-  return query === 'yes' || query === 'no'
-}
-
-function billIdMatches(billId: string, query: string) {
-  const id = billId.toLowerCase()
-  const q = query.toLowerCase()
-  if (id === q) {
-    return true
-  }
-  const compactId = compactAlphanumeric(billId)
-  const compactQuery = compactAlphanumeric(query)
-  if (!compactQuery) {
-    return false
-  }
-  if (compactId === compactQuery) {
-    return true
-  }
-  return /\d/.test(compactQuery) && compactId.includes(compactQuery)
-}
-
-function searchableText(value: string | null) {
-  if (!value) {
-    return ''
-  }
-  return value.replace(/<[^>]+>/g, ' ')
-}
-
-function looksLikeBillIdQuery(query: string) {
-  return /^\d+[a-z]+\d+$/.test(compactAlphanumeric(query))
-}
-
-function fuzzyTextMatch(value: string | null, query: string) {
-  const haystack = normalizeSearchText(searchableText(value))
-  if (!haystack) {
-    return false
-  }
-  const needle = normalizeSearchText(query)
-  if (!needle) {
-    return true
-  }
-  if (haystack.includes(needle)) {
-    return true
-  }
-  const tokens = needle.split(/\s+/).filter(Boolean)
-  return tokens.length > 0 && tokens.every((token) => haystack.includes(token))
-}
-
-function voteMatchesSearch(vote: OfficialVote, rawQuery: string) {
-  const query = rawQuery.trim().toLowerCase()
-  if (!query) {
-    return true
-  }
-  if (isVotePositionQuery(query)) {
-    return (vote.position ?? '').toLowerCase() === query
-  }
-  if (billIdMatches(vote.bill_id, query)) {
-    return true
-  }
-  if (looksLikeBillIdQuery(query)) {
-    return false
-  }
-  return (
-    fuzzyTextMatch(vote.bill_title, query) ||
-    fuzzyTextMatch(vote.bill_summary, query) ||
-    fuzzyTextMatch(vote.question ?? null, query) ||
-    fuzzyTextMatch(vote.result ?? null, query)
-  )
-}
-
-function billFromAlignment(alignment: VoteAlignment, votes: OfficialVote[]): Bill {
-  const vote = votes.find((v) => v.roll_call_id === alignment.roll_call_id)
-  if (vote) {
-    return billFromVote(vote)
-  }
-  return billFromVote({
-    bill_id: alignment.bill_id,
-    bill_title: alignment.bill_title,
-    bill_summary: null,
-    position: alignment.vote_position,
-    sponsor_name: null,
-  })
-}
-
-function billFromVote(vote: OfficialVote): Bill {
-  return {
-    ...billStub(vote.bill_id),
-    title: vote.bill_title,
-    sponsor_name: vote.sponsor_name,
-    summary: vote.bill_summary,
-  }
 }

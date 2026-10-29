@@ -7,13 +7,18 @@ import {
   FUNDING_MIX_COLORS,
   HOME_STATE_COLOR,
   OUT_OF_STATE_COLOR,
-  defaultElection,
+  SIZE_LABELS,
+  electionChipLabel,
   electionKey,
+  financeSelection,
   formatCompactMoney,
   formatMoney,
   formatShare,
+  noComparisonNote,
+  noTotalsMessage,
   partyBarClass,
   peerLines,
+  raceCandidateDetail,
 } from '@politmus/core/campaignFinance'
 import {
   partyShort,
@@ -29,14 +34,6 @@ import PacContributionsSection from './PacContributionsSection'
 
 // Preview of OpenFEC data (fec_client.py). Shown only to signed-in users in
 // the dev explorer until there is a real design for it.
-
-const SIZE_LABELS: Record<number, string> = {
-  0: '$200 and under',
-  200: '$200–499',
-  500: '$500–999',
-  1000: '$1,000–1,999',
-  2000: '$2,000+',
-}
 
 export default function CampaignFinanceSection({ officialId }: { officialId: string }) {
   const [finance, setFinance] = useState<OfficialFinance | null>(null)
@@ -69,22 +66,8 @@ export default function CampaignFinanceSection({ officialId }: { officialId: str
     return () => controller.abort()
   }, [officialId])
 
-  const elections = finance?.elections ?? []
-  const selected =
-    elections.find((election) => electionKey(election) === selectedKey) ??
-    (finance ? defaultElection(finance) : null)
-  const comparison = finance?.peer_comparison ?? null
-  // Peer figures belong to one election; only show them on that one.
-  const compared =
-    selected &&
-    comparison &&
-    comparison.election_year === selected.election_year &&
-    comparison.fec_candidate_id === selected.fec_candidate_id
-      ? comparison
-      : null
-  const sharesYear = (year: number) => elections.filter((e) => e.election_year === year).length > 1
-  const race = finance?.race_comparison ?? null
-  const raced = selected && race && race.election_year === selected.election_year ? race : null
+  // Peer and race figures belong to one election; only show them on that one.
+  const { elections, selected, compared, race, raced } = financeSelection(finance, selectedKey)
 
   return (
     <section
@@ -117,11 +100,7 @@ export default function CampaignFinanceSection({ officialId }: { officialId: str
             <p className="mt-2 text-xs text-slate-400">Loading…</p>
           ) : !selected ? (
             <p className="mt-2 text-xs text-slate-400">
-              {finance.fec_candidate_ids.length === 0
-                ? 'No FEC candidate ID. Run fec_client.py crosswalk.'
-                : race
-                  ? 'No totals loaded yet. Run fec_client.py totals --candidates.'
-                  : `No totals loaded yet. Run fec_client.py totals --official-id ${officialId}.`}
+              {noTotalsMessage(finance, officialId, race)}
             </p>
           ) : (
             <>
@@ -140,8 +119,7 @@ export default function CampaignFinanceSection({ officialId }: { officialId: str
                           : 'border-slate-700 text-slate-300 hover:border-slate-500'
                       }`}
                     >
-                      {election.election_year}
-                      {sharesYear(election.election_year) ? ` · ${election.fec_candidate_id}` : ''}
+                      {electionChipLabel(election, elections)}
                     </button>
                   )
                 })}
@@ -249,11 +227,7 @@ function ElectionView({
         {comparison ? (
           <Explainer label="How are these compared?">{EXPLAINERS.peers}</Explainer>
         ) : race ? null : (
-          <p className="mt-2 text-[11px] text-slate-500">
-            {inProgress
-              ? 'Comparisons with other members use finished elections; pick an earlier year to see them.'
-              : 'Comparisons with other members are shown for the most recent finished election.'}
-          </p>
+          <p className="mt-2 text-[11px] text-slate-500">{noComparisonNote(election)}</p>
         )}
       </div>
 
@@ -275,10 +249,6 @@ function RaceComparison({ race, officialId }: { race: Race; officialId: string }
       <ul className="mt-2 space-y-1.5">
         {race.candidates.map((candidate) => {
           const self = candidate.official_id === officialId
-          const outside =
-            candidate.outside_support || candidate.outside_oppose
-              ? `Outside +${formatCompactMoney(candidate.outside_support ?? 0)} / −${formatCompactMoney(candidate.outside_oppose ?? 0)}`
-              : null
           return (
             <li
               key={candidate.fec_candidate_id}
@@ -302,17 +272,7 @@ function RaceComparison({ race, officialId }: { race: Race; officialId: string }
                   style={{ width: `${((candidate.receipts ?? 0) / top) * 100}%` }}
                 />
               </div>
-              <p className="mt-1 text-[10px] text-slate-400">
-                {[
-                  `Cash ${formatCompactMoney(candidate.cash_on_hand)}`,
-                  candidate.small_donor_share != null
-                    ? `Small donors ${formatShare(candidate.small_donor_share)}`
-                    : null,
-                  outside,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
+              <p className="mt-1 text-[10px] text-slate-400">{raceCandidateDetail(candidate)}</p>
             </li>
           )
         })}

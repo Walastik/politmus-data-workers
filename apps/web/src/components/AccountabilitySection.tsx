@@ -13,6 +13,7 @@ import {
   wantsPhrase,
   type VoteGroup,
 } from '@politmus/core/accountability'
+import { alignmentResultLabel } from '@politmus/core/memberProfile'
 import { sourceLabel } from '@politmus/core/positions'
 import { positionBadgeClass, type AccountabilityScore, type VoteAlignment } from '@politmus/core/types'
 
@@ -107,13 +108,6 @@ export default function AccountabilitySection({
   )
 }
 
-function resultLabel(result: number | null) {
-  if (result === null) return 'Not scored'
-  if (result > 0) return 'Consistent, plus one'
-  if (result < 0) return 'Contradicts, minus one'
-  return 'Mixed, no points'
-}
-
 function VoteItem({
   vote,
   onSelectBill,
@@ -147,7 +141,7 @@ function VoteItem({
           </span>
           <span
             className={`rounded border px-1.5 py-0.5 text-xs font-bold ${pointsBadgeClass(vote.result ?? 0)}`}
-            aria-label={resultLabel(vote.result)}
+            aria-label={alignmentResultLabel(vote.result)}
           >
             {vote.result === null ? '—' : formatPoints(vote.result)}
           </span>

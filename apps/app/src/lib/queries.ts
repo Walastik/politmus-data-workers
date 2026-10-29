@@ -1,5 +1,17 @@
 import { feedPath } from '@politmus/core/feed'
-import type { FeedPage, RacesPage, VoterInfo } from '@politmus/core/types'
+import { pacParams } from '@politmus/core/campaignFinance'
+import type {
+  Bill,
+  BillVoter,
+  FeedPage,
+  FinanceElection,
+  OfficialDetail,
+  OfficialFinance,
+  PacSummary,
+  RacesPage,
+  VoteChamber,
+  VoterInfo,
+} from '@politmus/core/types'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 
 import { useApi } from './api'
@@ -59,3 +71,50 @@ export function useRaces(stateCode: string | null) {
     staleTime: 10 * 60 * 1000,
   })
 }
+
+export function useOfficial(id: string) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['official', id],
+    queryFn: ({ signal }) => api.json<OfficialDetail>(`/api/officials/${encodeURIComponent(id)}`, { signal }),
+  })
+}
+
+export function useBill(id: string) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['bill', id],
+    queryFn: ({ signal }) => api.json<Bill>(`/api/bills/${encodeURIComponent(id)}`, { signal }),
+  })
+}
+
+export function useBillVoters(id: string, chamber: VoteChamber, party: string) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['bill-voters', id, chamber, party],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ chamber, party })
+      const data = await api.json<{ voters: BillVoter[] }>(`/api/bills/${encodeURIComponent(id)}/votes?${params}`, { signal })
+      return Array.isArray(data.voters) ? data.voters : []
+    },
+  })
+}
+
+export function useFinance(officialId: string, enabled: boolean) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['finance', officialId],
+    enabled,
+    queryFn: ({ signal }) => api.json<OfficialFinance>(`/api/officials/${encodeURIComponent(officialId)}/finance`, { signal }),
+  })
+}
+
+export function usePacSummary(officialId: string, election: FinanceElection) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['pacs', officialId, pacParams(election)],
+    queryFn: ({ signal }) =>
+      api.json<PacSummary>(`/api/officials/${encodeURIComponent(officialId)}/finance/pacs?${pacParams(election)}`, { signal }),
+  })
+}
+

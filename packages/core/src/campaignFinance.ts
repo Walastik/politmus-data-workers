@@ -1,4 +1,4 @@
-import type { FinanceElection, OfficialFinance, PeerComparison, PeerMetric } from './types'
+import type { FinanceElection, OfficialFinance, PeerComparison, PeerMetric, Race, RaceCandidate } from './types'
 
 // Dark-surface categorical slots in fixed order (validated against slate-900).
 export const FUNDING_MIX_COLORS: Record<string, string> = {
@@ -58,12 +58,25 @@ const money = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 })
 
-const compactMoney = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  notation: 'compact',
-  maximumFractionDigits: 1,
-})
+// "$14.3M", like Intl's compact notation, which Hermes (React Native) lacks.
+const COMPACT_UNITS = ['', 'K', 'M', 'B', 'T']
+
+function compactDollars(value: number) {
+  const sign = value < 0 ? '-' : ''
+  let unit = 0
+  let scaled = Math.abs(value)
+  while (scaled >= 1000 && unit < COMPACT_UNITS.length - 1) {
+    scaled /= 1000
+    unit += 1
+  }
+  let rounded = Math.round(scaled * 10) / 10
+  // 999,960 rounds to 1000K; Intl calls that $1M.
+  if (rounded >= 1000 && unit > 0 && unit < COMPACT_UNITS.length - 1) {
+    rounded = Math.round((rounded / 1000) * 10) / 10
+    unit += 1
+  }
+  return `${sign}$${rounded}${COMPACT_UNITS[unit]}`
+}
 
 // Bar fill for a candidate's share of a race.
 export function partyBarClass(party: string | null | undefined) {
@@ -77,7 +90,7 @@ export function formatMoney(value: number | null | undefined) {
 }
 
 export function formatCompactMoney(value: number | null | undefined) {
-  return value == null ? '—' : compactMoney.format(value)
+  return value == null ? '—' : compactDollars(value)
 }
 
 export function formatShare(value: number | null | undefined) {
@@ -186,3 +199,67 @@ export function formatDateRange(first: string | null | undefined, last: string |
   }
   return `${first} → ${last}`
 }
+
+export const SIZE_LABELS: Record<number, string> = {
+  0: '$200 and under',
+  200: '$200–499',
+  500: '$500–999',
+  1000: '$1,000–1,999',
+  2000: '$2,000+',
+}
+
+// The election picked in the finance section (or the default), with the peer
+// and race comparisons that belong to that election only.
+export function financeSelection(finance: OfficialFinance | null, selectedKey: string | null) {
+  const elections = finance?.elections ?? []
+  const selected =
+    elections.find((election) => electionKey(election) === selectedKey) ?? (finance ? defaultElection(finance) : null)
+  const comparison = finance?.peer_comparison ?? null
+  const compared =
+    selected &&
+    comparison &&
+    comparison.election_year === selected.election_year &&
+    comparison.fec_candidate_id === selected.fec_candidate_id
+      ? comparison
+      : null
+  const race = finance?.race_comparison ?? null
+  const raced = selected && race && race.election_year === selected.election_year ? race : null
+  return { elections, selected, compared, race, raced }
+}
+
+// "2026", or "2026 · H6TX07123" when one year has two candidacies.
+export function electionChipLabel(election: FinanceElection, elections: FinanceElection[]) {
+  const shared = elections.filter((e) => e.election_year === election.election_year).length > 1
+  return `${election.election_year}${shared ? ` · ${election.fec_candidate_id}` : ''}`
+}
+
+// Why a member with finance data has no totals to show yet.
+export function noTotalsMessage(finance: OfficialFinance, officialId: string, race: Race | null) {
+  return finance.fec_candidate_ids.length === 0
+    ? 'No FEC candidate ID. Run fec_client.py crosswalk.'
+    : race
+      ? 'No totals loaded yet. Run fec_client.py totals --candidates.'
+      : `No totals loaded yet. Run fec_client.py totals --official-id ${officialId}.`
+}
+
+export function noComparisonNote(election: FinanceElection, now: Date = new Date()) {
+  return election.election_year >= now.getFullYear()
+    ? 'Comparisons with other members use finished elections; pick an earlier year to see them.'
+    : 'Comparisons with other members are shown for the most recent finished election.'
+}
+
+// The small line under a candidate in the race comparison.
+export function raceCandidateDetail(candidate: RaceCandidate) {
+  const outside =
+    candidate.outside_support || candidate.outside_oppose
+      ? `Outside +${formatCompactMoney(candidate.outside_support ?? 0)} / −${formatCompactMoney(candidate.outside_oppose ?? 0)}`
+      : null
+  return [
+    `Cash ${formatCompactMoney(candidate.cash_on_hand)}`,
+    candidate.small_donor_share != null ? `Small donors ${formatShare(candidate.small_donor_share)}` : null,
+    outside,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+

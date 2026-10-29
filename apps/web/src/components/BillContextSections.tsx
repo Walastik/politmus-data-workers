@@ -1,11 +1,11 @@
 import { ChevronDown, ChevronRight, MessagesSquare } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
+import { amendmentLabel, partyCounts, partyStateLabel } from '@politmus/core/billProfile'
 import {
   committeeReportUrl,
   formatBillDate,
   partyBadgeClass,
-  partyShort,
   type Bill,
   type BillAmendment,
   type BillDebate,
@@ -51,7 +51,7 @@ function Collapsible({
 
 function PartyChip({ party, state }: { party?: string | null; state?: string | null }) {
   if (!party && !state) return null
-  const label = [party ? partyShort(party) : null, state].filter(Boolean).join('-')
+  const label = partyStateLabel(party, state)
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
@@ -61,15 +61,6 @@ function PartyChip({ party, state }: { party?: string | null; state?: string | n
       {label}
     </span>
   )
-}
-
-function partyCounts(parties: (string | null)[]) {
-  const counts = new Map<string, number>()
-  for (const party of parties) {
-    const key = party || 'Unknown'
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  }
-  return [...counts.entries()].map(([party, n]) => `${n} ${partyShort(party)}`).join(', ')
 }
 
 // -- debate --------------------------------------------------------------------
@@ -167,7 +158,7 @@ export function DebateSection({ debate }: { debate?: BillDebate | null }) {
 
 function AmendmentItem({ amendment }: { amendment: BillAmendment }) {
   const [expanded, setExpanded] = useState(false)
-  const label = `${amendment.chamber === 'House' ? 'H.Amdt.' : 'S.Amdt.'} ${amendment.number}`
+  const label = amendmentLabel(amendment)
   const description = amendment.purpose || amendment.text_excerpt
   return (
     <li className="rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2">
