@@ -9,3 +9,6 @@ __pycache__/
 backend/scripts/llm_config.py
 backend/scripts/positions_llm_config.py
 backend/scripts/debate_llm_config.py
+
+# npm workspaces install at the repo root
+node_modules/
