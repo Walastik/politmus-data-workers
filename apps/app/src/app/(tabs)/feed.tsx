@@ -1,22 +1,10 @@
 import { FEED_FILTERS, FEED_LEVELS, groupFeed } from '@politmus/core/feed'
 import { useMemo, useState } from 'react'
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, Text, View } from 'react-native'
+import { ActivityIndicator, RefreshControl, ScrollView, SectionList, Text, View } from 'react-native'
 
 import FeedItemRow from '@/components/FeedItemRow'
+import { Chip } from '@/components/ui'
 import { useFeed } from '@/lib/queries'
-
-function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      className={`rounded-full border px-3 py-1 ${active ? 'border-blue-500 bg-blue-600' : 'border-slate-700 bg-slate-800'}`}
-    >
-      <Text className={`text-xs font-medium ${active ? 'text-white' : 'text-slate-300'}`}>{label}</Text>
-    </Pressable>
-  )
-}
 
 export default function FeedScreen() {
   const [filterKey, setFilterKey] = useState('all')

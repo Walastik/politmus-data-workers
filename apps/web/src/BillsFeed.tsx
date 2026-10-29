@@ -5,9 +5,8 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from './api'
 import { BillDates, BipartisanTag, PolicyAreaTag, StatusTag } from './BillDrawer'
 import VoteTallyBar from './VoteTallyBar'
+import { billSortOptions, billsPath, noBillsMessage, sortForQueryChange } from '@politmus/core/billsList'
 import type { Bill } from '@politmus/core/types'
-
-
 
 export default function BillsFeed({
   onSelectBill,
@@ -36,11 +35,7 @@ export default function BillsFeed({
     const timeout = window.setTimeout(() => {
       const next = query.trim()
       if (next === debouncedQuery) return
-      if (next && !debouncedQuery) {
-        setSort((current) => (current === 'voted_desc' ? 'relevance' : current))
-      } else if (!next) {
-        setSort((current) => (current === 'relevance' ? 'voted_desc' : current))
-      }
+      setSort((current) => sortForQueryChange(debouncedQuery, next, current))
       setDebouncedQuery(next)
       setPage(1)
     }, 250)
@@ -52,18 +47,12 @@ export default function BillsFeed({
     setLoading(true)
     setError(null)
 
-    const params = new URLSearchParams()
-    if (debouncedQuery) params.set('q', debouncedQuery)
-    if (voteStatus !== 'all') params.set('vote_status', voteStatus)
-    if (pace !== 'all') params.set('pace', pace)
-    if (status !== 'all') params.set('status', status)
-    if (sponsorParty !== 'all') params.set('sponsor_party', sponsorParty)
-    if (bipartisan !== 'all') params.set('bipartisan', bipartisan)
-    params.set('sort', sort)
-    params.set('limit', String(pageSize))
-    params.set('offset', String((page - 1) * pageSize))
+    const path = billsPath(
+      { query: debouncedQuery, voteStatus, status, pace, sponsorParty, bipartisan, sort },
+      { limit: pageSize, offset: (page - 1) * pageSize },
+    )
 
-    apiFetch(`/api/bills?${params.toString()}`, { signal: controller.signal })
+    apiFetch(path, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load bills (${res.status})`)
@@ -154,11 +143,11 @@ export default function BillsFeed({
         <label className="flex flex-col text-sm text-slate-300">
           Sort By
           <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} className="mt-1 rounded bg-slate-700 border-slate-600 px-2 py-1">
-            {debouncedQuery ? <option value="relevance">Best Match</option> : null}
-            <option value="voted_desc">Voted On (Newest)</option>
-            <option value="voted_asc">Voted On (Oldest)</option>
-            <option value="introduced_desc">Introduced (Newest)</option>
-            <option value="introduced_asc">Introduced (Oldest)</option>
+            {billSortOptions(Boolean(debouncedQuery)).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="flex flex-col text-sm text-slate-300">
@@ -180,7 +169,7 @@ export default function BillsFeed({
         <p className="text-slate-400">Loading legislation feed...</p>
       ) : bills.length === 0 ? (
         <p className="text-slate-400">
-          {debouncedQuery ? `No bills match "${debouncedQuery}" with these filters.` : 'No bills match your filters.'}
+          {noBillsMessage(debouncedQuery)}
         </p>
       ) : (
         <>

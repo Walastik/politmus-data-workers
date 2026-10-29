@@ -4,28 +4,32 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { apiFetch } from '../api'
-import MemberCard, { partyFillClass } from '../components/MemberCard'
+import MemberCard from '../components/MemberCard'
 import PageHeader, { PageContainer } from '../components/PageHeader'
 import PositionsProgressPanel from '../components/PositionsProgressPanel'
+import {
+  CONGRESS_VIEWS,
+  CURRENT_MEMBERS_PATH,
+  byState,
+  chamberMakeup,
+  delegationSummary,
+  houseSeatLabel,
+  memberMatches,
+  partyFillClass,
+  rosterPath,
+  sortRoster,
+  splitChambers,
+  type CongressView,
+  type RosterSort,
+} from '@politmus/core/congress'
 import {
   PARTY_FILTERS,
   ROSTER_STATUS_FILTERS,
   STATE_OPTIONS,
-  officialName,
-  partyShort,
   type Official,
   type RosterStatusFilter,
 } from '@politmus/core/types'
 import { useDrawerLinks } from '../useDrawerLinks'
-
-type View = 'senate' | 'house' | 'list'
-const VIEWS: { key: View; label: string }[] = [
-  { key: 'senate', label: 'Senate' },
-  { key: 'house', label: 'House' },
-  { key: 'list', label: 'All members' },
-]
-const NON_VOTING_OFFICES = new Set(['Delegate', 'Resident Commissioner'])
-const PARTY_ORDER = ['D', 'I', 'R']
 
 type Load<T> = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; data: T }
 
@@ -33,14 +37,14 @@ export default function Congress() {
   const { openOfficial } = useDrawerLinks()
   const [searchParams, setSearchParams] = useSearchParams()
   const rawView = searchParams.get('view')
-  const view: View = VIEWS.some((v) => v.key === rawView) ? (rawView as View) : 'senate'
+  const view: CongressView = CONGRESS_VIEWS.some((v) => v.key === rawView) ? (rawView as CongressView) : 'senate'
   const [party, setParty] = useState('')
   const [stateName, setStateName] = useState('')
   const [nameQuery, setNameQuery] = useState('')
   const query = useDebounced(nameQuery.trim(), 200)
   const members = useCurrentMembers()
 
-  function setView(next: View) {
+  function setView(next: CongressView) {
     const params = new URLSearchParams(searchParams)
     params.set('view', next)
     params.delete('official')
@@ -49,12 +53,8 @@ export default function Congress() {
   }
 
   const current = members.status === 'ok' ? members.data : []
-  const senators = current.filter((m) => m.office === 'Senator')
-  const house = current.filter((m) => m.office !== 'Senator')
-  const matches = (m: Official) =>
-    (!party || partyShort(m.party) === party) &&
-    (!stateName || m.state === stateName) &&
-    (!query || officialName(m).toLowerCase().includes(query.toLowerCase()) || m.name.toLowerCase().includes(query.toLowerCase()))
+  const { senators, house, voting, delegates } = splitChambers(current)
+  const matches = (m: Official) => memberMatches(m, { party, stateName, query })
 
   return (
     <PageContainer>
@@ -74,17 +74,13 @@ export default function Congress() {
       {members.status === 'ok' ? (
         <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2">
           <ChamberSummary title="Senate" members={senators} />
-          <ChamberSummary
-            title="House"
-            members={house.filter((m) => !NON_VOTING_OFFICES.has(m.office ?? ''))}
-            note={`plus ${house.filter((m) => NON_VOTING_OFFICES.has(m.office ?? '')).length} non-voting delegates`}
-          />
+          <ChamberSummary title="House" members={voting} note={`plus ${delegates} non-voting delegates`} />
         </div>
       ) : null}
 
       <div className="mb-4 flex flex-col gap-3">
         <div className="inline-flex self-start rounded-lg border border-slate-700 bg-slate-800/60 p-1" role="tablist" aria-label="Congress views">
-          {VIEWS.map(({ key, label }) => (
+          {CONGRESS_VIEWS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
@@ -128,7 +124,7 @@ function useCurrentMembers(): Load<Official[]> {
   const [load, setLoad] = useState<Load<Official[]>>({ status: 'loading' })
   useEffect(() => {
     const controller = new AbortController()
-    fetchOfficials(new URLSearchParams({ level: 'federal', current_member: 'true' }), controller.signal)
+    fetchOfficials(CURRENT_MEMBERS_PATH, controller.signal)
       .then((data) => setLoad({ status: 'ok', data }))
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
@@ -139,8 +135,8 @@ function useCurrentMembers(): Load<Official[]> {
   return load
 }
 
-async function fetchOfficials(params: URLSearchParams, signal: AbortSignal): Promise<Official[]> {
-  const res = await apiFetch(`/api/officials?${params.toString()}`, { signal })
+async function fetchOfficials(path: string, signal: AbortSignal): Promise<Official[]> {
+  const res = await apiFetch(path, { signal })
   if (!res.ok) {
     throw new Error(`Failed to load officials (${res.status})`)
   }
@@ -149,18 +145,7 @@ async function fetchOfficials(params: URLSearchParams, signal: AbortSignal): Pro
 }
 
 function ChamberSummary({ title, members, note }: { title: string; members: Official[]; note?: string }) {
-  const counts = { D: 0, R: 0, I: 0 }
-  for (const member of members) {
-    const key = partyShort(member.party) as keyof typeof counts
-    counts[key in counts ? key : 'I'] += 1
-  }
-  const total = members.length || 1
-  const scored = members.filter((m) => m.score_matches).length
-  const segments = [
-    { key: 'D', label: 'Democrat', count: counts.D, bar: 'bg-blue-500', text: 'text-blue-300' },
-    { key: 'I', label: 'Independent', count: counts.I, bar: 'bg-emerald-500', text: 'text-emerald-300' },
-    { key: 'R', label: 'Republican', count: counts.R, bar: 'bg-red-500', text: 'text-red-300' },
-  ]
+  const { segments, scored } = chamberMakeup(members)
   return (
     <section className="rounded-xl border border-slate-700 bg-slate-800/40 p-4" aria-label={`${title} makeup`}>
       <div className="flex items-baseline justify-between gap-2">
@@ -170,19 +155,17 @@ function ChamberSummary({ title, members, note }: { title: string; members: Offi
         </p>
       </div>
       <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-slate-700" aria-hidden="true">
-        {segments.map((s) =>
-          s.count ? <div key={s.key} className={s.bar} style={{ width: `${(s.count / total) * 100}%` }} /> : null,
-        )}
+        {segments.map((s) => (
+          <div key={s.key} className={s.bar} style={{ width: `${s.share * 100}%` }} />
+        ))}
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        {segments.map((s) =>
-          s.count ? (
-            <span key={s.key} className={s.text}>
-              <span className="font-semibold tabular-nums">{s.count}</span> {s.label}
-              {s.count === 1 ? '' : 's'}
-            </span>
-          ) : null,
-        )}
+        {segments.map((s) => (
+          <span key={s.key} className={s.text}>
+            <span className="font-semibold tabular-nums">{s.count}</span> {s.label}
+            {s.count === 1 ? '' : 's'}
+          </span>
+        ))}
       </div>
       <p className="mt-2 text-xs text-slate-500">
         {scored} of {members.length} have a Politmus Score so far.
@@ -263,16 +246,6 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   )
 }
 
-function byState(members: Official[]) {
-  const groups = new Map<string, Official[]>()
-  for (const member of members) {
-    const list = groups.get(member.state) ?? []
-    list.push(member)
-    groups.set(member.state, list)
-  }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
-}
-
 function SenateView({ members, onSelect }: { members: Official[]; onSelect: (official: Official) => void }) {
   if (members.length === 0) return <p className="text-slate-400">No senators match these filters.</p>
   return (
@@ -289,11 +262,6 @@ function SenateView({ members, onSelect }: { members: Official[]; onSelect: (off
       ))}
     </ul>
   )
-}
-
-function districtLabel(member: Official) {
-  if (NON_VOTING_OFFICES.has(member.office ?? '')) return member.office ?? 'Delegate'
-  return !member.district || member.district === 98 ? 'At-large' : `District ${member.district}`
 }
 
 function HouseView({
@@ -326,10 +294,7 @@ function HouseView({
       <ul className="divide-y divide-slate-800 rounded-lg border border-slate-700 bg-slate-800/30">
         {groups.map(([state, delegation]) => {
           const isOpen = expandAll || open.has(state)
-          const sorted = [...delegation].sort((a, b) => (a.district ?? 0) - (b.district ?? 0))
-          const counts = ['D', 'R', 'I']
-            .map((p) => [p, delegation.filter((m) => partyShort(m.party) === p).length] as const)
-            .filter(([, n]) => n > 0)
+          const summary = delegationSummary(delegation)
           return (
             <li key={state}>
               <button
@@ -352,26 +317,23 @@ function HouseView({
                 )}
                 <span className="flex-1 font-medium text-slate-100">{state}</span>
                 <span className="hidden gap-0.5 sm:flex" aria-hidden="true">
-                  {[...delegation]
-                    .sort((a, b) => PARTY_ORDER.indexOf(partyShort(a.party)) - PARTY_ORDER.indexOf(partyShort(b.party)))
-                    .map((m) => (
-                      <span key={m.id} className={`h-3 w-1.5 rounded-sm ${partyFillClass(m.party)}`} />
-                    ))}
+                  {summary.byParty.map((m) => (
+                    <span key={m.id} className={`h-3 w-1.5 rounded-sm ${partyFillClass(m.party)}`} />
+                  ))}
                 </span>
                 <span className="w-36 shrink-0 whitespace-nowrap text-right text-xs text-slate-400">
-                  {delegation.length} seat{delegation.length === 1 ? '' : 's'} ·{' '}
-                  {counts.map(([p, n]) => `${n}${p}`).join(' ')}
+                  {summary.label}
                 </span>
               </button>
               {isOpen ? (
                 <div className="grid grid-cols-1 gap-1.5 px-4 pb-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {sorted.map((member) => (
+                  {summary.byDistrict.map((member) => (
                     <MemberCard
                       key={member.id}
                       official={member}
                       onSelect={onSelect}
                       variant="compact"
-                      subtitle={districtLabel(member)}
+                      subtitle={houseSeatLabel(member)}
                     />
                   ))}
                 </div>
@@ -383,8 +345,6 @@ function HouseView({
     </div>
   )
 }
-
-type SortKey = 'name' | 'score'
 
 // The searchable roster: current or former members, filtered on the server.
 function MemberList({
@@ -400,20 +360,13 @@ function MemberList({
 }) {
   const [status, setStatus] = useState<RosterStatusFilter>('active')
   const [hasPositionsOnly, setHasPositionsOnly] = useState(false)
-  const [sort, setSort] = useState<SortKey>('name')
+  const [sort, setSort] = useState<RosterSort>('name')
   const [load, setLoad] = useState<Load<Official[]>>({ status: 'loading' })
 
   useEffect(() => {
     const controller = new AbortController()
-    const params = new URLSearchParams()
-    if (status === 'active') params.set('current_member', 'true')
-    else if (status === 'former') params.set('current_member', 'false')
-    params.set('level', 'federal')
-    if (party) params.set('party', party)
-    if (stateName) params.set('state', stateName)
-    if (query) params.set('q', query)
     setLoad({ status: 'loading' })
-    fetchOfficials(params, controller.signal)
+    fetchOfficials(rosterPath({ status, party, stateName, query }), controller.signal)
       .then((data) => setLoad({ status: 'ok', data }))
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
@@ -423,17 +376,10 @@ function MemberList({
     return () => controller.abort()
   }, [party, query, stateName, status])
 
-  const visible = useMemo(() => {
-    const rows = load.status === 'ok' ? load.data : []
-    const filtered = hasPositionsOnly ? rows.filter((m) => m.positions_status === 'ok') : rows
-    if (sort === 'name') return filtered
-    return [...filtered].sort(
-      (a, b) =>
-        (b.score_matches ? 1 : 0) - (a.score_matches ? 1 : 0) ||
-        (b.score_pct ?? -1) - (a.score_pct ?? -1) ||
-        (b.score_points ?? 0) - (a.score_points ?? 0),
-    )
-  }, [hasPositionsOnly, load, sort])
+  const visible = useMemo(
+    () => sortRoster(load.status === 'ok' ? load.data : [], { sort, hasPositionsOnly }),
+    [hasPositionsOnly, load, sort],
+  )
 
   return (
     <div>
@@ -463,7 +409,7 @@ function MemberList({
           Sort
           <select
             value={sort}
-            onChange={(event) => setSort(event.target.value as SortKey)}
+            onChange={(event) => setSort(event.target.value as RosterSort)}
             className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-slate-100 focus:border-blue-500 focus:outline-none"
           >
             <option value="name">Name</option>

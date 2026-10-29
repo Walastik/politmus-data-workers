@@ -25,17 +25,20 @@ export default function VoteTally({
   byParty,
   rollCalls,
   onPartyPress,
+  compact = false,
 }: {
   summary: Bill['votes_summary']
   byParty?: BillVotePartySummary
   rollCalls?: Partial<Record<VoteChamber, BillRollCall | null>>
   onPartyPress?: (chamber: VoteChamber, party: string) => void
+  // Lists show the chamber bars only; the profile adds the party pies.
+  compact?: boolean
 }) {
   if (voteTotal(summary) === 0) {
     return <Text className="text-xs text-slate-500">No recorded votes</Text>
   }
   return (
-    <View className="gap-4">
+    <View className={compact ? 'gap-2' : 'gap-4'}>
       <ChamberTally
         label="House"
         chamber="house"
@@ -43,6 +46,7 @@ export default function VoteTally({
         byParty={byParty?.house}
         rollCall={rollCalls?.house}
         onPartyPress={onPartyPress}
+        compact={compact}
       />
       <ChamberTally
         label="Senate"
@@ -51,10 +55,13 @@ export default function VoteTally({
         byParty={byParty?.senate}
         rollCall={rollCalls?.senate}
         onPartyPress={onPartyPress}
+        compact={compact}
       />
-      <Text className="text-[10px] text-slate-600">
-        {rollCalls ? 'Latest vote on passage in each chamber, or the latest vote if none' : 'Latest roll call stored for each chamber'}
-      </Text>
+      {compact ? null : (
+        <Text className="text-[10px] text-slate-600">
+          {rollCalls ? 'Latest vote on passage in each chamber, or the latest vote if none' : 'Latest roll call stored for each chamber'}
+        </Text>
+      )}
     </View>
   )
 }
@@ -66,6 +73,7 @@ function ChamberTally({
   byParty,
   rollCall,
   onPartyPress,
+  compact,
 }: {
   label: string
   chamber: VoteChamber
@@ -73,6 +81,7 @@ function ChamberTally({
   byParty: Record<string, ChamberVoteSummary> | undefined
   rollCall?: BillRollCall | null
   onPartyPress?: (chamber: VoteChamber, party: string) => void
+  compact: boolean
 }) {
   const { yes, no, present, notVoting, total, yesPct, noPct } = chamberCounts(summary)
   if (total === 0) {
@@ -106,11 +115,13 @@ function ChamberTally({
         {present > 0 ? <Text className="text-xs text-slate-400">{present} Present</Text> : null}
         {notVoting > 0 ? <Text className="text-xs text-slate-400">{notVoting} NV</Text> : null}
       </View>
-      <View className="mt-3 flex-row">
-        {PARTY_PIES.map((party) => (
-          <PartyPie key={party} chamber={chamber} party={party} summary={byParty?.[party] || {}} onPress={onPartyPress} />
-        ))}
-      </View>
+      {compact ? null : (
+        <View className="mt-3 flex-row">
+          {PARTY_PIES.map((party) => (
+            <PartyPie key={party} chamber={chamber} party={party} summary={byParty?.[party] || {}} onPress={onPartyPress} />
+          ))}
+        </View>
+      )}
     </View>
   )
 }

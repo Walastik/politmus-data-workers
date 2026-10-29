@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Pressable, Text, View } from 'react-native'
+import { Pressable, Text, TextInput, View } from 'react-native'
 
 import { openUrl } from '@/lib/links'
 
@@ -58,6 +58,62 @@ export function Badge({ className, children }: { className: string; children: Re
   return (
     <View className={`self-start rounded px-1.5 py-0.5 ${className}`}>
       <Text className={`text-[10px] font-bold ${className}`}>{children}</Text>
+    </View>
+  )
+}
+
+// A filter choice; `tone` picks the active colour.
+export function Chip({
+  label,
+  active,
+  onPress,
+  activeClassName = 'border-blue-500 bg-blue-600',
+  icon,
+}: {
+  label: string
+  active: boolean
+  onPress: () => void
+  activeClassName?: string
+  icon?: ReactNode
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      className={`flex-row items-center gap-1.5 rounded-full border px-3 py-1 ${active ? activeClassName : 'border-slate-700 bg-slate-800'}`}
+    >
+      {icon}
+      <Text className={`text-xs font-medium ${active ? 'text-white' : 'text-slate-300'}`}>{label}</Text>
+    </Pressable>
+  )
+}
+
+export function SearchField({
+  value,
+  onChangeText,
+  placeholder,
+  label,
+}: {
+  value: string
+  onChangeText: (value: string) => void
+  placeholder: string
+  label: string
+}) {
+  return (
+    <View className="flex-row items-center gap-2 rounded-md border border-slate-700 bg-slate-800 px-3">
+      <Icons.Search size={16} colorClassName="accent-slate-500" />
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColorClassName="accent-slate-500"
+        accessibilityLabel={label}
+        autoCorrect={false}
+        returnKeyType="search"
+        clearButtonMode="while-editing"
+        className="flex-1 py-2.5 text-sm text-slate-100"
+      />
     </View>
   )
 }

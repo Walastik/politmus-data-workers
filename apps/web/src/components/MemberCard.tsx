@@ -10,6 +10,7 @@ import {
   rosterStatusLabel,
   type Official,
 } from '@politmus/core/types'
+import { partyEdgeClass } from '@politmus/core/congress'
 import OfficialPhoto from './OfficialPhoto'
 import ScoreHeadline from './ScoreHeadline'
 
@@ -108,16 +109,4 @@ export function PositionsCardBadge({ official }: { official: Official }) {
   }
   const label = positionsStatusLabel(official.positions_status)
   return label ? <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-500">{label}</p> : null
-}
-
-export function partyEdgeClass(party: string | null | undefined) {
-  if (party === 'Democratic' || party === 'D') return 'border-blue-500'
-  if (party === 'Republican' || party === 'R') return 'border-red-500'
-  return 'border-emerald-500'
-}
-
-export function partyFillClass(party: string | null | undefined) {
-  if (party === 'Democratic' || party === 'D') return 'bg-blue-500'
-  if (party === 'Republican' || party === 'R') return 'bg-red-500'
-  return 'bg-emerald-500'
 }

@@ -21,8 +21,7 @@ native code, Expo Go is not enough: build a development client with
 ## Layout
 
 - `src/app/`: routes. `(tabs)/` mirrors the web app's sections (Now, Feed,
-  My Reps, Congress, Bills). Now, Feed and My Reps are ported; Congress and
-  Bills open politmus.com for now. `member/[id]` and `bill/[id]` are the
+  My Reps, Congress, Bills). `member/[id]` and `bill/[id]` are the
   profiles (the web app's drawers), pushed on the stack from any screen;
   `bill/[id]/voters` is the per-party vote list.
 - `src/components/`: UI. `Name.web.tsx` beside `Name.tsx` replaces it on web

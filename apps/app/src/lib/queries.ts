@@ -1,13 +1,17 @@
 import { feedPath } from '@politmus/core/feed'
+import { billsPath, type BillFilters } from '@politmus/core/billsList'
 import { pacParams } from '@politmus/core/campaignFinance'
+import { CURRENT_MEMBERS_PATH, rosterPath } from '@politmus/core/congress'
 import type {
   Bill,
   BillVoter,
   FeedPage,
   FinanceElection,
+  Official,
   OfficialDetail,
   OfficialFinance,
   PacSummary,
+  RosterStatusFilter,
   RacesPage,
   VoteChamber,
   VoterInfo,
@@ -115,6 +119,47 @@ export function usePacSummary(officialId: string, election: FinanceElection) {
     queryKey: ['pacs', officialId, pacParams(election)],
     queryFn: ({ signal }) =>
       api.json<PacSummary>(`/api/officials/${encodeURIComponent(officialId)}/finance/pacs?${pacParams(election)}`, { signal }),
+  })
+}
+
+const BILLS_PAGE_SIZE = 25
+
+export function useBills(filters: BillFilters) {
+  const api = useApi()
+  return useInfiniteQuery({
+    queryKey: ['bills', filters],
+    queryFn: ({ pageParam, signal }) =>
+      api.json<{ items: Bill[]; total: number }>(billsPath(filters, { limit: BILLS_PAGE_SIZE, offset: pageParam }), { signal }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + (page.items?.length ?? 0), 0)
+      return loaded < (last.total ?? 0) && (last.items?.length ?? 0) > 0 ? loaded : undefined
+    },
+    // Keep the old list on screen while a new filter loads.
+    placeholderData: (previous) => previous,
+  })
+}
+
+async function officials(api: ReturnType<typeof useApi>, path: string, signal: AbortSignal) {
+  const data = await api.json<Official[]>(path, { signal })
+  return Array.isArray(data) ? data : []
+}
+
+export function useCurrentMembers() {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['officials', 'current'],
+    queryFn: ({ signal }) => officials(api, CURRENT_MEMBERS_PATH, signal),
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+export function useRoster(filters: { status: RosterStatusFilter; party: string; stateName: string; query: string }) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['officials', 'roster', filters],
+    queryFn: ({ signal }) => officials(api, rosterPath(filters), signal),
+    placeholderData: (previous) => previous,
   })
 }
 
