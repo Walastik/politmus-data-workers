@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,6 +16,8 @@ from api.schemas import (
 from api.routes.officials import score_fields
 from database import get_db
 from models import Official, OfficialScore
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -124,8 +127,8 @@ def lookup_civic_info(
 ):
     """Resolve an address or a point to districts, then load federal and state officials.
 
-    Census geocodes the address (or the lat/lon point), including congressional
-    and state legislative districts. FastAPI then returns current senators, the
+    Census geocodes the address, then TIGERweb finds the congressional and state
+    legislative districts the sitting Congress and legislatures were elected on. FastAPI then returns current senators, the
     House member, the governor, and the matching state legislators from Postgres.
     """
     address = (address or "").strip()
@@ -139,10 +142,14 @@ def lookup_civic_info(
 
     try:
         match = geocode_coordinates(lat, lon) if has_point else geocode_address(address)
-    except CensusUnavailable:
+    except CensusUnavailable as exc:
+        logger.warning("Census lookup failed: %s", exc)
         raise HTTPException(
             status_code=502,
-            detail="Unable to reach the Census geocoder",
+            detail=(
+                "The Census service we use to find your districts is having trouble "
+                "right now. Please try again in a little while."
+            ),
         ) from None
 
     if match is None:

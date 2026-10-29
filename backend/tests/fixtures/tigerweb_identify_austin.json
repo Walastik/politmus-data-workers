@@ -1,0 +1,91 @@
+{
+    "results": [
+        {
+            "layerId": 4,
+            "layerName": "119th Congressional Districts",
+            "displayFieldName": "BASENAME",
+            "value": "37",
+            "attributes": {
+                "OBJECTID": "255",
+                "STGEOMETRY": "Polygon",
+                "AREALAND": "578840715",
+                "AREAWATER": "9144290",
+                "CD119": "37",
+                "CDSESSN": "119",
+                "CDTYP": "O",
+                "FUNCSTAT": "N",
+                "GEOID": "4837",
+                "LSADC": "C2",
+                "MTFCC": "G5200",
+                "BASENAME": "37",
+                "NAME": "Congressional District 37",
+                "OID": "2116635951825220",
+                "STATE": "48",
+                "CENTLON": "-097.7881955",
+                "CENTLAT": "+30.3190046",
+                "INTPTLON": "-097.7743605",
+                "INTPTLAT": "+30.3005289",
+                "HU100": "Null",
+                "POP100": "Null"
+            }
+        },
+        {
+            "layerId": 5,
+            "layerName": "2024 State Legislative Districts - Upper",
+            "displayFieldName": "BASENAME",
+            "value": "14",
+            "attributes": {
+                "AREALAND": "1333781950",
+                "AREAWATER": "13661972",
+                "BASENAME": "14",
+                "CENTLAT": "+30.3276171",
+                "CENTLON": "-097.6765074",
+                "FUNCSTAT": "N",
+                "GEOID": "48014",
+                "HU100": "Null",
+                "INTPTLAT": "+30.3276222",
+                "INTPTLON": "-097.6766210",
+                "LDTYP": "O",
+                "LSADC": "LU",
+                "LSY": "2024",
+                "MTFCC": "G5210",
+                "NAME": "State Senate District 14",
+                "OBJECTID": "1292",
+                "OID": "2126635951823303",
+                "POP100": "Null",
+                "SLDU": "014",
+                "STATE": "48",
+                "STGEOMETRY": "Polygon"
+            }
+        },
+        {
+            "layerId": 6,
+            "layerName": "2024 State Legislative Districts - Lower",
+            "displayFieldName": "BASENAME",
+            "value": "49",
+            "attributes": {
+                "AREALAND": "92144751",
+                "AREAWATER": "252516",
+                "BASENAME": "49",
+                "CENTLAT": "+30.2953482",
+                "CENTLON": "-097.7557976",
+                "FUNCSTAT": "N",
+                "GEOID": "48049",
+                "HU100": "Null",
+                "INTPTLAT": "+30.2943871",
+                "INTPTLON": "-097.7562946",
+                "LDTYP": "O",
+                "LSADC": "LL",
+                "LSY": "2024",
+                "MTFCC": "G5220",
+                "NAME": "State House District 49",
+                "OBJECTID": "2466",
+                "OID": "2136635951823815",
+                "POP100": "Null",
+                "SLDL": "049",
+                "STATE": "48",
+                "STGEOMETRY": "Polygon"
+            }
+        }
+    ]
+}
