@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { dayGroup, daysUntil, groupFeed } from './feed'
+import { dayGroup, daysUntil, feedPath, groupFeed } from './feed'
 import type { FeedItem } from './types'
 
 describe('dayGroup', () => {
@@ -73,5 +73,14 @@ describe('groupFeed', () => {
       [4, []],
       [2, []],
     ])
+  })
+})
+
+describe('feedPath', () => {
+  it('adds kinds, level and cursor only when they narrow the feed', () => {
+    expect(feedPath({ filterKey: 'all', level: 'all', limit: 25 })).toBe('/api/feed?limit=25')
+    expect(feedPath({ filterKey: 'officials', level: 'state', cursor: 'abc', limit: 10 })).toBe(
+      '/api/feed?limit=10&kinds=official_seated%2Cofficial_departed&level=state&cursor=abc',
+    )
   })
 })

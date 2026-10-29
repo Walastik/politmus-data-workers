@@ -9,6 +9,8 @@ export interface ApiClientOptions {
 export interface ApiClient {
   url: (path: string) => string
   fetch: (path: string, init?: RequestInit) => Promise<Response>
+  // Parsed body; throws the API's `detail` (or the status) when not ok.
+  json: <T>(path: string, init?: RequestInit) => Promise<T>
 }
 
 export function createApiClient({ baseUrl, getToken }: ApiClientOptions): ApiClient {
@@ -26,5 +28,20 @@ export function createApiClient({ baseUrl, getToken }: ApiClientOptions): ApiCli
     return fetch(url(path), { ...init, headers })
   }
 
-  return { url, fetch: apiFetch }
+  async function json<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await apiFetch(path, init)
+    let body: unknown = null
+    try {
+      body = await response.json()
+    } catch {
+      // fall through to the status check
+    }
+    if (!response.ok) {
+      const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : null
+      throw new Error(typeof detail === 'string' && detail ? detail : `Request failed (${response.status})`)
+    }
+    return body as T
+  }
+
+  return { url, fetch: apiFetch, json }
 }

@@ -6,7 +6,7 @@ import FeedItemCard from '../components/FeedItemCard'
 import PageHeader, { PageContainer } from '../components/PageHeader'
 import UpcomingElections from '../components/UpcomingElections'
 import { useDrawerLinks } from '../useDrawerLinks'
-import { FEED_FILTERS, FEED_LEVELS, groupFeed } from '@politmus/core/feed'
+import { FEED_FILTERS, FEED_LEVELS, feedPath, groupFeed } from '@politmus/core/feed'
 import type { FeedItem, FeedPage } from '@politmus/core/types'
 
 const PAGE_SIZE = 30
@@ -29,15 +29,8 @@ export default function Feed() {
   // Ignore "load more" responses that land after the filters changed.
   const requestKey = useRef('')
 
-  const feedPath = useCallback(
-    (cursor: string | null) => {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
-      const kinds = FEED_FILTERS.find((f) => f.key === filterKey)?.kinds
-      if (kinds) params.set('kinds', kinds.join(','))
-      if (level !== 'all') params.set('level', level)
-      if (cursor) params.set('cursor', cursor)
-      return `/api/feed?${params.toString()}`
-    },
+  const pagePath = useCallback(
+    (cursor: string | null) => feedPath({ filterKey, level, cursor, limit: PAGE_SIZE }),
     [filterKey, level],
   )
 
@@ -46,7 +39,7 @@ export default function Feed() {
     requestKey.current = `${filterKey}:${level}`
     setLoading(true)
     setError(null)
-    apiFetch(feedPath(null), { signal: controller.signal })
+    apiFetch(pagePath(null), { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load feed (${res.status})`)
@@ -66,13 +59,13 @@ export default function Feed() {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [feedPath, filterKey, level])
+  }, [pagePath, filterKey, level])
 
   const loadMore = () => {
     if (!nextCursor) return
     const key = requestKey.current
     setLoadingMore(true)
-    apiFetch(feedPath(nextCursor))
+    apiFetch(pagePath(nextCursor))
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load more (${res.status})`)

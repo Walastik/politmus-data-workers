@@ -1,0 +1,5 @@
+@import 'tailwindcss';
+@import 'uniwind';
+
+/* Class names returned by shared helpers (e.g. accountability colors). */
+@source '../../../packages/core/src';

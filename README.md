@@ -67,7 +67,8 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
    ```
 
    - `apps/web`: the React web app (Vite, Tailwind, Clerk).
-   - `packages/core`: platform-free TypeScript shared by the web app and the planned Expo mobile app: API types, the API client (`createApiClient`), and the feed, calendar, voting, finance and accountability helpers. Keep DOM and React out of it; put browser-only code in `apps/web`.
+   - `apps/app`: the Expo app for iOS, Android and web (`npm run app:ios` / `app:android` / `app:web`); see `apps/app/README.md`.
+   - `packages/core`: platform-free TypeScript shared by both apps: API types, the API client (`createApiClient`), and the feed, calendar, voting, finance and accountability helpers. Keep DOM and React out of it; put browser-only code in `apps/web`.
 
 ## Scripts
 

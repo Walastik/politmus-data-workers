@@ -15,7 +15,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { apiFetch } from '../api'
+import { apiJson } from '../api'
 import { buildElectionIcs, formatElectionDate } from '@politmus/core/calendar'
 import { downloadIcs } from '../downloadIcs'
 import {
@@ -99,7 +99,7 @@ export default function HappeningNow({
     }
     const controller = new AbortController()
     setVoterInfo({ status: 'loading' })
-    getJson<VoterInfo>('/api/voter-info', {
+    apiJson<VoterInfo>('/api/voter-info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, state: stateCode || undefined }),
@@ -127,7 +127,7 @@ export default function HappeningNow({
     }
     const controller = new AbortController()
     setRaces({ status: 'loading' })
-    getJson<RacesPage>(`/api/candidates/races?state=${encodeURIComponent(stateCode)}&limit=100`, {
+    apiJson<RacesPage>(`/api/candidates/races?state=${encodeURIComponent(stateCode)}&limit=100`, {
       signal: controller.signal,
     })
       .then((data) => setRaces({ status: 'ok', data: data.items ?? [] }))
@@ -255,7 +255,7 @@ function FeedPreview({
   const [items, setItems] = useState<Load<FeedItem[]>>({ status: 'loading' })
   useEffect(() => {
     const controller = new AbortController()
-    getJson<FeedPage>(`/api/feed?limit=${FEED_PREVIEW_SIZE}`, { signal: controller.signal })
+    apiJson<FeedPage>(`/api/feed?limit=${FEED_PREVIEW_SIZE}`, { signal: controller.signal })
       .then((data) => setItems({ status: 'ok', data: data.items ?? [] }))
       .catch((err) => {
         if (!controller.signal.aborted) setItems({ status: 'error', message: errorMessage(err, 'The feed is unavailable.') })
@@ -842,21 +842,6 @@ function houseDistrict(lookup: CivicLookup | null): number | null {
     if (match) return Number(match[1])
   }
   return null
-}
-
-async function getJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await apiFetch(path, init)
-  let body: unknown = null
-  try {
-    body = await response.json()
-  } catch {
-    // fall through to the status check
-  }
-  if (!response.ok) {
-    const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : null
-    throw new Error(typeof detail === 'string' && detail ? detail : `Request failed (${response.status})`)
-  }
-  return body as T
 }
 
 function errorMessage(err: unknown, fallback: string) {

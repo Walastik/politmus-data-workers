@@ -40,4 +40,14 @@ describe('createApiClient', () => {
       expect(new Headers(init?.headers).has('Authorization')).toBe(false)
     }
   })
+  it('returns the parsed body, or throws the API detail', async () => {
+    const fetchMock = stubFetch()
+    const api = createApiClient({ baseUrl: '' })
+    fetchMock.mockResolvedValueOnce(new Response('{"items":[]}'))
+    await expect(api.json('/api/feed')).resolves.toEqual({ items: [] })
+    fetchMock.mockResolvedValueOnce(new Response('{"detail":"Address not found"}', { status: 404 }))
+    await expect(api.json('/api/lookup')).rejects.toThrow('Address not found')
+    fetchMock.mockResolvedValueOnce(new Response('oops', { status: 502 }))
+    await expect(api.json('/api/lookup')).rejects.toThrow('Request failed (502)')
+  })
 })

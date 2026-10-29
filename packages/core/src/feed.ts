@@ -17,6 +17,29 @@ export const FEED_LEVELS = [
   { key: 'state', label: 'State' },
 ] as const
 
+export type FeedLevel = (typeof FEED_LEVELS)[number]['key']
+
+// GET /api/feed for one page of a filter and level; `cursor` is the previous
+// page's next_cursor.
+export function feedPath({
+  filterKey,
+  level,
+  cursor = null,
+  limit,
+}: {
+  filterKey: string
+  level: string
+  cursor?: string | null
+  limit: number
+}): string {
+  const params = new URLSearchParams({ limit: String(limit) })
+  const kinds = FEED_FILTERS.find((f) => f.key === filterKey)?.kinds
+  if (kinds) params.set('kinds', kinds.join(','))
+  if (level !== 'all') params.set('level', level)
+  if (cursor) params.set('cursor', cursor)
+  return `/api/feed?${params.toString()}`
+}
+
 export type DayGroup = 'Today' | 'Yesterday' | 'This week' | 'Earlier'
 
 export function dayGroup(occurredAt: string, now: Date = new Date()): DayGroup {

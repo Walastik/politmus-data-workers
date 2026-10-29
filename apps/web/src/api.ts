@@ -13,3 +13,4 @@ const api = createApiClient({
 })
 
 export const apiFetch = api.fetch
+export const apiJson = api.json

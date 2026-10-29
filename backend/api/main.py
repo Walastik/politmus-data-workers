@@ -33,6 +33,9 @@ if not _api_logger.handlers:
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    # Expo web dev server (apps/app)
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
 ]
 
 

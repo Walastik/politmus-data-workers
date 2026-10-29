@@ -19,65 +19,19 @@ import {
   partyBadgeClass,
   partyShort,
   type Bill,
-  type ChamberVoteSummary,
   type FeedItem,
   type Official,
 } from '@politmus/core/types'
+import { feedKindStyle, tallyAsBillSummary, type FeedIcon } from '@politmus/core/feedItem'
 
-interface KindStyle {
-  label: string
-  icon: ComponentType<{ className?: string }>
-  // Icon and label colour; one hue per kind of news.
-  tone: string
-}
-
-function kindStyle(item: FeedItem, voteCount: number): KindStyle {
-  switch (item.kind) {
-    case 'bill_introduced':
-      return { label: 'New bill', icon: FilePlus2, tone: 'text-blue-400' }
-    case 'bill_status_changed': {
-      const status = item.payload?.status ?? 'Bill moved'
-      if (status === 'Became Law') {
-        return { label: 'Became law', icon: Gavel, tone: 'text-emerald-400' }
-      }
-      if (status === 'Vetoed' || status === 'Failed') {
-        return { label: status, icon: XCircle, tone: 'text-red-400' }
-      }
-      return { label: status, icon: TrendingUp, tone: 'text-sky-400' }
-    }
-    case 'vote_held': {
-      const chamber = item.roll_call?.chamber ?? item.payload?.chamber ?? 'Floor'
-      const result = item.roll_call?.result ?? item.payload?.result
-      const votes = voteCount > 1 ? `${chamber} · ${voteCount} votes` : `${chamber} vote`
-      return {
-        label: result ? `${votes} · ${result}` : votes,
-        icon: Vote,
-        tone: 'text-slate-300',
-      }
-    }
-    case 'official_seated':
-      return { label: 'New in office', icon: UserPlus, tone: 'text-amber-400' }
-    case 'official_departed':
-      return { label: 'Left office', icon: UserMinus, tone: 'text-slate-400' }
-  }
-}
-
-// VoteTallyBar reads bill-shaped summaries; put this one roll call's party
-// tally under its chamber so the feed draws the same bar as the bills list.
-function tallyAsBillSummary(item: FeedItem) {
-  const byParty = item.tally_by_party
-  const chamber = item.roll_call?.chamber === 'House' ? 'house' : 'senate'
-  if (!byParty) return null
-  const totals: ChamberVoteSummary = {}
-  for (const positions of Object.values(byParty)) {
-    for (const [position, count] of Object.entries(positions)) {
-      totals[position] = (totals[position] ?? 0) + (count ?? 0)
-    }
-  }
-  return {
-    summary: { house: {}, senate: {}, [chamber]: totals },
-    byParty: { house: {}, senate: {}, [chamber]: byParty },
-  }
+const FEED_ICONS: Record<FeedIcon, ComponentType<{ className?: string }>> = {
+  bill: FilePlus2,
+  law: Gavel,
+  failed: XCircle,
+  progress: TrendingUp,
+  vote: Vote,
+  seated: UserPlus,
+  departed: UserMinus,
 }
 
 export default function FeedItemCard({
@@ -93,7 +47,8 @@ export default function FeedItemCard({
   onSelectOfficial: (official: Official) => void
 }) {
   const [showRelated, setShowRelated] = useState(false)
-  const { label, icon: Icon, tone } = kindStyle(item, related.length + 1)
+  const { label, icon, tone } = feedKindStyle(item, related.length + 1)
+  const Icon = FEED_ICONS[icon]
   const official = item.official
   const bill = item.bill
   const tally = item.kind === 'vote_held' ? tallyAsBillSummary(item) : null
