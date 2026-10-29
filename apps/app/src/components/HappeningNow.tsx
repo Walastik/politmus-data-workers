@@ -33,7 +33,7 @@ import { router } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
-import { openProfile, openSitePath, openUrl } from '@/lib/links'
+import { openProfile, openUrl } from '@/lib/links'
 import { useFeedPreview } from '@/lib/queries'
 
 import FeedItemRow from './FeedItemRow'
@@ -148,9 +148,11 @@ export function WhereToVote({
       icon={<Icons.MapPin size={16} colorClassName="accent-blue-400" />}
       title={sites.title}
       action={
-        // The full list (all sites, drop-offs, hours) is still web-only.
-        data && data.uiState !== 'unavailable' && sites.totalSites > sites.shown.length ? (
-          <LinkAction label={`All ${sites.totalSites} locations`} onPress={() => openSitePath('/now')} />
+        data && data.uiState !== 'unavailable' ? (
+          <LinkAction
+            label={sites.totalSites > 0 ? `See all ${sites.totalSites} locations` : 'Voting details'}
+            onPress={() => router.push('/voting')}
+          />
         ) : null
       }
     >

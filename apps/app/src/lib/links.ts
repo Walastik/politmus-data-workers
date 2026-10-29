@@ -26,7 +26,3 @@ export function openBill(bill: Pick<Bill, 'id'>) {
 export function profileShareUrl(kind: 'official' | 'bill', id: string) {
   return `${SITE}/reps?${kind}=${encodeURIComponent(id)}`
 }
-
-export function openSitePath(path: string) {
-  openUrl(`${SITE}${path}`)
-}
