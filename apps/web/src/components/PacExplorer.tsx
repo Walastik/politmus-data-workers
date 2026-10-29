@@ -3,25 +3,12 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { apiFetch } from '../api'
-import {
-  PAC_CATEGORY_COLORS,
-  formatDateRange,
-  formatMoney,
-  pacParams,
-} from '@politmus/core/campaignFinance'
+import { PAC_CATEGORY_COLORS, formatMoney } from '@politmus/core/campaignFinance'
+import { PAC_SORTS, fecCommitteeUrl, pacGiftsPath, pacListPath, pacMeta, type PacSort } from '@politmus/core/pacExplorer'
 import type { FinanceElection, Pac, PacGift, PacList, PacSummary } from '@politmus/core/types'
 import { LegendSwatch } from './financeParts'
 
-const PAGE_SIZE = 50
 const SEARCH_DEBOUNCE_MS = 250
-
-const SORTS = [
-  { value: 'amount', label: 'Largest total' },
-  { value: 'gifts', label: 'Most gifts' },
-  { value: 'recent', label: 'Most recent' },
-  { value: 'name', label: 'Name A–Z' },
-] as const
-type Sort = (typeof SORTS)[number]['value']
 
 // Every PAC that gave in one election, searchable and filterable. Opens over
 // the member drawer; Escape closes only this panel.
@@ -39,7 +26,7 @@ export default function PacExplorer({
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [category, setCategory] = useState<string | null>(null)
-  const [sort, setSort] = useState<Sort>('amount')
+  const [sort, setSort] = useState<PacSort>('amount')
   const [list, setList] = useState<PacList | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -77,22 +64,11 @@ export default function PacExplorer({
 
   useEffect(() => {
     const controller = new AbortController()
-    const params = pacParams(election)
-    params.set('sort', sort)
-    params.set('limit', String(PAGE_SIZE))
-    params.set('offset', String(offset))
-    if (debouncedQuery) {
-      params.set('q', debouncedQuery)
-    }
-    if (category) {
-      params.set('category', category)
-    }
     setLoading(true)
     setError(null)
-    apiFetch(
-      `/api/officials/${encodeURIComponent(officialId)}/finance/pacs/list?${params}`,
-      { signal: controller.signal },
-    )
+    apiFetch(pacListPath(officialId, election, { sort, offset, query: debouncedQuery, category }), {
+      signal: controller.signal,
+    })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load PACs (${res.status})`)
@@ -198,12 +174,12 @@ export default function PacExplorer({
               <select
                 value={sort}
                 onChange={(event) => {
-                  setSort(event.target.value as Sort)
+                  setSort(event.target.value as PacSort)
                   restart()
                 }}
                 className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-xs text-slate-200"
               >
-                {SORTS.map((option) => (
+                {PAC_SORTS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -309,10 +285,7 @@ function PacRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-xs text-slate-100">{pac.name}</span>
-          <span className="text-[10px] text-slate-500">
-            {pac.category_label} · {pac.gift_count} {pac.gift_count === 1 ? 'gift' : 'gifts'} ·{' '}
-            {formatDateRange(pac.first_date, pac.last_date)}
-          </span>
+          <span className="text-[10px] text-slate-500">{pacMeta(pac)}</span>
         </span>
         <span className="shrink-0 text-xs tabular-nums text-slate-200">{formatMoney(pac.total)}</span>
       </button>
@@ -335,12 +308,7 @@ function PacGifts({
 
   useEffect(() => {
     const controller = new AbortController()
-    const params = pacParams(election)
-    params.set('pac_key', pac.pac_key)
-    apiFetch(
-      `/api/officials/${encodeURIComponent(officialId)}/finance/pacs/gifts?${params}`,
-      { signal: controller.signal },
-    )
+    apiFetch(pacGiftsPath(officialId, election, pac.pac_key), { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load gifts (${res.status})`)
@@ -385,7 +353,7 @@ function PacGifts({
       {pac.committee_id ? (
         <li>
           <a
-            href={`https://www.fec.gov/data/committee/${pac.committee_id}/`}
+            href={fecCommitteeUrl(pac.committee_id)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-0.5 text-emerald-400 hover:text-emerald-300"

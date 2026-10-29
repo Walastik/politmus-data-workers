@@ -23,7 +23,8 @@ native code, Expo Go is not enough: build a development client with
 - `src/app/`: routes. `(tabs)/` mirrors the web app's sections (Now, Feed,
   My Reps, Congress, Bills). `member/[id]` and `bill/[id]` are the
   profiles (the web app's drawers), pushed on the stack from any screen;
-  `bill/[id]/voters` is the per-party vote list, `candidates` every race this
+  `bill/[id]/voters` is the per-party vote list, `member/[id]/pacs` the PAC
+  explorer, `candidates` every race this
   cycle, and `voting` every voting site and election office for the address.
 - `src/components/`: UI. `Name.web.tsx` beside `Name.tsx` replaces it on web
   only (see `AccountButton`). `profile/` holds the profile sections.

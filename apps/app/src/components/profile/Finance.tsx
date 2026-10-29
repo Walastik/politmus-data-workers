@@ -19,10 +19,11 @@ import {
   raceCandidateDetail,
 } from '@politmus/core/campaignFinance'
 import { partyShort, raceTitle, type FinanceElection, type OutsideSpender, type PeerComparison, type Race } from '@politmus/core/types'
+import { router } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
-import { openUrl, profileShareUrl } from '@/lib/links'
+import { openUrl } from '@/lib/links'
 import { useFinance, usePacSummary } from '@/lib/queries'
 
 import { Icons } from '../icons'
@@ -288,12 +289,17 @@ function PacSummaryView({ officialId, election }: { officialId: string; election
         ))}
       </View>
       <Pressable
-        onPress={() => openUrl(profileShareUrl('official', officialId))}
-        accessibilityRole="link"
+        onPress={() =>
+          router.push({
+            pathname: '/member/[id]/pacs',
+            params: { id: officialId, candidate: election.fec_candidate_id, year: String(election.election_year) },
+          })
+        }
+        accessibilityRole="button"
         className="mt-3 flex-row items-center gap-1.5 self-start rounded-md border border-emerald-500/40 px-2.5 py-1"
       >
         <Icons.ListFilter size={14} colorClassName="accent-emerald-300" />
-        <Text className="text-xs font-medium text-emerald-300">All {summary.pac_count} PACs on politmus.com</Text>
+        <Text className="text-xs font-medium text-emerald-300">View all {summary.pac_count} PACs</Text>
       </Pressable>
       <Explainer>{EXPLAINERS.pacs}</Explainer>
     </View>

@@ -2,6 +2,7 @@ import { feedPath } from '@politmus/core/feed'
 import { billsPath, type BillFilters } from '@politmus/core/billsList'
 import { pacParams } from '@politmus/core/campaignFinance'
 import { racesPath, type RaceFilters } from '@politmus/core/candidates'
+import { PAC_PAGE_SIZE, pacGiftsPath, pacListPath, type PacSort } from '@politmus/core/pacExplorer'
 import { CURRENT_MEMBERS_PATH, rosterPath } from '@politmus/core/congress'
 import type {
   Bill,
@@ -11,6 +12,8 @@ import type {
   Official,
   OfficialDetail,
   OfficialFinance,
+  PacGift,
+  PacList,
   PacSummary,
   RosterStatusFilter,
   RacesPage,
@@ -114,7 +117,7 @@ export function useFinance(officialId: string, enabled: boolean) {
 export function usePacSummary(officialId: string, election: FinanceElection) {
   const api = useApi()
   return useQuery({
-    queryKey: ['pacs', officialId, pacParams(election)],
+    queryKey: ['pacs', officialId, pacParams(election).toString()],
     queryFn: ({ signal }) =>
       api.json<PacSummary>(`/api/officials/${encodeURIComponent(officialId)}/finance/pacs?${pacParams(election)}`, { signal }),
   })
@@ -168,6 +171,34 @@ export function useRaceList(filters: RaceFilters, limit: number) {
     queryKey: ['races', 'list', filters, limit],
     queryFn: ({ signal }) => api.json<RacesPage>(racesPath(filters, limit), { signal }),
     placeholderData: (previous) => previous,
+  })
+}
+
+export function usePacList(
+  officialId: string,
+  election: FinanceElection | null,
+  filters: { sort: PacSort; query: string; category: string | null },
+) {
+  const api = useApi()
+  return useInfiniteQuery({
+    queryKey: ['pac-list', officialId, election && pacParams(election).toString(), filters],
+    enabled: Boolean(election),
+    queryFn: ({ pageParam, signal }) =>
+      api.json<PacList>(pacListPath(officialId, election!, { ...filters, offset: pageParam }), { signal }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0)
+      return loaded < last.total_count && last.items.length === PAC_PAGE_SIZE ? loaded : undefined
+    },
+    placeholderData: (previous) => previous,
+  })
+}
+
+export function usePacGifts(officialId: string, election: FinanceElection, pacKey: string) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['pac-gifts', officialId, pacParams(election).toString(), pacKey],
+    queryFn: ({ signal }) => api.json<PacGift[]>(pacGiftsPath(officialId, election, pacKey), { signal }),
   })
 }
 
