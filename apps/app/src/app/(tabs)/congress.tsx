@@ -20,6 +20,7 @@ import {
   type Official,
   type RosterStatusFilter,
 } from '@politmus/core/types'
+import { router } from 'expo-router'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native'
 
@@ -27,7 +28,6 @@ import { Icons } from '@/components/icons'
 import MemberRow from '@/components/MemberRow'
 import OptionSheet from '@/components/OptionSheet'
 import { Chip, SearchField } from '@/components/ui'
-import { openSitePath } from '@/lib/links'
 import { useCurrentMembers, useRoster } from '@/lib/queries'
 
 const STATE_CHOICES = [{ value: '', label: 'All states' }, ...STATE_OPTIONS.map((s) => ({ value: s.name, label: s.name }))]
@@ -49,7 +49,7 @@ export default function CongressScreen() {
     <View className="gap-4 px-4 pt-4 pb-3">
       <Text className="text-sm text-slate-400">
         Every current member of the Senate and House, with their Politmus Score. Running this cycle?{' '}
-        <Text onPress={() => openSitePath('/candidates')} className="text-blue-400">
+        <Text onPress={() => router.push('/candidates')} className="text-blue-400">
           See the candidates
         </Text>
         .

@@ -1,6 +1,7 @@
 import { feedPath } from '@politmus/core/feed'
 import { billsPath, type BillFilters } from '@politmus/core/billsList'
 import { pacParams } from '@politmus/core/campaignFinance'
+import { racesPath, type RaceFilters } from '@politmus/core/candidates'
 import { CURRENT_MEMBERS_PATH, rosterPath } from '@politmus/core/congress'
 import type {
   Bill,
@@ -66,10 +67,7 @@ export function useRaces(stateCode: string | null) {
     queryKey: ['races', stateCode],
     enabled: Boolean(stateCode),
     queryFn: async ({ signal }) => {
-      const page = await api.json<RacesPage>(
-        `/api/candidates/races?state=${encodeURIComponent(stateCode ?? '')}&limit=100`,
-        { signal },
-      )
+      const page = await api.json<RacesPage>(racesPath({ state: stateCode ?? '' }, 100), { signal })
       return page.items ?? []
     },
     staleTime: 10 * 60 * 1000,
@@ -159,6 +157,16 @@ export function useRoster(filters: { status: RosterStatusFilter; party: string; 
   return useQuery({
     queryKey: ['officials', 'roster', filters],
     queryFn: ({ signal }) => officials(api, rosterPath(filters), signal),
+    placeholderData: (previous) => previous,
+  })
+}
+
+// Every race this cycle; `limit` grows by a page for "Show more races".
+export function useRaceList(filters: RaceFilters, limit: number) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['races', 'list', filters, limit],
+    queryFn: ({ signal }) => api.json<RacesPage>(racesPath(filters, limit), { signal }),
     placeholderData: (previous) => previous,
   })
 }

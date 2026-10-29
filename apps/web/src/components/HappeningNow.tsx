@@ -17,6 +17,7 @@ import { Link } from 'react-router-dom'
 
 import { apiJson } from '../api'
 import { buildElectionIcs, formatElectionDate } from '@politmus/core/calendar'
+import { racesPath } from '@politmus/core/candidates'
 import { downloadIcs } from '../downloadIcs'
 import {
   earlyVotingPhase,
@@ -139,7 +140,7 @@ export default function HappeningNow({
     }
     const controller = new AbortController()
     setRaces({ status: 'loading' })
-    apiJson<RacesPage>(`/api/candidates/races?state=${encodeURIComponent(stateCode)}&limit=100`, {
+    apiJson<RacesPage>(racesPath({ state: stateCode }, 100), {
       signal: controller.signal,
     })
       .then((data) => setRaces({ status: 'ok', data: data.items ?? [] }))

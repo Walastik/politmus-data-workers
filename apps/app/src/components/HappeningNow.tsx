@@ -236,7 +236,7 @@ export function OnYourBallot({
     <Section
       icon={<Icons.Vote size={16} colorClassName="accent-blue-400" />}
       title="On your ballot"
-      action={<LinkAction label="All candidates" onPress={() => openSitePath('/candidates')} />}
+      action={<LinkAction label="All candidates" onPress={() => router.push('/candidates')} />}
     >
       {races.status === 'loading' ? (
         <Muted>Loading your races…</Muted>
@@ -424,7 +424,7 @@ function ExternalAction({ label, url, tone, accent }: { label: string; url: stri
   )
 }
 
-function UnlistedNomineeCard({ nominee }: { nominee: BallotNominee }) {
+export function UnlistedNomineeCard({ nominee }: { nominee: BallotNominee }) {
   return (
     <View className="flex-row items-center gap-3 rounded-lg border border-dashed border-slate-700 bg-slate-800/50 p-3">
       <OfficialPhoto url={null} name={nominee.name} party={nominee.party} />

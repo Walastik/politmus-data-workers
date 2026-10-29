@@ -4,10 +4,21 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../api'
 import { formatCompactMoney, partyBarClass } from '@politmus/core/campaignFinance'
 import {
+  CANDIDATES_PAGE_SIZE,
+  CANDIDATE_TAG_TONES,
+  OFFICE_FILTERS,
+  candidateTags,
+  hiddenFilersNote,
+  raceRaisedLine,
+  raceReceiptShares,
+  racesPath,
+  racesSourceNote,
+  racesSummary,
+  type CandidateTagTone,
+} from '@politmus/core/candidates'
+import {
   PARTY_FILTERS,
   STATE_OPTIONS,
-  formatBillDate,
-  incumbencyLabel,
   officialFromRaceCandidate,
   partyBadgeClass,
   partyShort,
@@ -19,14 +30,6 @@ import {
   type RacesPage,
 } from '@politmus/core/types'
 import OfficialPhoto from './OfficialPhoto'
-
-const PAGE_SIZE = 20
-
-const OFFICE_FILTERS = [
-  { value: '', label: 'All' },
-  { value: 'S', label: 'Senate' },
-  { value: 'H', label: 'House' },
-] as const
 
 // Everyone running for Congress this cycle (fec_client.py candidates), grouped
 // by race. Candidates open in the member drawer; members running again open
@@ -65,16 +68,14 @@ export default function CandidatesPanel({
 
   useEffect(() => {
     const controller = new AbortController()
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE * pages) })
-    if (filterState) params.set('state', filterState)
-    if (filterOffice) params.set('office', filterOffice)
-    if (filterParty) params.set('party', filterParty)
-    if (debouncedQuery) params.set('q', debouncedQuery)
-    if (showAll) params.set('all', 'true')
+    const path = racesPath(
+      { state: filterState, office: filterOffice, party: filterParty, query: debouncedQuery, showAll },
+      CANDIDATES_PAGE_SIZE * pages,
+    )
 
     setLoading(true)
     setError(null)
-    apiFetch(`/api/candidates/races?${params.toString()}`, { signal: controller.signal })
+    apiFetch(path, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`Failed to load candidates (${res.status})`)
@@ -97,14 +98,6 @@ export default function CandidatesPanel({
   }, [debouncedQuery, filterOffice, filterParty, filterState, pages, showAll])
 
   const races = page?.items ?? []
-  const electionDate = races[0] ? formatBillDate(races[0].election_date) : null
-  const awaitingBallot = races.some((race) => !race.ballot_filtered)
-  // States whose November ballot comes from services/ballot_nominees.py, not FEC.
-  const curated = [
-    ...new Map(
-      races.filter((race) => race.ballot_source).map((race) => [race.state_name, race.ballot_source]),
-    ),
-  ]
 
   return (
     <div>
@@ -174,18 +167,8 @@ export default function CandidatesPanel({
         <p className="text-slate-400">No races match this filter.</p>
       ) : (
         <>
-          <p className="mb-1 text-sm text-slate-400">
-            {page?.total_count} race{page?.total_count === 1 ? '' : 's'}
-            {electionDate ? ` · General election ${electionDate}` : ''}
-            {filterState ? '' : ' · Most expensive first'}
-          </p>
-          <p className="mb-4 text-xs text-slate-500">
-            Source: {page?.source}.{' '}
-            {awaitingBallot
-              ? 'FEC does not record primary results, so until pre-general reports are in, races list everyone who raised at least $5,000, including candidates who lost a primary.'
-              : 'Races list the campaigns that filed a pre-general report, the ones on the November ballot.'}
-            {curated.map(([state, source]) => ` ${state} races list the November nominees (${source}).`)}
-          </p>
+          <p className="mb-1 text-sm text-slate-400">{page ? racesSummary(page, Boolean(filterState)) : null}</p>
+          <p className="mb-4 text-xs text-slate-500">{page ? racesSourceNote(page) : null}</p>
           <div className="space-y-4">
             {races.map((race) => (
               <RaceCard key={race.key} race={race} showAll={showAll} onSelect={onSelectOfficial} />
@@ -251,7 +234,8 @@ function RaceCard({
   showAll: boolean
   onSelect: (official: Official) => void
 }) {
-  const top = Math.max(...race.candidates.map((candidate) => candidate.receipts ?? 0), 1)
+  const share = raceReceiptShares(race)
+  const hidden = hiddenFilersNote(race)
   return (
     <section
       className="rounded-xl border border-slate-700 bg-slate-800/40 p-4"
@@ -260,8 +244,7 @@ function RaceCard({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-base font-semibold">{raceTitle(race)}</h3>
         <p className="text-xs text-slate-400">
-          {formatCompactMoney(race.total_receipts)} raised by {race.candidates.length} candidate
-          {race.candidates.length === 1 ? '' : 's'}
+          {raceRaisedLine(race)}
         </p>
       </div>
       <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -269,7 +252,7 @@ function RaceCard({
           <li key={candidate.fec_candidate_id}>
             <CandidateCard
               candidate={candidate}
-              share={(candidate.receipts ?? 0) / top}
+              share={share(candidate)}
               showBallot={!race.ballot_filtered}
               onClick={() => onSelect(officialFromRaceCandidate(candidate, race))}
             />
@@ -281,16 +264,7 @@ function RaceCard({
           </li>
         ))}
       </ul>
-      {race.hidden_count > 0 && !showAll ? (
-        <p className="mt-3 text-xs text-slate-500">
-          {race.hidden_count} more filer{race.hidden_count === 1 ? '' : 's'} not shown
-          {race.ballot_source
-            ? ': not on the November ballot.'
-            : race.ballot_filtered
-              ? ': no pre-general report, so not on the November ballot.'
-              : ': raised under $5,000.'}
-        </p>
-      ) : null}
+      {hidden && !showAll ? <p className="mt-3 text-xs text-slate-500">{hidden}</p> : null}
     </section>
   )
 }
@@ -308,7 +282,6 @@ function CandidateCard({
 }) {
   const name = candidate.name ?? candidate.fec_candidate_id
   const party = candidate.party ?? ''
-  const incumbency = incumbencyLabel(candidate.incumbent_challenge)
   return (
     <button
       type="button"
@@ -327,13 +300,11 @@ function CandidateCard({
             <span className="truncate text-sm font-semibold">{name}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
-            {incumbency === 'Incumbent' ? <Tag tone="amber">Incumbent</Tag> : null}
-            {candidate.current_member && incumbency !== 'Incumbent' ? (
-              <Tag tone="slate">In Congress</Tag>
-            ) : null}
-            {showBallot && candidate.in_general_election ? (
-              <Tag tone="emerald">On Nov. ballot</Tag>
-            ) : null}
+            {candidateTags(candidate, showBallot).map((tag) => (
+              <Tag key={tag.label} tone={tag.tone}>
+                {tag.label}
+              </Tag>
+            ))}
           </div>
         </div>
       </div>
@@ -378,14 +349,9 @@ export function UnlistedNomineeCard({ nominee }: { nominee: BallotNominee }) {
   )
 }
 
-function Tag({ tone, children }: { tone: 'amber' | 'emerald' | 'slate'; children: string }) {
-  const tones = {
-    amber: 'border-amber-500/40 bg-amber-900/30 text-amber-200',
-    emerald: 'border-emerald-500/40 bg-emerald-900/30 text-emerald-200',
-    slate: 'border-slate-600 bg-slate-900/60 text-slate-300',
-  }
+function Tag({ tone, children }: { tone: CandidateTagTone; children: string }) {
   return (
-    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${tones[tone]}`}>
+    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${CANDIDATE_TAG_TONES[tone]}`}>
       {children}
     </span>
   )
