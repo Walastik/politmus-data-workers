@@ -7,7 +7,7 @@ declare global {
   }
 }
 
-const api = createApiClient({
+export const api = createApiClient({
   baseUrl: import.meta.env.VITE_API_URL ?? '',
   getToken: async () => window.Clerk?.session?.getToken() ?? null,
 })

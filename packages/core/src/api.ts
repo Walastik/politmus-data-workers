@@ -37,11 +37,28 @@ export function createApiClient({ baseUrl, getToken }: ApiClientOptions): ApiCli
       // fall through to the status check
     }
     if (!response.ok) {
-      const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : null
-      throw new Error(typeof detail === 'string' && detail ? detail : `Request failed (${response.status})`)
+      throw new Error(apiDetail(body, `Request failed (${response.status})`))
     }
     return body as T
   }
 
   return { url, fetch: apiFetch, json }
+}
+
+// FastAPI's error message: `detail` as a string, or the first validation msg.
+export function apiDetail(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object' || !('detail' in body)) {
+    return fallback
+  }
+  const detail = (body as { detail: unknown }).detail
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail
+  }
+  if (Array.isArray(detail) && detail[0] && typeof detail[0] === 'object') {
+    const first = detail[0] as { msg?: unknown }
+    if (typeof first.msg === 'string' && first.msg.trim()) {
+      return first.msg
+    }
+  }
+  return fallback
 }

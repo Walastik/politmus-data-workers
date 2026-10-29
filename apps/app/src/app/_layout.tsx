@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { Platform } from 'react-native'
 
 import { ApiProvider } from '@/lib/api'
+import { CivicLocationProvider } from '@/lib/civicLocation'
 
 const PUBLISHABLE_KEY: string = (() => {
   const key = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -30,10 +31,12 @@ export default function RootLayout() {
     <ClerkProvider publishableKey={PUBLISHABLE_KEY} tokenCache={Platform.OS === 'web' ? undefined : tokenCache}>
       <QueryClientProvider client={queryClient}>
         <ApiProvider>
-          <ThemeProvider value={theme}>
-            <StatusBar style="light" />
-            <Stack screenOptions={{ headerShown: false }} />
-          </ThemeProvider>
+          <CivicLocationProvider>
+            <ThemeProvider value={theme}>
+              <StatusBar style="light" />
+              <Stack screenOptions={{ headerShown: false }} />
+            </ThemeProvider>
+          </CivicLocationProvider>
         </ApiProvider>
       </QueryClientProvider>
     </ClerkProvider>

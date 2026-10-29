@@ -38,7 +38,13 @@
         }
       ],
       "@clerk/expo",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Politmus uses your location only to look up your districts, representatives and voting sites."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -47,6 +47,8 @@ describe('createApiClient', () => {
     await expect(api.json('/api/feed')).resolves.toEqual({ items: [] })
     fetchMock.mockResolvedValueOnce(new Response('{"detail":"Address not found"}', { status: 404 }))
     await expect(api.json('/api/lookup')).rejects.toThrow('Address not found')
+    fetchMock.mockResolvedValueOnce(new Response('{"detail":[{"msg":"address is required"}]}', { status: 422 }))
+    await expect(api.json('/api/lookup')).rejects.toThrow('address is required')
     fetchMock.mockResolvedValueOnce(new Response('oops', { status: 502 }))
     await expect(api.json('/api/lookup')).rejects.toThrow('Request failed (502)')
   })

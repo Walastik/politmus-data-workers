@@ -23,9 +23,3 @@ export function useSavedAddress() {
 
   return { isLoaded, canSave: Boolean(user), savedAddress, saveAddress }
 }
-
-export function sameAddress(a: string | null | undefined, b: string | null | undefined) {
-  const normalize = (value: string | null | undefined) =>
-    (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase()
-  return normalize(a) === normalize(b)
-}

@@ -21,11 +21,13 @@ native code, Expo Go is not enough: build a development client with
 ## Layout
 
 - `src/app/`: routes. `(tabs)/` mirrors the web app's sections (Now, Feed,
-  My Reps, Congress, Bills); screens not ported yet link to politmus.com.
+  My Reps, Congress, Bills). Now, Feed and My Reps are ported; Congress, Bills
+  and member/candidate profiles open politmus.com for now.
 - `src/components/`: UI. `Name.web.tsx` beside `Name.tsx` replaces it on web
   only (see `AccountButton`).
-- `src/lib/`: the API provider (Clerk token on every request) and TanStack
-  Query hooks.
+- `src/lib/`: the API provider (Clerk token on every request), TanStack Query
+  hooks, and the device side of the shared location provider
+  (`locationPlatform.ts`: SecureStore and expo-location).
 
 Put anything without React Native or DOM code in `packages/core` so the web app
 uses it too.

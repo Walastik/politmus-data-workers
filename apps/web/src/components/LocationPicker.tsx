@@ -1,7 +1,7 @@
 import { LocateFixed, Search } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 
-import { canUseGeolocation, suggestAddresses, type PhotonResult } from '../geo'
+import { suggestAddresses, type PhotonResult } from '@politmus/core/geo'
 import { useCivicLocation } from '../useCivicLocation'
 
 // Address box with suggestions and a "Use my location" button. Sets the app's
@@ -19,7 +19,7 @@ export default function LocationPicker({
   onCancel?: () => void
   autoFocus?: boolean
 }) {
-  const { setAddress, locateMe, locating, locationError } = useCivicLocation()
+  const { setAddress, locateMe, canLocate, locating, locationError } = useCivicLocation()
   const [value, setValue] = useState(initial)
   const [suggestions, setSuggestions] = useState<PhotonResult[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -98,7 +98,7 @@ export default function LocationPicker({
             </ul>
           ) : null}
         </label>
-        {canUseGeolocation() ? (
+        {canLocate ? (
           <button
             type="button"
             onClick={useLocation}

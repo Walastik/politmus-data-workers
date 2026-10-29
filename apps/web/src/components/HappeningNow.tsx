@@ -38,7 +38,6 @@ import {
   partyBadgeClass,
   partyShort,
   type Bill,
-  type CivicLookup,
   type FeedItem,
   type FeedPage,
   type Official,
@@ -46,21 +45,34 @@ import {
   type RaceCandidate,
   type RacesPage,
   type VoterInfo,
-  type VoterLocation,
 } from '@politmus/core/types'
 import { useCivicLocation, type Load } from '../useCivicLocation'
-import { directionsUrl, formatMiles, locationAddress, rankSites, type RankedSite } from '@politmus/core/votingSites'
+import { directionsUrl, formatMiles, locationAddress, type RankedSite } from '@politmus/core/votingSites'
+import {
+  FEED_PREVIEW_SIZE,
+  UNCONFIRMED_CANDIDATES_SHOWN,
+  ballotRacesFor,
+  ballotUrlFrom,
+  beforeYouVoteLinks,
+  candidateBackground,
+  daysAwayLabel,
+  districtLabel,
+  electionHeadline,
+  errorMessage,
+  houseDistrict,
+  incompleteRaceReason,
+  isElectionFocus,
+  moreSitesNote,
+  noSitesMessage,
+  uniqueCandidates,
+  votingSitesView,
+} from '@politmus/core/happeningNow'
 import { formatCompactMoney } from '@politmus/core/campaignFinance'
 import { UnlistedNomineeCard } from './CandidatesPanel'
 import FeedItemCard from './FeedItemCard'
 import LocationBar from './LocationBar'
 import OfficialPhoto from './OfficialPhoto'
 import VotingLocations from './VotingLocations'
-
-const CLOSEST_SITES_SHOWN = 3
-// Within this many days of Election Day the page is about the election; before
-// that it leads with what Congress has been doing.
-const ELECTION_FOCUS_DAYS = 60
 
 // The first page after sign-in (and open to everyone): what's going on in the
 // visitor's election right now, where to vote, who is on the ballot, who
@@ -145,13 +157,10 @@ export default function HappeningNow({
   const today = localToday()
   const electionDate = voterData?.election?.date ?? nextCalendarElection(today)
   const daysToElection = electionDate ? daysUntil(electionDate) : null
-  const electionFocus = daysToElection !== null && daysToElection >= 0 && daysToElection <= ELECTION_FOCUS_DAYS
+  const electionFocus = isElectionFocus(daysToElection)
   const window = getEarlyVotingWindow(stateCode, electionDate)
   const phase = window ? earlyVotingPhase(window, today) : null
-  const ballotRaces =
-    races.status === 'ok'
-      ? races.data.filter((race) => race.office === 'S' || (race.office === 'H' && race.district === district))
-      : []
+  const ballotRaces = races.status === 'ok' ? ballotRacesFor(races.data, district) : []
   const hasPlace = Boolean(location.place) && lookup.status !== 'error'
 
   if (!location.ready) {
@@ -180,7 +189,7 @@ export default function HappeningNow({
             : 'Enter an address, or use your location, to see who represents you and what’s on your ballot next.'
         }
         submitLabel="Show my election"
-        detail={district !== null && stateCode ? `${stateCode}-${district === 0 ? 'AL' : district}` : null}
+        detail={districtLabel(stateCode, district)}
       />
 
       {lookup.status === 'error' ? <p className="text-red-400">{lookup.message}</p> : null}
@@ -199,7 +208,7 @@ export default function HappeningNow({
             races={races}
             ballotRaces={ballotRaces}
             stateCode={stateCode}
-            ballotUrl={voterData?.adminBodies.local?.ballotInfoUrl ?? voterData?.adminBodies.state?.ballotInfoUrl ?? null}
+            ballotUrl={ballotUrlFrom(voterData)}
             onSelectOfficial={onSelectOfficial}
           />
           <BeforeYouVote voterInfo={voterData} stateCode={stateCode} />
@@ -238,8 +247,6 @@ function QuietHero({ placeName }: { placeName: string | null }) {
     </section>
   )
 }
-
-const FEED_PREVIEW_SIZE = 5
 
 // The latest feed items, as the next thing to read after the election.
 function FeedPreview({
@@ -318,32 +325,13 @@ function ElectionHero({
       )
     : null
   const openStates = electionDate && !stateCode ? statesWithEarlyVotingOpen(electionDate, today) : []
-  const endLabel = window
-    ? window.end === window.electionDate
-      ? 'Election Day'
-      : formatShortDate(window.end)
-    : null
-  const daysLeft = window ? daysUntil(window.end) : null
-
-  let headline: string
-  let detail: string | null = null
-  if (window && phase?.phase === 'open') {
-    headline = `Early voting is open in ${stateName}`
-    detail = `Vote in person any day through ${endLabel}${
-      daysLeft === 0 ? ' (today is the last day)' : daysLeft !== null ? ` · ${daysLeft + 1} days left` : ''
-    }.`
-  } else if (window && phase?.phase === 'upcoming') {
-    headline = `Early voting in ${stateName} starts ${formatShortDate(window.start)}`
-    detail = phase.daysUntil === 1 ? 'That’s tomorrow.' : `That’s in ${phase.daysUntil} days.`
-  } else if (window && phase?.phase === 'ended') {
-    headline = `Early voting in ${stateName} has ended`
-    detail = 'You can still vote at your polling place on Election Day.'
-  } else if (openStates.length > 0) {
-    headline = `Early voting is open in ${openStates.length} states`
-    detail = 'Add your address to see your dates, closest voting sites and who is on your ballot.'
-  } else {
-    headline = electionName ?? 'Election Day is coming up'
-  }
+  const { headline, detail, endLabel } = electionHeadline({
+    window,
+    phase,
+    stateName,
+    openStateCount: openStates.length,
+    electionName,
+  })
 
   return (
     <section
@@ -388,10 +376,8 @@ function ElectionHero({
           <div className="shrink-0 rounded-lg border border-slate-700 bg-slate-900/60 p-3 sm:text-right">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Election Day</p>
             <p className="text-lg font-bold text-slate-100">{formatElectionDate(electionDate)}</p>
-            {daysToElection !== null && daysToElection >= 0 ? (
-              <p className="text-sm font-semibold text-blue-300">
-                {daysToElection === 0 ? 'Today' : daysToElection === 1 ? 'Tomorrow' : `${daysToElection} days away`}
-              </p>
+            {daysAwayLabel(daysToElection) ? (
+              <p className="text-sm font-semibold text-blue-300">{daysAwayLabel(daysToElection)}</p>
             ) : null}
             {ics ? (
               <button
@@ -427,28 +413,14 @@ function WhereToVote({
 }) {
   const resources = getVoterResources(stateCode)
   const data = voterInfo.status === 'ok' ? voterInfo.data : null
-  // Early voting sites while early voting is on (or ahead); Election Day
-  // polling places once it's over or when no early sites are listed.
-  const preferEarly = phase?.phase !== 'ended'
-  const early = data?.earlyVoteSites ?? []
-  const polling = data?.pollingLocations ?? []
-  const [kind, locations]: ['early' | 'polling', VoterLocation[]] =
-    preferEarly && early.length > 0
-      ? ['early', early]
-      : polling.length > 0
-        ? ['polling', polling]
-        : ['early', early]
-  const ranked = rankSites(locations, point)
-  const shown = ranked.slice(0, CLOSEST_SITES_SHOWN)
-  const sorted = shown.some((site) => site.miles !== null)
-  const totalSites = early.length + polling.length + (data?.dropOffLocations.length ?? 0)
-
-  const title = kind === 'early' ? 'Early voting sites' : 'Election Day polling places'
+  const sites = votingSitesView(data, phase, point)
+  const { shown, totalSites } = sites
+  const moreNote = moreSitesNote(sites)
 
   return (
     <Section
       icon={<MapPin className="h-4 w-4 text-blue-400" aria-hidden="true" />}
-      title={sorted ? `Closest ${title.toLowerCase()}` : title}
+      title={sites.title}
       action={
         data && data.uiState !== 'unavailable' ? (
           <LinkButton onClick={onToggleAll} expanded={expanded}>
@@ -469,11 +441,7 @@ function WhereToVote({
         />
       ) : shown.length === 0 ? (
         <NoSites
-          message={
-            data?.mailOnly
-              ? `${resources.name} votes by mail. Return your ballot by mail or at a drop-off site.`
-              : `${resources.name} hasn’t published voting sites for your address to Google yet.`
-          }
+          message={noSitesMessage(data, stateCode)}
           lookupUrl={resources.pollingPlaceUrl}
         />
       ) : (
@@ -485,15 +453,7 @@ function WhereToVote({
               </li>
             ))}
           </ul>
-          {ranked.length > shown.length ? (
-            <p className="mt-2 text-xs text-slate-500">
-              {sorted
-                ? `By straight-line distance from your address. ${ranked.length - shown.length} more ${
-                    kind === 'early' ? 'early voting sites' : 'polling places'
-                  } nearby.`
-                : `Showing ${shown.length} of ${ranked.length}.`}
-            </p>
-          ) : null}
+          {moreNote ? <p className="mt-2 text-xs text-slate-500">{moreNote}</p> : null}
         </>
       )}
       {expanded && data ? (
@@ -625,10 +585,6 @@ function OnYourBallot({
   )
 }
 
-// Candidates per race before "Show all", while the ballot isn't confirmed and a
-// race can still list a dozen primary candidates.
-const UNCONFIRMED_CANDIDATES_SHOWN = 6
-
 function BallotRace({
   race,
   ballotUrl,
@@ -639,14 +595,7 @@ function BallotRace({
   onSelectOfficial: (official: Official) => void
 }) {
   const [showAll, setShowAll] = useState(false)
-  // FEC sometimes lists one campaign under two candidate IDs; show it once.
-  const seen = new Set<string>()
-  const candidates = race.candidates.filter((candidate) => {
-    const key = `${(candidate.name ?? candidate.fec_candidate_id).toLowerCase()}|${candidate.party ?? ''}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  const candidates = uniqueCandidates(race)
   const limit = race.ballot_filtered || showAll ? candidates.length : UNCONFIRMED_CANDIDATES_SHOWN
   const shown = candidates.slice(0, limit)
   return (
@@ -687,9 +636,7 @@ function BallotRace({
 // Shown on any race whose list we can't vouch for as the whole ballot.
 function IncompleteRaceNote({ race, ballotUrl }: { race: Race; ballotUrl: string | null }) {
   const [open, setOpen] = useState(false)
-  const reason = race.ballot_source
-    ? 'We’ve confirmed the major-party nominees, but independent and third-party candidates come from news coverage and FEC filings, so some may be missing.'
-    : 'We haven’t confirmed this race’s nominees yet. This list comes from FEC filings, so it can include candidates who lost a primary and leave out candidates who haven’t filed with the FEC.'
+  const reason = incompleteRaceReason(race)
   return (
     <>
       <button
@@ -722,26 +669,7 @@ function IncompleteRaceNote({ race, ballotUrl }: { race: Race; ballotUrl: string
 }
 
 function BeforeYouVote({ voterInfo, stateCode }: { voterInfo: VoterInfo | null; stateCode: string | null }) {
-  const resources = getVoterResources(stateCode)
-  const local = voterInfo?.adminBodies.local
-  const state = voterInfo?.adminBodies.state
-  const links = [
-    {
-      label: 'Check that you’re registered',
-      url:
-        local?.electionRegistrationConfirmationUrl ??
-        state?.electionRegistrationConfirmationUrl ??
-        resources.registrationStatusUrl ??
-        resources.checkRegistrationUrl,
-    },
-    { label: 'See your sample ballot', url: local?.ballotInfoUrl ?? state?.ballotInfoUrl ?? null },
-    {
-      label: 'Official polling place lookup',
-      url: local?.votingLocationFinderUrl ?? state?.votingLocationFinderUrl ?? resources.pollingPlaceUrl ?? null,
-    },
-    { label: 'Voting by mail', url: local?.absenteeVotingInfoUrl ?? state?.absenteeVotingInfoUrl ?? null },
-  ].filter((link): link is { label: string; url: string } => Boolean(link.url))
-  const office = local ?? state
+  const { links, office } = beforeYouVoteLinks(voterInfo, stateCode)
 
   return (
     <Section icon={<Check className="h-4 w-4 text-blue-400" aria-hidden="true" />} title="Before you vote">
@@ -835,22 +763,6 @@ function LinkTo({ to, children }: { to: string; children: ReactNode }) {
   )
 }
 
-// The House district from the lookup's divisions (".../cd:7"; 0 is at-large).
-function houseDistrict(lookup: CivicLookup | null): number | null {
-  for (const division of lookup?.divisions ?? []) {
-    const match = /\/cd:(\d+)$/.exec(division.ocd_id)
-    if (match) return Number(match[1])
-  }
-  return null
-}
-
-function errorMessage(err: unknown, fallback: string) {
-  return err instanceof Error && err.message ? err.message : fallback
-}
-
-// Occupations too generic to tell a voter anything.
-const GENERIC_BACKGROUND = new Set(['politician'])
-
 // Who the candidate is and what they run on, readable without opening the drawer.
 function BallotCandidateCard({
   candidate,
@@ -862,10 +774,7 @@ function BallotCandidateCard({
   const name = candidate.name ?? candidate.fec_candidate_id
   const party = candidate.party ?? ''
   const incumbent = incumbencyLabel(candidate.incumbent_challenge) === 'Incumbent'
-  const background = (candidate.background ?? [])
-    .filter((item) => !GENERIC_BACKGROUND.has(item.toLowerCase()))
-    .slice(0, 2)
-    .map((item) => item.charAt(0).toUpperCase() + item.slice(1))
+  const background = candidateBackground(candidate)
   const issues = candidate.top_issues ?? []
 
   return (

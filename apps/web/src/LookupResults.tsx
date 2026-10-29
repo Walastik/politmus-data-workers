@@ -6,13 +6,18 @@ import OfficialPhoto from './components/OfficialPhoto'
 import ScoreHeadline from './components/ScoreHeadline'
 
 import {
+  lookupSections,
+  representativeDistrict,
+  representativeKey,
+  representativeState,
+  websiteLabel,
+} from '@politmus/core/representatives'
+import {
   civicRepresentativeToOfficial,
-  groupCivicRepresentatives,
   isCivicStateLevel,
   officialName,
   partyBadgeClass,
   partyShort,
-  stateNameFromAbbr,
   type CivicLookup,
   type CivicRepresentative,
   type Official,
@@ -26,10 +31,7 @@ export default function LookupResults({
   lookup: CivicLookup
   onSelectOfficial: (official: Official) => void
 }) {
-  const grouped = groupCivicRepresentatives(lookup.representatives)
-  const fallbackState = stateNameFromAbbr(lookup.normalized_input?.state)
-  const federal = [...grouped.senators, ...grouped.house]
-  const state = [...grouped.governors, ...grouped.stateSenators, ...grouped.stateHouse]
+  const { fallbackState, federal, state, other } = lookupSections(lookup)
 
   return (
     <div className="space-y-10">
@@ -61,10 +63,10 @@ export default function LookupResults({
         </OfficeSection>
       ) : null}
 
-      {grouped.other.length ? (
+      {other.length ? (
         <OfficeSection title="Other offices">
           <RepresentativeGrid
-            representatives={grouped.other}
+            representatives={other}
             fallbackState={fallbackState}
             onSelectOfficial={onSelectOfficial}
           />
@@ -82,17 +84,15 @@ export function FederalRepsStrip({
   lookup: CivicLookup
   onSelectOfficial: (official: Official) => void
 }) {
-  const grouped = groupCivicRepresentatives(lookup.representatives)
-  const fallbackState = stateNameFromAbbr(lookup.normalized_input?.state)
-  const federal = [...grouped.senators, ...grouped.house]
+  const { fallbackState, federal } = lookupSections(lookup)
   if (federal.length === 0) return null
   return (
     <ul className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       {federal.map((rep) => {
-        const official = civicRepresentativeToOfficial(rep, officialState(rep, fallbackState))
+        const official = civicRepresentativeToOfficial(rep, representativeState(rep, fallbackState))
         const name = officialName(rep)
         return (
-          <li key={`${rep.id ?? rep.name}-${rep.office}`}>
+          <li key={representativeKey(rep)}>
             <button
               type="button"
               disabled={!official}
@@ -147,7 +147,7 @@ function RepresentativeGrid({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {representatives.map((representative) => (
         <RepresentativeCard
-          key={`${representative.id ?? representative.name}-${representative.office}`}
+          key={representativeKey(representative)}
           representative={representative}
           fallbackState={fallbackState}
           onSelectOfficial={onSelectOfficial}
@@ -169,16 +169,10 @@ function RepresentativeCard({
   const party = representative.party || ''
   const phone = representative.phones[0]
   const website = representative.urls[0]
-  const stateLabel = officialState(representative, fallbackState)
+  const stateLabel = representativeState(representative, fallbackState)
   const official = civicRepresentativeToOfficial(representative, stateLabel)
   const name = officialName(representative)
-  const district =
-    representative.division_name &&
-    (representative.division_id?.includes('/cd:') ||
-      representative.division_id?.includes('/sldu:') ||
-      representative.division_id?.includes('/sldl:'))
-      ? representative.division_name
-      : null
+  const district = representativeDistrict(representative)
 
   return (
     <article className="flex h-full flex-col rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm">
@@ -243,27 +237,4 @@ function RepresentativeCard({
       </div>
     </article>
   )
-}
-
-function officialState(
-  representative: CivicRepresentative,
-  fallbackState: string,
-) {
-  if (
-    representative.division_name &&
-    !representative.division_id?.includes('/cd:') &&
-    !representative.division_id?.includes('/sldu:') &&
-    !representative.division_id?.includes('/sldl:')
-  ) {
-    return representative.division_name
-  }
-  return fallbackState
-}
-
-function websiteLabel(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '')
-  } catch {
-    return url
-  }
 }

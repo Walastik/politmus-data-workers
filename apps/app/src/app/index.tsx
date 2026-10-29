@@ -1,6 +1,6 @@
 import { Redirect } from 'expo-router'
 
-// Feed is the first screen ported; switch to /now once Happening Now is.
+// Happening Now is the home screen, as on the web app.
 export default function Index() {
-  return <Redirect href="/feed" />
+  return <Redirect href="/now" />
 }
