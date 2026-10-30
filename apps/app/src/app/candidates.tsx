@@ -32,6 +32,7 @@ import OfficialPhoto from '@/components/OfficialPhoto'
 import OptionSheet from '@/components/OptionSheet'
 import { Chip, SearchField } from '@/components/ui'
 import { openProfile } from '@/lib/links'
+import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { useRaceList } from '@/lib/queries'
 
 const STATE_CHOICES = [{ value: '', label: 'All states' }, ...STATE_OPTIONS.map((s) => ({ value: s.abbr, label: s.name }))]
@@ -167,16 +168,21 @@ function SourceNote({ text }: { text: string }) {
 function RaceCard({ race, showAll }: { race: Race; showAll: boolean }) {
   const share = raceReceiptShares(race)
   const hidden = hiddenFilersNote(race)
+  const columns = useGridColumns()
   return (
     <View accessibilityLabel={raceTitle(race)} className="mx-4 mb-4 rounded-xl border border-slate-700 bg-slate-800/40 p-4">
       <Text className="text-base font-semibold text-slate-100">{raceTitle(race)}</Text>
       <Text className="mt-0.5 text-xs text-slate-400">{raceRaisedLine(race)}</Text>
-      <View className="mt-3 gap-3">
+      <View className={columns > 1 ? '-mx-1.5 mt-1.5 flex-row flex-wrap' : 'mt-3 gap-3'}>
         {race.candidates.map((candidate) => (
-          <CandidateCard key={candidate.fec_candidate_id} candidate={candidate} race={race} share={share(candidate)} />
+          <View key={candidate.fec_candidate_id} style={gridCellStyle(columns)}>
+            <CandidateCard candidate={candidate} race={race} share={share(candidate)} />
+          </View>
         ))}
         {(race.unlisted_nominees ?? []).map((nominee) => (
-          <UnlistedNomineeCard key={nominee.name} nominee={nominee} />
+          <View key={nominee.name} style={gridCellStyle(columns)}>
+            <UnlistedNomineeCard nominee={nominee} />
+          </View>
         ))}
       </View>
       {hidden && !showAll ? <Text className="mt-3 text-xs text-slate-500">{hidden}</Text> : null}

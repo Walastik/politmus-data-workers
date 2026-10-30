@@ -17,6 +17,7 @@ import { BillTags } from '@/components/profile/BillSections'
 import VoteTally from '@/components/profile/VoteTally'
 import { Chip, SearchField } from '@/components/ui'
 import { openBill } from '@/lib/links'
+import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { useBills } from '@/lib/queries'
 
 // Legislation moving through Congress; native counterpart of the web Bills page.
@@ -25,6 +26,8 @@ export default function BillsScreen() {
   const [filters, setFilters] = useState<BillFilters>(DEFAULT_BILL_FILTERS)
   const [showFilters, setShowFilters] = useState(false)
   const bills = useBills(filters)
+  const columns = useGridColumns(2)
+  const grid = columns > 1
 
   // Debounce the search box into the filters.
   useEffect(() => {
@@ -89,10 +92,18 @@ export default function BillsScreen() {
   return (
     <View className="flex-1 bg-slate-900">
       <FlatList
+        // numColumns can't change on a mounted list.
+        key={`bills-${columns}`}
+        numColumns={columns}
+        contentContainerClassName={grid ? 'px-2.5' : undefined}
         data={items}
         keyExtractor={(bill) => bill.id}
-        renderItem={({ item }) => <BillCard bill={item} />}
-        ListHeaderComponent={header}
+        renderItem={({ item }) => (
+          <View style={gridCellStyle(columns)}>
+            <BillCard bill={item} grid={grid} />
+          </View>
+        )}
+        ListHeaderComponent={<View className={grid ? '-mx-2.5' : undefined}>{header}</View>}
         keyboardShouldPersistTaps="handled"
         className={bills.isPlaceholderData ? 'opacity-50' : ''}
         ListEmptyComponent={
@@ -115,7 +126,7 @@ export default function BillsScreen() {
   )
 }
 
-function BillCard({ bill }: { bill: Bill }) {
+function BillCard({ bill, grid }: { bill: Bill; grid: boolean }) {
   const { isSignedIn } = useAuth()
   const sponsor = sponsorText(bill)
   const dates = billDates(bill)
@@ -125,7 +136,7 @@ function BillCard({ bill }: { bill: Bill }) {
       onPress={() => openBill(bill)}
       accessibilityRole="button"
       accessibilityLabel={`Open details for ${bill.title || bill.id}`}
-      className="mx-4 mb-3 rounded-lg border border-slate-700 bg-slate-800 p-4 active:border-slate-500"
+      className={`rounded-lg border border-slate-700 bg-slate-800 p-4 active:border-slate-500 ${grid ? 'h-full' : 'mx-4 mb-3'}`}
     >
       <View className="flex-row flex-wrap items-start justify-between gap-2">
         <Text className="font-mono text-xs text-slate-400">{bill.id}</Text>

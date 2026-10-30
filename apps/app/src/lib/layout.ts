@@ -12,10 +12,10 @@ export function useWideLayout() {
 
 export const wideContentStyle = { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center' } as const
 
-// Lists of small cards (Congress, Candidates) go three across on desktop web;
-// phones, narrow windows and the native app keep one column.
-export function useGridColumns() {
-  return useWideLayout() ? 3 : 1
+// Lists of cards go `wideColumns` across on desktop web (three for small member
+// cards, two for bills); phones, narrow windows and the native app keep one.
+export function useGridColumns(wideColumns = 3) {
+  return useWideLayout() ? wideColumns : 1
 }
 
 // One grid cell: a fraction of the row, with half the gap on each side (the
