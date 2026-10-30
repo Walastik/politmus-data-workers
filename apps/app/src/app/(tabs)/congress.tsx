@@ -28,6 +28,7 @@ import { Icons } from '@/components/icons'
 import MemberRow from '@/components/MemberRow'
 import OptionSheet from '@/components/OptionSheet'
 import { Chip, SearchField } from '@/components/ui'
+import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { useCurrentMembers, useRoster } from '@/lib/queries'
 
 const STATE_CHOICES = [{ value: '', label: 'All states' }, ...STATE_OPTIONS.map((s) => ({ value: s.name, label: s.name }))]
@@ -157,21 +158,29 @@ function ChamberSummary({ title, members, note }: { title: string; members: Offi
 }
 
 function SenateView({ header, members }: { header: ReactElement; members: Official[] }) {
+  const columns = useGridColumns()
+  const grid = columns > 1
   return (
     <FlatList
+      // numColumns can't change on a mounted list.
+      key={`senate-${columns}`}
+      numColumns={columns}
       className="flex-1 bg-slate-900"
+      contentContainerClassName={grid ? 'px-2.5' : undefined}
       keyboardShouldPersistTaps="handled"
       data={byState(members)}
       keyExtractor={([state]) => state}
-      ListHeaderComponent={header}
+      ListHeaderComponent={<View className={grid ? '-mx-2.5' : undefined}>{header}</View>}
       ListEmptyComponent={<Text className="px-4 text-slate-400">No senators match these filters.</Text>}
       renderItem={({ item: [state, senators] }) => (
-        <View className="mx-4 mb-3 rounded-lg border border-slate-700 bg-slate-800/40 p-3">
-          <Text className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{state}</Text>
-          <View className="gap-1.5">
-            {senators.map((senator) => (
-              <MemberRow key={senator.id} official={senator} />
-            ))}
+        <View style={gridCellStyle(columns)}>
+          <View className={`rounded-lg border border-slate-700 bg-slate-800/40 p-3 ${grid ? 'h-full' : 'mx-4 mb-3'}`}>
+            <Text className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{state}</Text>
+            <View className="gap-1.5">
+              {senators.map((senator) => (
+                <MemberRow key={senator.id} official={senator} />
+              ))}
+            </View>
           </View>
         </View>
       )}
@@ -180,6 +189,7 @@ function SenateView({ header, members }: { header: ReactElement; members: Offici
 }
 
 function HouseView({ header, members, expandAll }: { header: ReactElement; members: Official[]; expandAll: boolean }) {
+  const columns = useGridColumns()
   const [open, setOpen] = useState<Set<string>>(new Set())
   const groups = byState(members)
   const allOpen = expandAll || groups.every(([state]) => open.has(state))
@@ -235,11 +245,21 @@ function HouseView({ header, members, expandAll }: { header: ReactElement; membe
               <Text className="text-xs text-slate-400">{summary.label}</Text>
             </Pressable>
             {isOpen ? (
-              <View className="gap-1.5 pb-4">
-                {summary.byDistrict.map((member) => (
-                  <MemberRow key={member.id} official={member} subtitle={houseSeatLabel(member)} />
-                ))}
-              </View>
+              columns > 1 ? (
+                <View className="-mx-1.5 flex-row flex-wrap pb-3">
+                  {summary.byDistrict.map((member) => (
+                    <View key={member.id} style={gridCellStyle(columns)}>
+                      <MemberRow official={member} subtitle={houseSeatLabel(member)} />
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View className="gap-1.5 pb-4">
+                  {summary.byDistrict.map((member) => (
+                    <MemberRow key={member.id} official={member} subtitle={houseSeatLabel(member)} />
+                  ))}
+                </View>
+              )
             ) : null}
           </View>
         )
@@ -254,16 +274,21 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
   const [hasPositionsOnly, setHasPositionsOnly] = useState(false)
   const [sort, setSort] = useState<RosterSort>('name')
   const roster = useRoster({ status, party, stateName, query })
+  const columns = useGridColumns()
+  const grid = columns > 1
   const visible = useMemo(() => sortRoster(roster.data ?? [], { sort, hasPositionsOnly }), [roster.data, sort, hasPositionsOnly])
 
   return (
     <FlatList
+      key={`roster-${columns}`}
+      numColumns={columns}
+      contentContainerClassName={grid ? 'px-2.5' : undefined}
       className={`flex-1 bg-slate-900 ${roster.isPlaceholderData ? 'opacity-60' : ''}`}
       keyboardShouldPersistTaps="handled"
       data={visible}
       keyExtractor={(official) => official.id}
       ListHeaderComponent={
-        <View>
+        <View className={grid ? '-mx-2.5' : undefined}>
           {header}
           <View className="flex-row flex-wrap items-center gap-1.5 px-4 pb-3">
             {ROSTER_STATUS_FILTERS.map(({ value, label }) => (
@@ -299,7 +324,7 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
         )
       }
       renderItem={({ item }) => (
-        <View className="mx-4 mb-1.5">
+        <View className={grid ? undefined : 'mx-4 mb-1.5'} style={gridCellStyle(columns)}>
           <MemberRow official={item} subtitle={officeLine(item)} status={status === 'active' ? undefined : rosterStatusLabel(item)} />
         </View>
       )}

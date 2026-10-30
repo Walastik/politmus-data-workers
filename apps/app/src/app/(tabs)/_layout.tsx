@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router'
 
 import AccountButton from '@/components/AccountButton'
+import DesktopNav from '@/components/DesktopNav'
 import { Icons } from '@/components/icons'
 import { useWideLayout, wideContentStyle } from '@/lib/layout'
 
@@ -17,21 +18,14 @@ export default function TabLayout() {
   const wide = useWideLayout()
   return (
     <Tabs
+      // Desktop web: one top bar with the sections (DesktopNav) and the page centered.
+      tabBar={wide ? (props) => <DesktopNav {...props} items={TABS} /> : undefined}
       screenOptions={{
         headerTintColor: '#f8fafc',
         headerRight: () => <AccountButton />,
         tabBarActiveTintColor: '#f8fafc',
         tabBarInactiveTintColor: '#94a3b8',
-        // Desktop web: nav down the side with full labels, content centered.
-        ...(wide
-          ? {
-              tabBarPosition: 'left' as const,
-              tabBarVariant: 'material' as const,
-              tabBarLabelPosition: 'beside-icon' as const,
-              tabBarActiveBackgroundColor: '#1e293b',
-              sceneStyle: wideContentStyle,
-            }
-          : {}),
+        ...(wide ? { tabBarPosition: 'top' as const, headerShown: false, sceneStyle: wideContentStyle } : {}),
       }}
     >
       {TABS.map(({ name, title, short, Icon }) => (
@@ -40,7 +34,7 @@ export default function TabLayout() {
           name={name}
           options={{
             title,
-            tabBarLabel: wide ? title : short,
+            tabBarLabel: short,
             tabBarIcon: ({ color, size }) => <Icon color={color} size={size} />,
           }}
         />
