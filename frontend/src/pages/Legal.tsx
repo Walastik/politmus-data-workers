@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom'
 
 import PageHeader, { PageContainer } from '../components/PageHeader'
 
-// Fill these in before launch. They appear verbatim in both documents.
-const LEGAL_CONTACT_EMAIL = 'privacy@politmus.com'
-const GOVERNING_STATE = 'Illinois'
+// These appear verbatim in both documents.
+const LEGAL_CONTACT_EMAIL = 'walastikllc@gmail.com'
+const GOVERNING_STATE = 'Texas'
 const LAST_UPDATED = 'October 31, 2026'
 
 function LegalPage({ title, children }: { title: string; children: ReactNode }) {
