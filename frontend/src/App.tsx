@@ -7,6 +7,7 @@ import Candidates from './pages/Candidates'
 import Congress from './pages/Congress'
 import Feed from './pages/Feed'
 import Landing from './pages/Landing'
+import { PrivacyPolicy, TermsOfService } from './pages/Legal'
 import Now from './pages/Now'
 import Reps from './pages/Reps'
 import WipLanding from './pages/WipLanding'
@@ -34,6 +35,8 @@ export function AppRoutes() {
           <Route path="/congress" element={<Congress />} />
           <Route path="/bills" element={<Bills />} />
           <Route path="/candidates" element={<Candidates />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
         </Route>
         <Route path="/dev-explorer" element={<LegacyExplorerRedirect />} />
         <Route path="/landing" element={<Navigate to={HOME_PATH} replace />} />
