@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import PageHeader, { PageContainer } from '../components/PageHeader'
 
 // These appear verbatim in both documents.
+const OPERATOR = 'Walastik LLC'
 const LEGAL_CONTACT_EMAIL = 'walastikllc@gmail.com'
 const GOVERNING_STATE = 'Texas'
 const LAST_UPDATED = 'October 31, 2026'
@@ -42,9 +43,9 @@ export function PrivacyPolicy() {
   return (
     <LegalPage title="Privacy Policy">
       <p>
-        Politmus helps you see who represents you, how they vote, and where to vote. This policy explains what
-        information we collect when you use the Politmus website and apps (the "Service"), how we use it, and the
-        choices you have. We collect as little as we can to make the Service work, and we do not sell your personal
+        Politmus helps you see who represents you, how they vote, and where to vote. Politmus is operated by{' '}
+        {OPERATOR} ("we," "us," or "our"). This policy explains what information we collect when you use the
+        Politmus website and apps (the "Service"), how we use it, and the choices you have. We collect as little as we can to make the Service work, and we do not sell your personal
         information.
       </p>
 
@@ -202,8 +203,9 @@ export function TermsOfService() {
   return (
     <LegalPage title="Terms of Service">
       <p>
-        These terms govern your use of the Politmus website and apps (the "Service"). By using the Service, you agree
-        to these terms. If you do not agree, please do not use the Service.
+        These terms are an agreement between you and {OPERATOR} ("we," "us," or "our"), which operates Politmus. They
+        govern your use of the Politmus website and apps (the "Service"). By using the Service, you agree to these
+        terms. If you do not agree, please do not use the Service.
       </p>
 
       <Section title="Who can use Politmus">
@@ -252,7 +254,7 @@ export function TermsOfService() {
       <Section title="Content and ownership">
         <p>
           Public records remain public. The Service's design, code, scoring methodology, and original text are owned by
-          Politmus. You may share links to the Service and quote reasonable portions of it with attribution. Logos and
+          {OPERATOR}. You may share links to the Service and quote reasonable portions of it with attribution. Logos and
           trademarks of third parties belong to their owners.
         </p>
       </Section>
@@ -293,7 +295,8 @@ export function TermsOfService() {
 
       <Section title="Limitation of liability">
         <p>
-          TO THE FULLEST EXTENT PERMITTED BY LAW, POLITMUS AND ITS OPERATORS WILL NOT BE LIABLE FOR ANY INDIRECT,
+          TO THE FULLEST EXTENT PERMITTED BY LAW, {OPERATOR.toUpperCase()} AND ITS MEMBERS, MANAGERS, AND
+          CONTRACTORS WILL NOT BE LIABLE FOR ANY INDIRECT,
           INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, OPPORTUNITY, OR GOODWILL,
           ARISING FROM YOUR USE OF THE SERVICE, INCLUDING RELIANCE ON ANY ELECTION OR VOTING INFORMATION. OUR TOTAL
           LIABILITY FOR ANY CLAIM RELATED TO THE SERVICE WILL NOT EXCEED $100. Some jurisdictions do not allow these
@@ -303,7 +306,7 @@ export function TermsOfService() {
 
       <Section title="Indemnification">
         <p>
-          You agree to defend and hold harmless Politmus and its operators from claims arising out of your misuse of
+          You agree to defend and hold harmless {OPERATOR} and its members, managers, and contractors from claims arising out of your misuse of
           the Service or your violation of these terms.
         </p>
       </Section>
