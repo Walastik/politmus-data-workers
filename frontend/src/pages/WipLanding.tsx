@@ -2,7 +2,6 @@ import { SignInButton, UserButton, SignedIn, SignedOut } from '@clerk/clerk-reac
 import { MapPin } from 'lucide-react'
 import LocationSettings from '../components/LocationSettings'
 import AsciiAnimation from './AsciiAnimation'
-import { LegalLinks } from './Legal'
 
 export default function WipLanding() {
   return (
@@ -33,8 +32,6 @@ export default function WipLanding() {
           </UserButton>
         </SignedIn>
       </div>
-
-      <LegalLinks className="absolute inset-x-0 bottom-4" />
     </div>
   )
 }
