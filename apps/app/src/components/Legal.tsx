@@ -7,7 +7,7 @@ import { openUrl } from '@/lib/links'
 // Privacy Policy and Terms of Service, worded as on the Vite site
 // (apps/web/src/pages/Legal.tsx). These appear verbatim in both documents.
 const OPERATOR = 'Walastik LLC'
-const LEGAL_CONTACT_EMAIL = 'walastikllc@gmail.com'
+export const LEGAL_CONTACT_EMAIL = 'walastikllc@gmail.com'
 const GOVERNING_STATE = 'Texas'
 const LAST_UPDATED = 'November 3, 2026'
 
