@@ -4,6 +4,7 @@ import { View } from 'react-native'
 import AboutButton from '@/components/AboutButton'
 import AccountButton from '@/components/AccountButton'
 import DesktopNav from '@/components/DesktopNav'
+import Monogram from '@/components/Monogram'
 import { Icons } from '@/components/icons'
 import { useWideLayout, wideContentStyle } from '@/lib/layout'
 
@@ -24,6 +25,11 @@ export default function TabLayout() {
       tabBar={wide ? (props) => <DesktopNav {...props} items={TABS} /> : undefined}
       screenOptions={{
         headerTintColor: '#f8fafc',
+        headerLeft: () => (
+          <View className="mr-2 ml-4">
+            <Monogram size={24} />
+          </View>
+        ),
         headerRight: () => (
           <View className="flex-row items-center">
             <AboutButton />

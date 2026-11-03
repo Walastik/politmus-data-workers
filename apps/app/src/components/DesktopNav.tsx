@@ -2,6 +2,7 @@ import type { BottomTabBarProps } from 'expo-router/tabs'
 import { Pressable, Text, View } from 'react-native'
 
 import AccountButton from './AccountButton'
+import Monogram from './Monogram'
 import { Icons } from './icons'
 
 export interface NavItem {
@@ -23,7 +24,7 @@ export default function DesktopNav({ state, navigateToTab, items }: BottomTabBar
     <View className="border-b border-slate-800 bg-slate-900">
       <View className="h-14 w-full max-w-6xl flex-row items-center gap-6 self-center px-6">
         <Pressable onPress={() => go('home')} accessibilityRole="link" className="flex-row items-center gap-2">
-          <Icons.Landmark size={20} colorClassName="accent-blue-400" />
+          <Monogram size={26} />
           <Text className="text-lg font-bold tracking-tight text-slate-50">Politmus</Text>
         </Pressable>
         <View accessibilityRole="tablist" accessibilityLabel="Primary" className="flex-1 flex-row items-center gap-1">

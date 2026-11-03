@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar'
 import { useEffect, useState } from 'react'
 import { Platform, Pressable, Text } from 'react-native'
 
+import Monogram from '@/components/Monogram'
 import { ApiProvider } from '@/lib/api'
 import { CivicLocationProvider } from '@/lib/civicLocation'
 
@@ -79,7 +80,8 @@ function DrawerLinks() {
 
 function HomeLink() {
   return (
-    <Pressable onPress={() => router.replace('/now')} accessibilityRole="link" className="ml-2 px-2 py-1">
+    <Pressable onPress={() => router.replace('/now')} accessibilityRole="link" className="ml-2 flex-row items-center gap-1.5 px-2 py-1">
+      <Monogram size={22} />
       <Text className="text-base font-bold text-slate-50">Politmus</Text>
     </Pressable>
   )

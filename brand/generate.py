@@ -8,6 +8,7 @@ Outputs (all written next to this script, except the favicon):
   app-icon-android-foreground.svg   adaptive icon foreground, glyph inside the 66/108 safe zone
   app-icon-android-background.svg   adaptive icon background (textured paper)
   app-icon-android-monochrome.svg   Android 13+ themed icon layer (alpha only)
+  ../apps/app/public/monogram.svg   copy of the full-detail mark for the website header
   ../apps/app/public/favicon.svg    simplified mark that stays legible at 16-32px
 
 The glyph lives in a 600x800 box: stem on the left, D-shaped bowl on the right,
@@ -18,6 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FAVICON = HERE.parent / "apps" / "app" / "public" / "favicon.svg"
+SITE_MONOGRAM = HERE.parent / "apps" / "app" / "public" / "monogram.svg"
 
 # Litmus palette (from the brand strip): red -> violet -> blue.
 RED, VIOLET, BLUE = "#DC2626", "#7C3AED", "#2563EB"
@@ -216,6 +218,10 @@ def build() -> dict[Path, str]:
         title="Politmus",
         size=1024,
     )
+
+    # The website header serves the full mark as a file, so the browser draws
+    # its filters; the native header uses PNGs rendered from it.
+    files[SITE_MONOGRAM] = files[HERE / "politmus-monogram.svg"]
 
     # Favicon: flat gradient, heavy outline, no texture or fold lines, which
     # turn to mud below ~48px.
