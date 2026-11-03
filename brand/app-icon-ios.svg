@@ -37,7 +37,7 @@
     </filter>
   </defs>
   <rect width="1024" height="1024" fill="#F7F4EE" filter="url(#i-paper)"/>
-  <g transform="translate(300.3 224.0) scale(0.72)">
+  <g transform="translate(268.0 180.0) scale(0.83)">
   <path transform="translate(16 14)" fill="#4C1D95" fill-opacity=".16" fill-rule="evenodd" filter="url(#i-shadowBlur)" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/>
   <rect x="-60" y="-60" width="720" height="920" fill="url(#i-litmus)" filter="url(#i-watercolor)" clip-path="url(#i-clip)"/>
   <g clip-path="url(#i-clip)"><path fill="#7F1D1D" fill-opacity=".22" d="M0 164H180V362H92C32 362 0 398 0 468Z"/><path fill="url(#i-foldShade)" d="M0 594C0 558 26 536 78 536H180V660H0Z"/></g>

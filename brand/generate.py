@@ -131,10 +131,35 @@ def svg(view_box: str, body: str, *, title: str, size: int | None = None) -> str
     )
 
 
-def place(scale: float, canvas: float = 1024) -> str:
-    """Center the 588x800 glyph on a square canvas at the given scale."""
-    w, h = 588 * scale, 800 * scale
-    return f"translate({(canvas - w) / 2:.1f} {(canvas - h) / 2:.1f}) scale({scale})"
+def place(scale: float, anchor_x: float = 294, canvas: float = 1024) -> str:
+    """Put glyph point (anchor_x, 400) at the canvas center, at the given scale.
+
+    The default anchor is the bounding-box center of the 588x800 glyph.
+    """
+    tx = canvas / 2 - anchor_x * scale
+    ty = canvas / 2 - 400 * scale
+    return f"translate({tx:.1f} {ty:.1f}) scale({scale})"
+
+
+def monochrome_mask(p: str) -> str:
+    """Alpha mask for the one-colour P: the fold lines become gaps and the stem
+    behind the ribbon drops to partial alpha, so the loop still reads when
+    Android tints the whole layer a single colour."""
+    # Gap versions of the fold lines: butt ends that stop flush at the bowl and
+    # run out past the stem's left edge, so the cuts leave no nicks or slivers.
+    gaps = ("M-20 164H181", "M181 362H92C40 362 6 392 -24 446", "M181 536H78C34 536 6 552 -24 578")
+    lines = "".join(f'<path d="{d}"/>' for d in gaps)
+    return f"""
+    <linearGradient id="{p}foldFade" gradientUnits="userSpaceOnUse" x1="0" y1="536" x2="0" y2="660">
+      <stop offset="0" stop-color="#000" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="{p}mask" maskUnits="userSpaceOnUse" x="-60" y="-60" width="720" height="920">
+      <path fill="#fff" fill-rule="evenodd" d="{SILHOUETTE}"/>
+      <path fill="#000" fill-opacity=".45" d="{BEHIND_STEM}"/>
+      <path fill="url(#{p}foldFade)" d="{UNDER_FOLD}"/>
+      <g fill="none" stroke="#000" stroke-width="30">{lines}</g>
+    </mask>"""
 
 
 def build() -> dict[Path, str]:
@@ -153,16 +178,19 @@ def build() -> dict[Path, str]:
         "0 0 1024 1024",
         f"  <defs>{defs('i-', texture=True)}{paper_defs('i-', 0.09)}\n  </defs>\n"
         f'  <rect width="1024" height="1024" fill="{PAPER}" filter="url(#i-paper)"/>\n'
-        f'  <g transform="{place(0.72)}">\n  '
+        f'  <g transform="{place(0.83)}">\n  '
         + glyph("i-", stroke=24, texture=True, detail=True, shadow=True)
         + "\n  </g>",
         title="Politmus",
         size=1024,
     )
 
-    # Android adaptive icon: 108dp canvas drawn at 1024 units. The 66dp safe
-    # circle is 626 units across; a 0.616 glyph (362x493) has a 612 diagonal.
-    android_place = place(0.616)
+    # Android adaptive icon: 108dp canvas drawn at 1024 units, and only the
+    # 66dp safe circle (r = 313 units) is guaranteed to survive every launcher
+    # mask. Anchoring at x=230 rather than the bbox center (294) balances the
+    # stem's square corners against the round bowl, which lets the glyph grow
+    # to 0.667 (stroke included) while staying inside the circle.
+    android_place = place(0.667, anchor_x=230)
     files[HERE / "app-icon-android-foreground.svg"] = svg(
         "0 0 1024 1024",
         f"  <defs>{defs('a-', texture=True)}\n  </defs>\n"
@@ -181,7 +209,10 @@ def build() -> dict[Path, str]:
     )
     files[HERE / "app-icon-android-monochrome.svg"] = svg(
         "0 0 1024 1024",
-        f'  <path transform="{android_place}" fill="#000" fill-rule="evenodd" d="{SILHOUETTE}"/>',
+        f"  <defs>{monochrome_mask('mo-')}\n  </defs>\n"
+        f'  <g transform="{android_place}">\n'
+        f'    <rect x="-60" y="-60" width="720" height="920" fill="#000" mask="url(#mo-mask)"/>\n'
+        f"  </g>",
         title="Politmus",
         size=1024,
     )
