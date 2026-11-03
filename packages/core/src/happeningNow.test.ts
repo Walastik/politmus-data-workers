@@ -7,9 +7,12 @@ import {
   daysAwayLabel,
   districtLabel,
   electionHeadline,
+  formatClockTime,
+  formatCountdown,
   houseDistrict,
   isElectionFocus,
   moreSitesNote,
+  pollsCloseFor,
   uniqueCandidates,
   votingSitesView,
 } from './happeningNow'
@@ -87,6 +90,21 @@ describe('electionHeadline', () => {
     expect(open.endLabel).toBe('Election Day')
   })
 
+  it('leads with Election Day, with the closing time once sites load', () => {
+    const base = { window, phase: { phase: 'ended' } as const, stateName: 'Texas', openStateCount: 0, electionName: null }
+    const withClose = electionHeadline({
+      ...base,
+      electionDay: true,
+      pollsClose: { at: new Date(2026, 10, 3, 19, 0), siteName: 'Sam Houston Building' },
+    })
+    expect(withClose.headline).toBe('Today is Election Day!')
+    expect(withClose.detail).toBe('Your closest polling place closes at 7 pm. If you’re in line by then, you can still vote.')
+    expect(electionHeadline({ ...base, electionDay: true }).detail).toContain('before your polling place closes tonight')
+    expect(electionHeadline({ ...base, stateName: null, electionDay: true }).detail).toContain('Add your address')
+    // Early voting that runs through Election Day still gives way to it.
+    expect(electionHeadline({ ...base, phase: { phase: 'open' }, electionDay: true }).headline).toBe('Today is Election Day!')
+  })
+
   it('falls back to the count of open states, then the election name', () => {
     expect(
       electionHeadline({ window: null, phase: null, stateName: null, openStateCount: 30, electionName: null }).headline,
@@ -117,6 +135,50 @@ describe('votingSitesView', () => {
     expect(view.kind).toBe('polling')
     expect(view.title).toBe('Election Day polling places')
     expect(moreSitesNote(view)).toBeNull()
+  })
+
+  it('shows polling places on Election Day even while early voting runs through it', () => {
+    expect(votingSitesView(data, { phase: 'open' }, null, true).kind).toBe('polling')
+  })
+})
+
+describe('pollsCloseFor', () => {
+  const hours = (location: VoterLocation, pollingHours: string) => ({ ...location, pollingHours })
+
+  it('uses the closest polling place with hours for Election Day', () => {
+    const data = voterInfo({
+      pollingLocations: [
+        hours(site('Far', 31, -98), 'Tue, Nov 3: 7 am - 8 pm'),
+        hours(site('Near', 30.01, -97.01), 'Tue, Nov 3: 7 am - 7 pm'),
+        site('Nearest, no hours', 30, -97),
+      ],
+    })
+    expect(pollsCloseFor(data, { lat: 30, lon: -97 }, '2026-11-03')).toEqual({
+      at: new Date(2026, 10, 3, 19, 0),
+      siteName: 'Near',
+    })
+  })
+
+  it('counts early sites only when their hours name Election Day', () => {
+    const undated = voterInfo({ earlyVoteSites: [hours(site('Center'), '8 am - 5 pm')] })
+    expect(pollsCloseFor(undated, null, '2026-11-03')).toBeNull()
+    const dated = voterInfo({
+      earlyVoteSites: [hours(site('Center'), 'Mon, Nov 2: 8 am - 5 pm\nTue, Nov 3: 7 am - 8:30 pm')],
+    })
+    expect(pollsCloseFor(dated, null, '2026-11-03')?.at).toEqual(new Date(2026, 10, 3, 20, 30))
+  })
+
+  it('is null without sites or hours', () => {
+    expect(pollsCloseFor(null, null, '2026-11-03')).toBeNull()
+    expect(pollsCloseFor(voterInfo({ pollingLocations: [site('A')] }), null, '2026-11-03')).toBeNull()
+  })
+
+  it('formats the closing time and the countdown', () => {
+    expect(formatClockTime(new Date(2026, 10, 3, 19, 0))).toBe('7 pm')
+    expect(formatClockTime(new Date(2026, 10, 3, 20, 30))).toBe('8:30 pm')
+    expect(formatCountdown((2 * 3600 + 5 * 60 + 9) * 1000)).toBe('2h 05m 09s')
+    expect(formatCountdown((5 * 60 + 9) * 1000 + 400)).toBe('5m 09s')
+    expect(formatCountdown(0)).toBeNull()
   })
 })
 

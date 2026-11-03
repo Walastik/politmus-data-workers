@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitPollingHours } from './pollingHours'
+import { closingTimeOn, splitPollingHours } from './pollingHours'
 
 // Burnsville City Hall early voting hours as returned by the Civic API (MN, 2026 midterm)
 const BURNSVILLE = [
@@ -58,5 +58,24 @@ describe('splitPollingHours', () => {
   it('falls back to the current year without an election date', () => {
     const { passed } = splitPollingHours('Fri, Sep 18: 8 am - 4 pm', { today: new Date(2026, 9, 12) })
     expect(passed).toHaveLength(1)
+  })
+})
+
+describe('closingTimeOn', () => {
+  it('reads the last time on the day’s line', () => {
+    expect(closingTimeOn('Tue, Nov 3: 7 am - 7 pm', '2026-11-03')).toEqual({ hour: 19, minute: 0 })
+    expect(closingTimeOn('Mon, Nov 2: 8 am - 5 pm\nTue, Nov 3: 6:00 AM - 8:30 PM', '2026-11-03')).toEqual({ hour: 20, minute: 30 })
+    expect(closingTimeOn('Tue, Nov 3: 7 a.m. - 12 p.m.', '2026-11-03')).toEqual({ hour: 12, minute: 0 })
+    expect(closingTimeOn('Tue, Nov 3: 7 am - 12 am', '2026-11-03')).toEqual({ hour: 24, minute: 0 })
+  })
+
+  it('uses an undated line unless a date is required', () => {
+    expect(closingTimeOn('7:00 am - 7:00 pm', '2026-11-03')).toEqual({ hour: 19, minute: 0 })
+    expect(closingTimeOn('7:00 am - 7:00 pm', '2026-11-03', { requireDate: true })).toBeNull()
+  })
+
+  it('is null when the day is missing or has no times', () => {
+    expect(closingTimeOn('Mon, Nov 2: 8 am - 5 pm', '2026-11-03')).toBeNull()
+    expect(closingTimeOn('Tue, Nov 3: by appointment', '2026-11-03')).toBeNull()
   })
 })

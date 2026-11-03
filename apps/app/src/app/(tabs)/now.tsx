@@ -13,6 +13,7 @@ import {
   errorMessage,
   houseDistrict,
   isElectionFocus,
+  pollsCloseFor,
 } from '@politmus/core/happeningNow'
 import { getVoterResources } from '@politmus/core/types'
 import { router } from 'expo-router'
@@ -50,12 +51,15 @@ export default function NowScreen() {
   const voterQuery = useVoterInfo(address, stateCode, Boolean(lookupData))
   const voterData = voterQuery.data ?? null
   const electionDate = voterData?.election?.date ?? nextCalendarElection(today)
-  const electionFocus = isElectionFocus(electionDate ? daysUntil(electionDate) : null)
+  const daysToElection = electionDate ? daysUntil(electionDate) : null
+  const electionFocus = isElectionFocus(daysToElection)
+  const electionDay = daysToElection === 0
   const window = getEarlyVotingWindow(stateCode, electionDate)
   const phase = window ? earlyVotingPhase(window, today) : null
   const district = houseDistrict(lookupData)
   const racesQuery = useRaces(electionFocus ? stateCode : null)
   const hasPlace = Boolean(location.place) && lookup.status !== 'error'
+  const pollsClose = electionDay && hasPlace ? pollsCloseFor(voterData, lookupData?.point ?? null, electionDate) : null
 
   // Voting sites need a street address; a device location without one only
   // gets the races and representatives.
@@ -91,6 +95,8 @@ export default function NowScreen() {
               window={window}
               phase={phase}
               openStateCount={electionDate && !stateCode ? statesWithEarlyVotingOpen(electionDate, today).length : 0}
+              electionDay={electionDay}
+              pollsClose={pollsClose}
             />
           ) : (
             <QuietHero placeName={stateCode ? getVoterResources(stateCode).name : null} />
@@ -111,7 +117,7 @@ export default function NowScreen() {
 
           {hasPlace && lookupData && electionFocus ? (
             <>
-              <WhereToVote voterInfo={voterInfo} point={lookupData.point ?? null} stateCode={stateCode} phase={phase} />
+              <WhereToVote voterInfo={voterInfo} point={lookupData.point ?? null} stateCode={stateCode} phase={phase} electionDay={electionDay} />
               <OnYourBallot
                 races={races}
                 ballotRaces={racesQuery.data ? ballotRacesFor(racesQuery.data, district) : []}
