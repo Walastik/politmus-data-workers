@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img">
+  <title>Politmus</title>
+  <defs>
+    <linearGradient id="a-litmus" gradientUnits="userSpaceOnUse" x1="60" y1="0" x2="250" y2="800">
+      <stop offset="0" stop-color="#DC2626"/>
+      <stop offset=".28" stop-color="#DC2626"/>
+      <stop offset=".5" stop-color="#7C3AED"/>
+      <stop offset=".72" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <clipPath id="a-clip"><path clip-rule="evenodd" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/></clipPath>
+    <linearGradient id="a-foldShade" gradientUnits="userSpaceOnUse" x1="0" y1="536" x2="0" y2="660">
+      <stop offset="0" stop-color="#1D4ED8" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#1D4ED8" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="a-watercolor" filterUnits="userSpaceOnUse" x="-60" y="-60" width="720" height="920" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="3" seed="7" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="110" xChannelSelector="R" yChannelSelector="G" result="bleed"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.009" numOctaves="3" seed="11" result="bloomNoise"/>
+      <feColorMatrix in="bloomNoise" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.9 0 0 0 -0.38" result="bloom"/>
+      <feComposite in="bloom" in2="bleed" operator="atop" result="washed"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.08" numOctaves="4" seed="2" result="fiber"/>
+      <feDiffuseLighting in="fiber" lighting-color="#ffffff" surfaceScale="1.2" result="light">
+        <feDistantLight azimuth="45" elevation="60"/>
+      </feDiffuseLighting>
+      <feBlend in="washed" in2="light" mode="multiply"/>
+    </filter>
+    <filter id="a-shadowBlur" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+  <g transform="translate(330.9 265.6) scale(0.616)">
+  <path transform="translate(16 14)" fill="#4C1D95" fill-opacity=".16" fill-rule="evenodd" filter="url(#a-shadowBlur)" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/>
+  <rect x="-60" y="-60" width="720" height="920" fill="url(#a-litmus)" filter="url(#a-watercolor)" clip-path="url(#a-clip)"/>
+  <g clip-path="url(#a-clip)"><path fill="#7F1D1D" fill-opacity=".22" d="M0 164H180V362H92C32 362 0 398 0 468Z"/><path fill="url(#a-foldShade)" d="M0 594C0 558 26 536 78 536H180V660H0Z"/></g>
+  <g stroke="#111111" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"><path fill="none" fill-rule="evenodd" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/><path fill="none" d="M0 164H180"/><path fill="none" d="M180 362H92C32 362 0 398 0 468"/><path fill="none" d="M180 536H78C26 536 0 558 0 594"/></g>
+  </g>
+</svg>
