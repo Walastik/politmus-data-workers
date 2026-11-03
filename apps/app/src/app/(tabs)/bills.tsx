@@ -18,7 +18,12 @@ import VoteTally from '@/components/profile/VoteTally'
 import { Chip, SearchField } from '@/components/ui'
 import { openBill } from '@/lib/links'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
+import { pageMetadata } from '@/lib/metadata'
 import { useBills } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/bills')
+}
 
 // Legislation moving through Congress; native counterpart of the web Bills page.
 export default function BillsScreen() {

@@ -4,7 +4,7 @@ import { ClerkProvider } from '@clerk/expo'
 import { tokenCache } from '@clerk/expo/token-cache'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { CLERK_LOCALIZATION, HOME_PATH } from '@politmus/core/site'
-import { DarkTheme, router, Stack, ThemeProvider, useGlobalSearchParams } from 'expo-router'
+import { DarkTheme, router, Stack, ThemeProvider, useGlobalSearchParams, usePathname } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useEffect, useState } from 'react'
 import { Platform, Pressable, Text } from 'react-native'
@@ -12,6 +12,7 @@ import { Platform, Pressable, Text } from 'react-native'
 import Monogram from '@/components/Monogram'
 import { ApiProvider } from '@/lib/api'
 import { CivicLocationProvider } from '@/lib/civicLocation'
+import { pageTitle } from '@/lib/metadata'
 
 const PUBLISHABLE_KEY: string = (() => {
   const key = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -58,6 +59,7 @@ export default function RootLayout() {
                 })}
               />
               <DrawerLinks />
+              <DocumentTitle />
             </ThemeProvider>
           </CivicLocationProvider>
         </ApiProvider>
@@ -75,6 +77,16 @@ function DrawerLinks() {
     if (official) router.replace({ pathname: '/member/[id]', params: { id: official } })
     if (bill) router.push({ pathname: '/bill/[id]', params: { id: bill } })
   }, [official, bill])
+  return null
+}
+
+// Each page's static HTML carries its own <title> (generateMetadata), but moving
+// between pages in the browser doesn't reload it, so keep the tab title in step.
+function DocumentTitle() {
+  const pathname = usePathname()
+  useEffect(() => {
+    if (Platform.OS === 'web') document.title = pageTitle(pathname)
+  }, [pathname])
   return null
 }
 

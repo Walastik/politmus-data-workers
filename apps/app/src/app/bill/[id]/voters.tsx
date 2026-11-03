@@ -2,7 +2,12 @@ import { partyBadgeClass, partyShort, voteShort, voteTextClass, type VoteChamber
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { FlatList, Text, View } from 'react-native'
 
+import { pageMetadata } from '@/lib/metadata'
 import { useBillVoters } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/bill/[id]/voters')
+}
 
 // How each member of one party voted in one chamber; native counterpart of
 // the web VotePartyList overlay.

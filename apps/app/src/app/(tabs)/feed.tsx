@@ -5,7 +5,12 @@ import { ActivityIndicator, RefreshControl, ScrollView, SectionList, Text, View 
 import FeedItemRow from '@/components/FeedItemRow'
 import { Chip } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
+import { pageMetadata } from '@/lib/metadata'
 import { useFeed } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/feed')
+}
 
 export default function FeedScreen() {
   const [filterKey, setFilterKey] = useState('all')

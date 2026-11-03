@@ -26,7 +26,12 @@ import { Icons } from '@/components/icons'
 import { addToCalendar, CALENDAR_HINT, canAddToCalendar } from '@/lib/calendar'
 import { useCivicLocation } from '@/lib/civicLocation'
 import { openUrl } from '@/lib/links'
+import { pageMetadata } from '@/lib/metadata'
 import { useVoterInfo } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/voting')
+}
 
 // Every voting site for the visitor's address, their election office and the
 // official fallbacks; native counterpart of the web VotingLocations.

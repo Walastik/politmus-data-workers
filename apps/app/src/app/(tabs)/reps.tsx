@@ -3,6 +3,11 @@ import { ScrollView, Text, View } from 'react-native'
 import LocationBar from '@/components/LocationBar'
 import LookupResults from '@/components/Representatives'
 import { useCivicLocation } from '@/lib/civicLocation'
+import { pageMetadata } from '@/lib/metadata'
+
+export function generateMetadata() {
+  return pageMetadata('/reps')
+}
 
 export default function RepsScreen() {
   const { ready, place, lookup } = useCivicLocation()

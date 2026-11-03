@@ -29,9 +29,14 @@ import MemberRow from '@/components/MemberRow'
 import OptionSheet from '@/components/OptionSheet'
 import { Chip, SearchField } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
+import { pageMetadata } from '@/lib/metadata'
 import { useCurrentMembers, useRoster } from '@/lib/queries'
 
 const STATE_CHOICES = [{ value: '', label: 'All states' }, ...STATE_OPTIONS.map((s) => ({ value: s.name, label: s.name }))]
+
+export function generateMetadata() {
+  return pageMetadata('/congress')
+}
 
 // Every current member of the Senate and House, with their Politmus Score;
 // native counterpart of the web Congress page.

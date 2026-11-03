@@ -33,9 +33,14 @@ import OptionSheet from '@/components/OptionSheet'
 import { Chip, SearchField } from '@/components/ui'
 import { openProfile } from '@/lib/links'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
+import { pageMetadata } from '@/lib/metadata'
 import { useRaceList } from '@/lib/queries'
 
 const STATE_CHOICES = [{ value: '', label: 'All states' }, ...STATE_OPTIONS.map((s) => ({ value: s.abbr, label: s.name }))]
+
+export function generateMetadata() {
+  return pageMetadata('/candidates')
+}
 
 // Everyone running for Congress this cycle, by race; native counterpart of
 // the web Candidates page.

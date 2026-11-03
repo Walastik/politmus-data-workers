@@ -4,6 +4,11 @@ import { Platform, Text, View } from 'react-native'
 
 import AccountButton from '@/components/AccountButton'
 import AsciiArt from '@/components/AsciiArt'
+import { pageMetadata } from '@/lib/metadata'
+
+export function generateMetadata() {
+  return pageMetadata('/')
+}
 
 // The app opens on Happening Now. On the website, until launch (HOME_PATH
 // isn't '/'), the root is the Work in Progress page with a hidden sign-in,

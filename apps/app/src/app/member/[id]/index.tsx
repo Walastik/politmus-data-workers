@@ -35,7 +35,12 @@ import { SectionHeading, ShareButton } from '@/components/profile/parts'
 import { AccountabilityReport, StatedPositions } from '@/components/profile/Positions'
 import { ScoreHeadline } from '@/components/Score'
 import { openBill, openUrl, profileShareUrl } from '@/lib/links'
+import { pageMetadata } from '@/lib/metadata'
 import { useOfficial } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/member/[id]')
+}
 
 // The member (or candidate) profile; native counterpart of the web MemberDrawer.
 export default function MemberScreen() {

@@ -17,7 +17,12 @@ import {
 import { SectionHeading, ShareButton } from '@/components/profile/parts'
 import VoteTally from '@/components/profile/VoteTally'
 import { profileShareUrl } from '@/lib/links'
+import { pageMetadata } from '@/lib/metadata'
 import { useBill } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/bill/[id]')
+}
 
 // The bill profile; native counterpart of the web BillDrawer.
 export default function BillScreen() {

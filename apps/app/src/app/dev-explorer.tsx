@@ -1,6 +1,12 @@
 import { legacyExplorerPath } from '@politmus/core/site'
 import { Redirect, useLocalSearchParams, type Href } from 'expo-router'
 
+import { pageMetadata } from '@/lib/metadata'
+
+export function generateMetadata() {
+  return pageMetadata('/dev-explorer')
+}
+
 // Old /dev-explorer?tab=… links from before the site had pages.
 export default function DevExplorer() {
   const params = useLocalSearchParams<Record<string, string>>()

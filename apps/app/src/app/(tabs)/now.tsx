@@ -31,7 +31,12 @@ import LocationBar from '@/components/LocationBar'
 import { FederalRepsStrip } from '@/components/Representatives'
 import { LinkAction, Section } from '@/components/ui'
 import { useCivicLocation } from '@/lib/civicLocation'
+import { pageMetadata } from '@/lib/metadata'
 import { useRaces, useVoterInfo } from '@/lib/queries'
+
+export function generateMetadata() {
+  return pageMetadata('/now')
+}
 
 // What's going on in the visitor's election right now, where to vote, who is
 // on the ballot, who represents them, and the latest from the feed.

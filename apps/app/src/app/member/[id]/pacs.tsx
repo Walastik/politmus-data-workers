@@ -9,9 +9,14 @@ import { Icons } from '@/components/icons'
 import { LegendSwatch } from '@/components/profile/parts'
 import { Chip, SearchField } from '@/components/ui'
 import { openUrl } from '@/lib/links'
+import { pageMetadata } from '@/lib/metadata'
 import { useFinance, usePacGifts, usePacList, usePacSummary } from '@/lib/queries'
 
 const color = (key: string) => PAC_CATEGORY_COLORS[key] ?? PAC_CATEGORY_COLORS.other
+
+export function generateMetadata() {
+  return pageMetadata('/member/[id]/pacs')
+}
 
 // Every PAC that gave in one election, searchable and filterable; native
 // counterpart of the web PacExplorer.
