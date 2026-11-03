@@ -1,9 +1,11 @@
 // What Happening Now shows and says, shared by the web and native screens.
 
+import { parseIsoDate } from './calendar'
 import { daysUntil } from './feed'
 import { formatShortDate, type EarlyVotingInfo, type EarlyVotingPhase } from './earlyVoting'
 import { getVoterResources, type CivicLookup, type Race, type RaceCandidate, type VoterInfo, type VoterLocation } from './types'
-import { rankSites, type RankedSite } from './votingSites'
+import { closingTimeOn } from './pollingHours'
+import { rankSites, type Point, type RankedSite } from './votingSites'
 
 // Within this many days of Election Day the page is about the election; before
 // that it leads with what Congress has been doing.
@@ -44,6 +46,8 @@ export function electionHeadline({
   stateName,
   openStateCount,
   electionName,
+  electionDay = false,
+  pollsClose = null,
 }: {
   window: EarlyVotingInfo | null
   phase: EarlyVotingPhase | null
@@ -51,9 +55,25 @@ export function electionHeadline({
   // States with early voting open, when we don't know the visitor's state.
   openStateCount: number
   electionName: string | null
+  // Today is Election Day.
+  electionDay?: boolean
+  // When the visitor's closest polling place closes, once their sites load.
+  pollsClose?: PollsClose | null
 }): { headline: string; detail: string | null; endLabel: string | null } {
   const endLabel = window ? (window.end === window.electionDate ? 'Election Day' : formatShortDate(window.end)) : null
   const daysLeft = window ? daysUntil(window.end) : null
+
+  if (electionDay) {
+    return {
+      headline: 'Today is Election Day!',
+      detail: pollsClose
+        ? `Your closest polling place closes at ${formatClockTime(pollsClose.at)}. If you’re in line by then, you can still vote.`
+        : stateName
+          ? 'Get out and vote before your polling place closes tonight. If you’re in line when polls close, you can still vote.'
+          : 'Get out and vote before polls close tonight. Add your address to find your polling place and when it closes.',
+      endLabel,
+    }
+  }
 
   if (window && phase?.phase === 'open') {
     return {
@@ -88,6 +108,61 @@ export function electionHeadline({
   return { headline: electionName ?? 'Election Day is coming up', detail: null, endLabel }
 }
 
+export interface PollsClose {
+  at: Date
+  siteName: string | null
+}
+
+// When the visitor's closest Election Day polling place closes today, from its
+// posted hours. The hours are read on the viewer's clock, which matches the
+// site's for anyone looking up their own address.
+export function pollsCloseFor(
+  data: VoterInfo | null,
+  point: Point | null,
+  electionDate: string | null,
+): PollsClose | null {
+  const day = parseIsoDate(electionDate)
+  if (!data || !electionDate || !day) return null
+  // Polling places first; vote centers listed as early sites only count when
+  // their hours name Election Day.
+  const candidates = [
+    ...rankSites(data.pollingLocations, point).map((site) => ({ site, requireDate: false })),
+    ...rankSites(data.earlyVoteSites, point).map((site) => ({ site, requireDate: true })),
+  ]
+  for (const { site, requireDate } of candidates) {
+    const hours = site.location.pollingHours
+    const close = hours ? closingTimeOn(hours, electionDate, { requireDate }) : null
+    if (close) {
+      return {
+        at: new Date(day.year, day.month - 1, day.day, close.hour, close.minute),
+        siteName: site.location.locationName,
+      }
+    }
+  }
+  return null
+}
+
+// "7 pm", "7:30 pm"
+export function formatClockTime(at: Date): string {
+  const hour = at.getHours()
+  const minute = at.getMinutes()
+  if (hour === 0 && minute === 0) return 'midnight'
+  const suffix = hour < 12 ? 'am' : 'pm'
+  const h12 = hour % 12 === 0 ? 12 : hour % 12
+  return minute === 0 ? `${h12} ${suffix}` : `${h12}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+// "2h 05m 09s", "5m 09s", or null once the time has passed.
+export function formatCountdown(ms: number): string | null {
+  if (ms <= 0) return null
+  const total = Math.floor(ms / 1000)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return hours > 0 ? `${hours}h ${pad(minutes)}m ${pad(seconds)}s` : `${minutes}m ${pad(seconds)}s`
+}
+
 export function daysAwayLabel(days: number | null): string | null {
   if (days === null || days < 0) return null
   return days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days away`
@@ -104,13 +179,14 @@ export interface VotingSitesView {
 }
 
 // Early voting sites while early voting is on (or ahead); Election Day
-// polling places once it's over or when no early sites are listed.
+// polling places once it's over, on Election Day, or when no early sites are listed.
 export function votingSitesView(
   data: VoterInfo | null,
   phase: EarlyVotingPhase | null,
   point: { lat: number; lon: number } | null,
+  electionDay = false,
 ): VotingSitesView {
-  const preferEarly = phase?.phase !== 'ended'
+  const preferEarly = phase?.phase !== 'ended' && !electionDay
   const early = data?.earlyVoteSites ?? []
   const polling = data?.pollingLocations ?? []
   const [kind, locations]: ['early' | 'polling', VoterLocation[]] =

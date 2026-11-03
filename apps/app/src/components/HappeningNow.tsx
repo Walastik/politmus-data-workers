@@ -10,11 +10,14 @@ import {
   daysAwayLabel,
   electionHeadline,
   errorMessage,
+  formatClockTime,
+  formatCountdown,
   incompleteRaceReason,
   moreSitesNote,
   noSitesMessage,
   uniqueCandidates,
   votingSitesView,
+  type PollsClose,
 } from '@politmus/core/happeningNow'
 import { splitPollingHours } from '@politmus/core/pollingHours'
 import {
@@ -30,7 +33,7 @@ import {
 } from '@politmus/core/types'
 import { directionsUrl, formatMiles, locationAddress, type RankedSite } from '@politmus/core/votingSites'
 import { router } from 'expo-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
 import { addToCalendar, canAddToCalendar } from '@/lib/calendar'
@@ -66,6 +69,8 @@ export function ElectionHero({
   window,
   phase,
   openStateCount,
+  electionDay,
+  pollsClose,
 }: {
   electionDate: string | null
   electionName: string | null
@@ -73,15 +78,26 @@ export function ElectionHero({
   window: EarlyVotingInfo | null
   phase: EarlyVotingPhase | null
   openStateCount: number
+  electionDay: boolean
+  pollsClose: PollsClose | null
 }) {
   const stateName = stateCode ? getVoterResources(stateCode).name : null
   const daysAway = daysAwayLabel(electionDate ? daysUntil(electionDate) : null)
-  const { headline, detail, endLabel } = electionHeadline({ window, phase, stateName, openStateCount, electionName })
+  const { headline, detail, endLabel } = electionHeadline({
+    window,
+    phase,
+    stateName,
+    openStateCount,
+    electionName,
+    electionDay,
+    pollsClose,
+  })
   const calendarElection = electionDate
     ? { id: `general-${electionDate}`, name: electionName ?? 'Election Day', date: electionDate }
     : null
   const infoUrl = getVoterResources(stateCode).pollingPlaceUrl ?? 'https://vote.gov'
-  const open = phase?.phase === 'open'
+  const open = electionDay || phase?.phase === 'open'
+  const showWindow = window && phase?.phase !== 'ended' && !electionDay
 
   return (
     <View className={`gap-4 rounded-xl border p-5 ${open ? 'border-emerald-700/60 bg-emerald-950/30' : 'border-slate-700 bg-slate-800/60'}`}>
@@ -94,8 +110,8 @@ export function ElectionHero({
           {headline}
         </Text>
         {detail ? <Text className="mt-1 text-sm text-slate-300">{detail}</Text> : null}
-        {window?.note && phase?.phase !== 'ended' ? <Text className="mt-2 text-xs text-slate-400">{window.note}</Text> : null}
-        {window && phase?.phase !== 'ended' ? (
+        {showWindow && window.note ? <Text className="mt-2 text-xs text-slate-400">{window.note}</Text> : null}
+        {showWindow ? (
           <Text className="mt-2 text-xs text-slate-500">
             {formatShortDate(window.start)} – {endLabel} statewide; your county sets sites and hours. Source:{' '}
             <Text onPress={() => openUrl(window.sourceUrl)} className="text-slate-400 underline">
@@ -104,12 +120,14 @@ export function ElectionHero({
           </Text>
         ) : null}
       </View>
-      {electionDate ? (
+      {electionDay && pollsClose ? (
+        <PollsCountdown pollsClose={pollsClose} />
+      ) : electionDate ? (
         <View className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
           <Text className="text-xs font-semibold uppercase tracking-wider text-slate-500">Election Day</Text>
           <Text className="text-lg font-bold text-slate-100">{formatElectionDate(electionDate)}</Text>
           {daysAway ? <Text className="text-sm font-semibold text-blue-300">{daysAway}</Text> : null}
-          {calendarElection && canAddToCalendar(calendarElection, infoUrl) ? (
+          {!electionDay && calendarElection && canAddToCalendar(calendarElection, infoUrl) ? (
             <Pressable
               onPress={() => addToCalendar(calendarElection, infoUrl)}
               accessibilityRole="button"
@@ -125,20 +143,56 @@ export function ElectionHero({
   )
 }
 
+// Time left before the visitor's closest polling place closes, ticking each second.
+function PollsCountdown({ pollsClose }: { pollsClose: PollsClose }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const left = formatCountdown(pollsClose.at.getTime() - now)
+  const closesAt = formatClockTime(pollsClose.at)
+  return (
+    <View
+      className="rounded-lg border border-emerald-700/60 bg-slate-900/60 p-3"
+      accessibilityRole="timer"
+      accessibilityLabel={left ? `Polls close in ${left}, at ${closesAt}` : `Polls closed at ${closesAt}`}
+    >
+      <Text className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+        {left ? 'Polls close in' : 'Polls have closed'}
+      </Text>
+      {left ? (
+        <Text className="text-3xl font-bold tabular-nums text-emerald-300">{left}</Text>
+      ) : (
+        <Text className="text-sm text-slate-200">
+          Your closest polling place closed at {closesAt}. If you were in line by then, stay in line: you can still vote.
+        </Text>
+      )}
+      {left ? (
+        <Text className="mt-1 text-xs text-slate-400">
+          {closesAt} at {pollsClose.siteName || 'your closest polling place'}
+        </Text>
+      ) : null}
+    </View>
+  )
+}
+
 export function WhereToVote({
   voterInfo,
   point,
   stateCode,
   phase,
+  electionDay,
 }: {
   voterInfo: { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; data: VoterInfo }
   point: { lat: number; lon: number } | null
   stateCode: string | null
   phase: EarlyVotingPhase | null
+  electionDay: boolean
 }) {
   const resources = getVoterResources(stateCode)
   const data = voterInfo.status === 'ok' ? voterInfo.data : null
-  const sites = votingSitesView(data, phase, point)
+  const sites = votingSitesView(data, phase, point, electionDay)
   const moreNote = moreSitesNote(sites)
 
   return (

@@ -332,6 +332,7 @@ function ElectionHero({
     stateName,
     openStateCount: openStates.length,
     electionName,
+    electionDay: daysToElection === 0,
   })
 
   return (

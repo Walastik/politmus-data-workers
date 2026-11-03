@@ -66,3 +66,48 @@ export function splitPollingHours(
   }
   return result
 }
+
+const TIME = /(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\b\.?/gi
+
+// When a site closes on `date` (YYYY-MM-DD), read from its pollingHours text:
+// the last time on that day's line, e.g. "Tue, Nov 3: 7 am - 7 pm" gives 19:00.
+// A line without a date counts for any day unless `requireDate` is set.
+// Midnight comes back as hour 24 so it sorts after the rest of the day.
+export function closingTimeOn(
+  hours: string,
+  date: string,
+  options: { requireDate?: boolean } = {},
+): { hour: number; minute: number } | null {
+  const target = parseIsoDate(date)
+  if (!target) return null
+  const anchor = new Date(target.year, target.month - 1, target.day)
+  let dated: string | null = null
+  let undated: string | null = null
+  for (const line of hours.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const match = LINE_DATE.exec(line)
+    const month = match ? MONTHS.indexOf(match[2].toLowerCase()) : -1
+    if (!match || month < 0) {
+      undated ??= line
+      continue
+    }
+    const weekdayIndex = match[1] ? WEEKDAYS.indexOf(match[1].toLowerCase()) : -1
+    const day = resolveDate(month, Number(match[3]), weekdayIndex >= 0 ? weekdayIndex : null, anchor)
+    if (day && day.getTime() === anchor.getTime()) {
+      // Drop the date so its day number can't read as a time.
+      dated = line.slice(match[0].length)
+      break
+    }
+  }
+  const line = dated ?? (options.requireDate ? null : undated)
+  if (!line) return null
+  const times = [...line.matchAll(TIME)]
+  const last = times.at(-1)
+  if (!last) return null
+  const raw = Number(last[1])
+  const minute = last[2] ? Number(last[2]) : 0
+  if (raw < 1 || raw > 12 || minute > 59) return null
+  const pm = last[3].toLowerCase() === 'p'
+  const hour = raw === 12 ? (pm ? 12 : 24) : pm ? raw + 12 : raw
+  return { hour, minute }
+}
