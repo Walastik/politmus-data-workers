@@ -1,9 +1,19 @@
-import type { ReactNode } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { Pressable, Text, TextInput, View } from 'react-native'
+import { SafeAreaView as PlainSafeAreaView } from 'react-native-safe-area-context'
+import { withUniwind } from 'uniwind'
 
 import { openUrl } from '@/lib/links'
 
 import { Icons } from './icons'
+
+// Uniwind only styles React Native's own components, so the safe-area view
+// needs wrapping before className (e.g. a sheet's background) applies.
+const StyledSafeAreaView = withUniwind(PlainSafeAreaView)
+
+export function SafeAreaView(props: ComponentProps<typeof StyledSafeAreaView>) {
+  return <StyledSafeAreaView {...props} />
+}
 
 // A titled card, like the web app's Happening Now sections.
 export function Section({

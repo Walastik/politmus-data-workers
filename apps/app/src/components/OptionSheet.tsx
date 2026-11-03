@@ -1,7 +1,7 @@
 import { FlatList, Modal, Pressable, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { Icons } from './icons'
+import { SafeAreaView } from './ui'
 
 // A full list of choices in a sheet (the native stand-in for a <select>).
 export default function OptionSheet({

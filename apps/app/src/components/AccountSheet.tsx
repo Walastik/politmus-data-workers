@@ -1,11 +1,11 @@
 import { useAuth, useUser } from '@clerk/expo'
 import { useState } from 'react'
 import { ActivityIndicator, Alert, Modal, Pressable, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { openUrl } from '@/lib/links'
 
 import { LEGAL_CONTACT_EMAIL } from './Legal'
+import { SafeAreaView } from './ui'
 
 // The signed-in account on native: who you are, sign out, and delete the
 // account (Apple requires deletion in the app). Web uses Clerk's own profile.
