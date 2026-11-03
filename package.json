@@ -6,8 +6,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w apps/web",
-    "build": "npm run build -w apps/web",
+    "dev": "npm run web -w apps/app",
+    "build": "npm run build:web -w apps/app",
+    "dev:vite": "npm run dev -w apps/web",
+    "build:vite": "npm run build -w apps/web",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
     "app:ios": "npm run ios -w apps/app",

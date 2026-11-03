@@ -62,14 +62,13 @@ Local pipeline that pulls congressional data from the [Congress.gov API](https:/
 
    ```bash
    npm install
-   npm run dev     # apps/web on Vite, proxies /api to localhost:8000
-   npm test        # apps/web and packages/core
+   npm run dev       # the Expo app in the browser (npm run app:ios / app:android for the simulators)
+   npm run lint && npm run typecheck && npm test && npm run build
    ```
 
-   - `apps/web`: the React web app (Vite, Tailwind, Clerk).
-   - `apps/app`: the Expo app for iOS, Android and web (`npm run app:ios` / `app:android` / `app:web`); see `apps/app/README.md`.
-   - `packages/core`: platform-free TypeScript shared by both apps: API types, the API client (`createApiClient`), the shared location provider, and the display rules for every page. Keep DOM and React Native out of it (React is fine); put platform code in the apps.
-   - The website (politmus.com) is the Expo app's web export (`apps/app/Dockerfile`). `apps/web` is the previous Vite site, kept until the Expo site has run in production; its tests still cover the shared core.
+   - `apps/app`: the Expo app. One codebase for the iOS app, the Android app and the website (politmus.com is its static web export). See `apps/app/README.md`.
+   - `packages/core`: platform-free TypeScript shared by every build: API types, the API client (`createApiClient`), the shared location provider, and the display rules for every page. Keep DOM and React Native out of it (React is fine); put platform code in the app.
+   - `apps/web`: the previous Vite site, kept only as a rollback (`npm run dev:vite`, `npm run build:vite`); its tests still cover the shared core. New work goes in `apps/app`.
 
 ## Scripts
 
@@ -440,7 +439,7 @@ python ballot_wikipedia.py --save-db --until-election   # what the daily job run
 
 ## Deploy to Fly.io
 
-Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Expo app's static web export, `apps/app/Dockerfile`). The API has no public address: nginx proxies `/api/` to it over Flycast, so the site and the mobile apps call `https://politmus.com/api/...`. The web build bakes in an empty `EXPO_PUBLIC_API_URL` (same origin) and the live Clerk key from `apps/app/fly.toml`.
+Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `politmus-api` (FastAPI), and `politmus-web` (nginx serving the Expo app's static web export, `apps/app/Dockerfile`). The API has no public address: nginx proxies `/api/` to it over Flycast, so the site and the mobile apps call `https://politmus.com/api/...`. **[docs/deploy.md](docs/deploy.md)** has the full deploy notes: checks before and after, rollback, Clerk and Google OAuth settings, and what the mobile apps still need.
 
 ### First-time setup
 
@@ -462,16 +461,16 @@ Production is three Fly apps in `ord` (Chicago): `politmus-db` (Postgres), `poli
 3. After deploy:
 
    - Site: `https://politmus.com` (also `https://politmus-web.fly.dev`)
-   - API health: `https://politmus-api.fly.dev/api/health`
+   - API health: `https://politmus.com/api/health` (the API itself has no public address)
 
 ### Later deploys
 
 ```bash
-( cd backend && fly deploy )
+( cd backend && fly deploy )                                               # the API
 fly deploy . --config apps/app/fly.toml --dockerfile apps/app/Dockerfile  # the website, from the repo root
-# Roll back to the previous Vite site:
-# fly deploy . --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 ```
+
+See [docs/deploy.md](docs/deploy.md) for checks and rollback.
 
 ### GitHub Actions ingest
 

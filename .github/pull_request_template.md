@@ -22,7 +22,7 @@
 <!-- Say what you ran and what you saw. Delete lines that don't apply. -->
 
 - [ ] Backend tests: `cd backend && pytest --ignore=scripts`
-- [ ] Frontend: `npm run lint && npm test && npm run build` (repo root: web app and packages/core)
+- [ ] Frontend: `npm run lint && npm run typecheck && npm test && npm run build` (repo root: the Expo app, packages/core and the legacy Vite site)
 - [ ] Ran it by hand (command, page, or endpoint, and the result):
 - [ ] Not tested (explain why):
 
