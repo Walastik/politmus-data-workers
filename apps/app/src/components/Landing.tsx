@@ -4,6 +4,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native'
 
 import AsciiArt from './AsciiArt'
 import { Icons } from './icons'
+import { LegalLinks } from './Legal'
 import { LocationPicker } from './LocationBar'
 import SignUpLink from './SignUpLink'
 
@@ -29,6 +30,7 @@ export default function Landing() {
           Politmus: open data, transparent scoring. Built with public congressional data from Congress.gov, Google Civic
           Information API, and OpenStates.
         </Text>
+        <LegalLinks className="mt-4" />
       </View>
     </ScrollView>
   )
