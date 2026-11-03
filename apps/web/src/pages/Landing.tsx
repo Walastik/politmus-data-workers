@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 
 import LocationPicker from '../components/LocationPicker'
+import { LegalLinks } from './Legal'
 import AsciiAnimation from './AsciiAnimation'
 
 // ─── Fold 1 · Hero ────────────────────────────────────────────────────────────
@@ -572,6 +573,7 @@ export default function Landing() {
           congressional data from Congress.gov, Google Civic Information API,
           and OpenStates.
         </p>
+        <LegalLinks className="mt-4" />
       </footer>
     </div>
   )
