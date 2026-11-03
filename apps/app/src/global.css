@@ -1,0 +1,9 @@
+/* Clerk's web components live in the "clerk" layer (appearance.cssLayerName),
+   ordered between Tailwind's base and utilities so preflight doesn't erase them. */
+@layer theme, base, clerk, components, utilities;
+
+@import 'tailwindcss';
+@import 'uniwind';
+
+/* Class names returned by shared helpers (e.g. accountability colors). */
+@source '../../../packages/core/src';

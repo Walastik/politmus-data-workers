@@ -1,0 +1,32 @@
+# politmus-web: the previous Vite SPA + nginx, kept for rollback; the live
+# site deploys from apps/app/fly.toml. Builds from the repo root (npm workspaces):
+#   fly deploy . --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
+app = "politmus-web"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+  [build.args]
+        VITE_CLERK_PUBLISHABLE_KEY="pk_live_Y2xlcmsucG9saXRtdXMuY29tJA"
+
+[env]
+  API_UPSTREAM = "politmus-api.flycast:80"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

@@ -22,7 +22,7 @@
 <!-- Say what you ran and what you saw. Delete lines that don't apply. -->
 
 - [ ] Backend tests: `cd backend && pytest --ignore=scripts`
-- [ ] Frontend: `cd frontend && npm run lint && npm test && npm run build`
+- [ ] Frontend: `npm run lint && npm run typecheck && npm test && npm run build` (repo root: the Expo app, packages/core and the legacy Vite site)
 - [ ] Ran it by hand (command, page, or endpoint, and the result):
 - [ ] Not tested (explain why):
 
@@ -33,7 +33,7 @@
 - [ ] Schema change: added to `ensure_schema()` in `backend/init_db.py` and safe to re-run (Fly's release step runs it on every deploy)
 - [ ] Needs a data backfill or one-off command after deploy:
 - [ ] New or changed env vars / secrets (`.env.example`, `fly secrets set`, or GitHub Actions secrets):
-- [ ] Needs a deploy beyond the usual `fly deploy` for `backend/` and `frontend/`, or a change on the Mac Mini (new requirements, cron, Ollama model):
+- [ ] Needs a deploy beyond the usual `fly deploy` for `backend/` and the website (`apps/app/fly.toml`), or a change on the Mac Mini (new requirements, cron, Ollama model):
 - [ ] Changes scheduled GitHub Actions ingest
 
 ## Screenshots

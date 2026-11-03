@@ -1,0 +1,20 @@
+{
+  "name": "politmus",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run web -w apps/app",
+    "build": "npm run build:web -w apps/app",
+    "dev:vite": "npm run dev -w apps/web",
+    "build:vite": "npm run build -w apps/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "app:ios": "npm run ios -w apps/app",
+    "app:android": "npm run android -w apps/app",
+    "app:web": "npm run web -w apps/app",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

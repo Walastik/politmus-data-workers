@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-136 -30 860 860" role="img">
+  <title>Politmus</title>
+  <defs>
+    <linearGradient id="f-litmus" gradientUnits="userSpaceOnUse" x1="60" y1="0" x2="250" y2="800">
+      <stop offset="0" stop-color="#DC2626"/>
+      <stop offset=".28" stop-color="#DC2626"/>
+      <stop offset=".5" stop-color="#7C3AED"/>
+      <stop offset=".72" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <clipPath id="f-clip"><path clip-rule="evenodd" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/></clipPath>
+    <linearGradient id="f-foldShade" gradientUnits="userSpaceOnUse" x1="0" y1="536" x2="0" y2="660">
+      <stop offset="0" stop-color="#1D4ED8" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#1D4ED8" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#f-litmus)" fill-rule="evenodd" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/>
+  <g stroke="#111111" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"><path fill="none" fill-rule="evenodd" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/></g>
+</svg>
