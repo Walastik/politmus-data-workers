@@ -20,8 +20,9 @@ const FEED_ICONS: Record<FeedIcon, (typeof Icons)[keyof typeof Icons]> = {
 }
 
 // Native counterpart of the web FeedItemCard; labels and colours come from
-// @politmus/core/feedItem so the two read the same.
-export default function FeedItemRow({ entry }: { entry: FeedEntry }) {
+// @politmus/core/feedItem so the two read the same. In a desktop grid the
+// cell spaces the cards and they fill its height.
+export default function FeedItemRow({ entry, grid = false }: { entry: FeedEntry; grid?: boolean }) {
   const { item, related } = entry
   const [showRelated, setShowRelated] = useState(false)
   const { label, icon, tone } = feedKindStyle(item, related.length + 1)
@@ -33,7 +34,7 @@ export default function FeedItemRow({ entry }: { entry: FeedEntry }) {
   const open = bill ? () => openBill(bill) : official ? () => openProfile(official) : undefined
 
   return (
-    <View className="mx-4 mb-3 rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <View className={`rounded-lg border border-slate-700 bg-slate-800 p-4 ${grid ? 'h-full' : 'mx-4 mb-3'}`}>
       <Pressable
         onPress={open}
         disabled={!open}

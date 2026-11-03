@@ -4,17 +4,25 @@ import { ActivityIndicator, RefreshControl, ScrollView, SectionList, Text, View 
 
 import FeedItemRow from '@/components/FeedItemRow'
 import { Chip } from '@/components/ui'
+import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { useFeed } from '@/lib/queries'
 
 export default function FeedScreen() {
   const [filterKey, setFilterKey] = useState('all')
   const [level, setLevel] = useState<string>('all')
   const feed = useFeed(filterKey, level)
+  const columns = useGridColumns(2)
 
+  // SectionList has no numColumns, so each section's entries go in rows of
+  // `columns` (one per row on phones and the native app).
   const sections = useMemo(() => {
     const items = feed.data?.pages.flatMap((page) => (Array.isArray(page.items) ? page.items : [])) ?? []
-    return groupFeed(items).map(({ label, entries }) => ({ title: label, data: entries }))
-  }, [feed.data])
+    return groupFeed(items).map(({ label, entries }) => {
+      const rows = []
+      for (let i = 0; i < entries.length; i += columns) rows.push(entries.slice(i, i + columns))
+      return { title: label, data: rows }
+    })
+  }, [feed.data, columns])
 
   const filters = (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-4 py-3">
@@ -32,8 +40,20 @@ export default function FeedScreen() {
     <View className="flex-1 bg-slate-900">
       <SectionList
         sections={sections}
-        keyExtractor={(entry) => String(entry.item.id)}
-        renderItem={({ item }) => <FeedItemRow entry={item} />}
+        keyExtractor={(row) => String(row[0].item.id)}
+        renderItem={({ item: row }) =>
+          columns > 1 ? (
+            <View className="flex-row px-2.5">
+              {row.map((entry) => (
+                <View key={entry.item.id} style={gridCellStyle(columns)}>
+                  <FeedItemRow entry={entry} grid />
+                </View>
+              ))}
+            </View>
+          ) : (
+            <FeedItemRow entry={row[0]} />
+          )
+        }
         renderSectionHeader={({ section }) => (
           <Text className="bg-slate-900 px-4 pt-3 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
             {section.title}
