@@ -9,7 +9,7 @@ import { openUrl } from '@/lib/links'
 const OPERATOR = 'Walastik LLC'
 const LEGAL_CONTACT_EMAIL = 'walastikllc@gmail.com'
 const GOVERNING_STATE = 'Texas'
-const LAST_UPDATED = 'October 31, 2026'
+const LAST_UPDATED = 'November 3, 2026'
 
 function LegalPage({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -108,18 +108,21 @@ export function PrivacyPolicy() {
             stored with your account so you don't have to enter it again.
           </Item>
           <Item>
-            <Strong>Device location.</Strong> If you choose "use my location," your browser shares your approximate
-            coordinates with the Service. We use them only to perform the lookup you asked for. You can turn off
+            <Strong>Device location.</Strong> If you choose "use my location," your browser or device shares your
+            approximate coordinates with the Service. We use them only to perform the lookup you asked for. You can turn
+            off
             location access at any time in your browser or device settings.
           </Item>
           <Item>
-            <Strong>Information stored on your device.</Strong> Your most recent lookup address is kept in your
-            browser's local storage so the Service remembers it between visits. Clerk sets cookies that keep you signed
-            in. We do not use advertising or cross-site tracking cookies.
+            <Strong>Information stored on your device.</Strong> Your most recent lookup address is kept on your device
+            so the Service remembers it between visits: in your browser's local storage on the website, and in the app's
+            secure storage on iOS and Android. To keep you signed in, Clerk sets cookies on the website and stores a
+            sign-in token in the app's secure storage. We do not use advertising or cross-site tracking cookies.
           </Item>
           <Item>
-            <Strong>Technical information.</Strong> Like most websites, our servers and hosting provider receive your
-            IP address, browser type, and the pages you request. We use IP addresses to limit abusive traffic and keep
+            <Strong>Technical information.</Strong> Like most websites and apps, our servers and hosting provider
+            receive your IP address, browser or device type, and the pages and data you request. We use IP addresses to
+            limit abusive traffic and keep
             the Service running.
           </Item>
         </List>
@@ -127,7 +130,8 @@ export function PrivacyPolicy() {
 
       <Section title="How we use information">
         <List>
-          <Item>To provide the Service, including looking up your representatives, elections, and voting locations.</Item>
+          <Item>To provide the Service, including looking up your representatives, elections, and voting
+          locations.</Item>
           <Item>To create and secure your account and keep you signed in.</Item>
           <Item>To remember your preferences, such as a saved address.</Item>
           <Item>To protect the Service from abuse, fix problems, and improve how it works.</Item>
@@ -156,7 +160,7 @@ export function PrivacyPolicy() {
           <Item>
             <Strong>Photon (Komoot)</Strong> receives partial addresses as you type, to suggest matches, and your
             coordinates if you use your location, to find the nearest street address. These requests go directly from
-            your browser.
+            your browser or device.
           </Item>
           <Item>
             <Strong>Fly.io</Strong> hosts our servers.
@@ -193,9 +197,11 @@ export function PrivacyPolicy() {
       <Section title="Your choices and rights">
         <List>
           <Item>You can use most of the Service without an account.</Item>
-          <Item>You can change or remove your saved address in your account settings.</Item>
-          <Item>You can delete your account from your account settings, or by emailing us.</Item>
-          <Item>You can clear your browser's storage to remove the remembered address from your device.</Item>
+          <Item>You can change or remove your saved address in your account settings on the website. In the apps, you
+          can save a different address from the location bar.</Item>
+          <Item>You can delete your account from your account settings on the website, or by emailing us.</Item>
+          <Item>You can clear your browser's storage, or uninstall the app, to remove the remembered address from your
+          device.</Item>
         </List>
         <P>
           Depending on where you live, you may have the right to access, correct, delete, or receive a copy of your
@@ -282,7 +288,8 @@ export function TermsOfService() {
         <P>When using the Service, you agree not to:</P>
         <List>
           <Item>Break the law or use the Service to harass, threaten, or impersonate anyone.</Item>
-          <Item>Scrape, crawl, or make automated requests in a way that burdens the Service or gets around rate limits.</Item>
+          <Item>Scrape, crawl, or make automated requests in a way that burdens the Service or gets around rate
+          limits.</Item>
           <Item>Try to access accounts, data, or systems you are not authorized to access.</Item>
           <Item>Interfere with the security or operation of the Service, or introduce malicious code.</Item>
           <Item>Present information from the Service in a misleading way, or as coming from us when it doesn't.</Item>

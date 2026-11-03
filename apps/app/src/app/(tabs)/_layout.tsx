@@ -1,5 +1,7 @@
 import { Tabs } from 'expo-router'
+import { View } from 'react-native'
 
+import AboutButton from '@/components/AboutButton'
 import AccountButton from '@/components/AccountButton'
 import DesktopNav from '@/components/DesktopNav'
 import { Icons } from '@/components/icons'
@@ -22,7 +24,12 @@ export default function TabLayout() {
       tabBar={wide ? (props) => <DesktopNav {...props} items={TABS} /> : undefined}
       screenOptions={{
         headerTintColor: '#f8fafc',
-        headerRight: () => <AccountButton />,
+        headerRight: () => (
+          <View className="flex-row items-center">
+            <AboutButton />
+            <AccountButton />
+          </View>
+        ),
         tabBarActiveTintColor: '#f8fafc',
         tabBarInactiveTintColor: '#94a3b8',
         ...(wide ? { tabBarPosition: 'top' as const, headerShown: false, sceneStyle: wideContentStyle } : {}),

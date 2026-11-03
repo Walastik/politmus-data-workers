@@ -7,7 +7,7 @@ import PageHeader, { PageContainer } from '../components/PageHeader'
 const OPERATOR = 'Walastik LLC'
 const LEGAL_CONTACT_EMAIL = 'walastikllc@gmail.com'
 const GOVERNING_STATE = 'Texas'
-const LAST_UPDATED = 'October 31, 2026'
+const LAST_UPDATED = 'November 3, 2026'
 
 function LegalPage({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -45,7 +45,8 @@ export function PrivacyPolicy() {
       <p>
         Politmus helps you see who represents you, how they vote, and where to vote. Politmus is operated by{' '}
         {OPERATOR} ("we," "us," or "our"). This policy explains what information we collect when you use the
-        Politmus website and apps (the "Service"), how we use it, and the choices you have. We collect as little as we can to make the Service work, and we do not sell your personal
+        Politmus website and apps (the "Service"), how we use it, and the choices you have. We collect as little as we
+        can to make the Service work, and we do not sell your personal
         information.
       </p>
 
@@ -64,17 +65,21 @@ export function PrivacyPolicy() {
           </li>
           <li>
             <strong className="text-slate-100">Device location.</strong> If you choose "use my location," your browser
-            shares your approximate coordinates with the Service. We use them only to perform the lookup you asked for.
+            or device shares your approximate coordinates with the Service. We use them only to perform the lookup you
+            asked for.
             You can turn off location access at any time in your browser or device settings.
           </li>
           <li>
             <strong className="text-slate-100">Information stored on your device.</strong> Your most recent lookup
-            address is kept in your browser's local storage so the Service remembers it between visits. Clerk sets
-            cookies that keep you signed in. We do not use advertising or cross-site tracking cookies.
+            address is kept on your device so the Service remembers it between visits: in your browser's local storage
+            on the website, and in the app's secure storage on iOS and Android. To keep you signed in, Clerk sets
+            cookies on the website and stores a sign-in token in the app's secure storage. We do not use advertising or
+            cross-site tracking cookies.
           </li>
           <li>
-            <strong className="text-slate-100">Technical information.</strong> Like most websites, our servers and
-            hosting provider receive your IP address, browser type, and the pages you request. We use IP addresses to
+            <strong className="text-slate-100">Technical information.</strong> Like most websites and apps, our servers
+            and hosting provider receive your IP address, browser or device type, and the pages and data you request. We
+            use IP addresses to
             limit abusive traffic and keep the Service running.
           </li>
         </List>
@@ -112,7 +117,7 @@ export function PrivacyPolicy() {
           <li>
             <strong className="text-slate-100">Photon (Komoot)</strong> receives partial addresses as you type, to
             suggest matches, and your coordinates if you use your location, to find the nearest street address. These
-            requests go directly from your browser.
+            requests go directly from your browser or device.
           </li>
           <li>
             <strong className="text-slate-100">Fly.io</strong> hosts our servers.
@@ -154,9 +159,11 @@ export function PrivacyPolicy() {
       <Section title="Your choices and rights">
         <List>
           <li>You can use most of the Service without an account.</li>
-          <li>You can change or remove your saved address in your account settings.</li>
-          <li>You can delete your account from your account settings, or by emailing us.</li>
-          <li>You can clear your browser's storage to remove the remembered address from your device.</li>
+          <li>You can change or remove your saved address in your account settings on the website. In the apps, you can
+          save a different address from the location bar.</li>
+          <li>You can delete your account from your account settings on the website, or by emailing us.</li>
+          <li>You can clear your browser's storage, or uninstall the app, to remove the remembered address from your
+          device.</li>
         </List>
         <p>
           Depending on where you live, you may have the right to access, correct, delete, or receive a copy of your
@@ -306,7 +313,8 @@ export function TermsOfService() {
 
       <Section title="Indemnification">
         <p>
-          You agree to defend and hold harmless {OPERATOR} and its members, managers, and contractors from claims arising out of your misuse of
+          You agree to defend and hold harmless {OPERATOR} and its members, managers, and contractors from claims
+          arising out of your misuse of
           the Service or your violation of these terms.
         </p>
       </Section>
