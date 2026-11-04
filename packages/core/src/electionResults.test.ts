@@ -209,3 +209,29 @@ describe('results link and snapshot URL', () => {
     expect(snapshotRequestUrl('/dev-results.json', at)).toBe('/dev-results.json')
   })
 })
+
+describe('priciest votes', () => {
+  it('skips races still reporting', () => {
+    const race = (done: number) => ({
+      office: 'S' as const,
+      district: 0,
+      label: 'U.S. Senate',
+      special: false,
+      totalVotes: 20000,
+      reporting: { done, total: 10, unit: 'precincts' as const },
+      counties: {},
+      candidates: [
+        { name: 'A Lead', party: 'DEM', votes: 12000, profile: { receipts: 9_000_000 } as never },
+        { name: 'B Trail', party: 'REP', votes: 8000 },
+      ],
+    })
+    const snapshot = (done: number) =>
+      ({
+        election: { date: '2026-11-03', name: 'x' },
+        generatedAt: '2026-11-04T00:00:00Z',
+        states: { AK: { state: 'AK', name: 'Alaska', source: { name: 's', url: 'u', lastUpdated: null }, registered: null, ballots: null, counties: {}, races: [race(done)] } },
+      }) as never
+    expect(resultHighlights(snapshot(6)).some((h) => h.kind === 'priciest-votes')).toBe(false)
+    expect(resultHighlights(snapshot(10)).some((h) => h.kind === 'priciest-votes')).toBe(true)
+  })
+})

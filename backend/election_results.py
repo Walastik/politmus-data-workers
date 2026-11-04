@@ -15,6 +15,8 @@ Sources (all official state election offices):
 - TotalVote results sites: Montana, Nebraska, New Mexico, South Dakota, Oregon
 - South Carolina Election Commission results spreadsheets
 - Delaware Department of Elections results files
+- Minnesota Secretary of State and Florida Division of Elections media files
+- Louisiana Secretary of State results data; Alaska Division of Elections precinct file
 
 The Election Results GitHub Action runs this every few minutes and publishes
 the snapshot to the election-results-data branch (see docs/deploy.md).
@@ -26,21 +28,25 @@ to Politmus races (FEC data) for photos, money raised and incumbency.
 from __future__ import annotations
 
 import argparse
+import csv
 import io
 import json
 import re
 import sys
+import tempfile
 import time
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
 from html import unescape
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
+import certifi
 import requests
 
 USER_AGENT = "Politmus election results (https://politmus.com)"
@@ -105,6 +111,8 @@ class StateResults:
 PARTY_CODES = {
     "dem": "DEM", "democratic": "DEM", "democrat": "DEM", "d": "DEM",
     "rep": "REP", "republican": "REP", "r": "REP",
+    # Minnesota's Democratic-Farmer-Labor Party is the state's Democratic Party.
+    "dfl": "DEM",
     "lib": "LIB", "lbr": "LIB", "libertarian": "LIB", "l": "LIB",
     "grn": "GRN", "green": "GRN", "g": "GRN",
     "ind": "IND", "independent": "IND", "i": "IND", "una": "IND", "unaffiliated": "IND",
@@ -865,6 +873,357 @@ def fetch_delaware() -> StateResults:
     )
 
 
+# ---- Minnesota and Florida: results files published for media ---------------
+
+
+def last_modified(response) -> str | None:
+    stamp = response.headers.get("Last-Modified")
+    if not stamp:
+        return None
+    try:
+        return parsedate_to_datetime(stamp).astimezone(timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def county_totals(rows: dict[str, dict[str, int]], names: list[str]) -> dict[str, list[int]]:
+    return {county: [votes.get(n, 0) for n in names] for county, votes in rows.items()}
+
+
+MN_FILES = "https://electionresultsfiles.sos.mn.gov/20261103"
+# The Secretary of State numbers counties 01-87 alphabetically, the same order as
+# their FIPS codes (27001, 27003, ...). Names as the map spells them.
+MN_COUNTIES = [
+    "Aitkin", "Anoka", "Becker", "Beltrami", "Benton", "Big Stone", "Blue Earth", "Brown", "Carlton", "Carver",
+    "Cass", "Chippewa", "Chisago", "Clay", "Clearwater", "Cook", "Cottonwood", "Crow Wing", "Dakota", "Dodge",
+    "Douglas", "Faribault", "Fillmore", "Freeborn", "Goodhue", "Grant", "Hennepin", "Houston", "Hubbard", "Isanti",
+    "Itasca", "Jackson", "Kanabec", "Kandiyohi", "Kittson", "Koochiching", "Lac qui Parle", "Lake",
+    "Lake of the Woods", "Le Sueur", "Lincoln", "Lyon", "McLeod", "Mahnomen", "Marshall", "Martin", "Meeker",
+    "Mille Lacs", "Morrison", "Mower", "Murray", "Nicollet", "Nobles", "Norman", "Olmsted", "Otter Tail",
+    "Pennington", "Pine", "Pipestone", "Polk", "Pope", "Ramsey", "Red Lake", "Redwood", "Renville", "Rice", "Rock",
+    "Roseau", "St. Louis", "Scott", "Sherburne", "Sibley", "Stearns", "Steele", "Stevens", "Swift", "Todd",
+    "Traverse", "Wabasha", "Wadena", "Waseca", "Washington", "Watonwan", "Wilkin", "Winona", "Wright",
+    "Yellow Medicine",
+]
+MN_HOUSE = re.compile(r"^U\.S\. Representative District (\d+)", re.I)
+
+
+def mn_races(text: str) -> list[Race]:
+    """allracesbycounty.txt: one row per county and candidate,
+    'MN;01;;0102;U.S. Senator;;1001;Name;;;IND;51;51;180;2.01;8954'
+    (state, county, precinct, office id, office, district, candidate id,
+    name, suffix, incumbent, party, precincts reporting, precincts, votes, %, total)."""
+    contests: dict[str, dict] = {}
+    for line in text.splitlines():
+        f = line.split(";")
+        if len(f) < 16:
+            continue
+        title = f[4].strip()
+        senate = title.lower().startswith("u.s. senator")
+        house = MN_HOUSE.match(title)
+        if not senate and not house:
+            continue
+        contest = contests.setdefault(title, {"senate": senate, "house": house, "candidates": {}, "counties": {}, "units": {}})
+        name = " ".join(f[7].split())
+        candidate = contest["candidates"].setdefault(
+            name,
+            Candidate(
+                name="Write-in" if f[10] == "WI" else name,
+                party="" if f[10] == "WI" else party_code(f[10]),
+                votes=0,
+                incumbent=f[9].strip().upper() == "I",
+                write_in=f[10] == "WI" or bool(WRITE_IN.search(name)),
+            ),
+        )
+        votes = to_int(f[13])
+        candidate.votes += votes
+        county_id = to_int(f[1])
+        county = MN_COUNTIES[county_id - 1] if 0 < county_id <= len(MN_COUNTIES) else None
+        if county:
+            contest["counties"].setdefault(county, {})[name] = votes
+            contest["units"][county] = (to_int(f[11]), to_int(f[12]))
+    races = []
+    for title, c in contests.items():
+        names = list(c["candidates"])
+        district = 0 if c["senate"] else int(c["house"].group(1))
+        races.append(
+            Race(
+                office="S" if c["senate"] else "H",
+                district=district,
+                label="U.S. Senate" if c["senate"] else f"U.S. House District {district}",
+                special="special" in title.lower(),
+                candidates=list(c["candidates"].values()),
+                reporting={
+                    "done": sum(done for done, _ in c["units"].values()),
+                    "total": sum(total for _, total in c["units"].values()),
+                    "unit": "precincts",
+                },
+                counties=county_totals(c["counties"], names),
+            )
+        )
+    return races
+
+
+def fetch_minnesota() -> StateResults:
+    response = session.get(f"{MN_FILES}/allracesbycounty.txt", timeout=120)
+    response.raise_for_status()
+    return StateResults(
+        state="MN",
+        name="Minnesota",
+        source_name="Minnesota Secretary of State",
+        source_url="https://electionresults.sos.mn.gov/",
+        last_updated=last_modified(response),
+        races=mn_races(response.content.decode("utf-8", errors="replace")),
+    )
+
+
+FL_FILE = "https://flelectionfiles.floridados.gov/enightfilespublic/20261103_ElecResultsFL.txt"
+FL_HOUSE = re.compile(r"District\s+(\d+)", re.I)
+
+
+def fl_races(text: str) -> list[Race]:
+    """The tab-delimited election night file: one row per county and candidate."""
+    lines = text.splitlines()
+    if not lines:
+        return []
+    header = lines[0].split("\t")
+    contests: dict[tuple, dict] = {}
+    seen: set[tuple] = set()
+    for line in lines[1:]:
+        row = dict(zip(header, line.split("\t")))
+        code = (row.get("RaceCode") or "").strip()
+        if code not in ("USS", "USR"):
+            continue
+        # The file repeats some rows; count each county and candidate once.
+        key = tuple(row.get(k, "").strip() for k in ("RaceName", "CountyCode", "CanNameLast", "CanNameFirst", "PartyCode"))
+        if key in seen:
+            continue
+        seen.add(key)
+        title = row["RaceName"].strip()
+        house = FL_HOUSE.search(title) if code == "USR" else None
+        if code == "USR" and not house:
+            continue
+        contest = contests.setdefault((code, title), {"house": house, "candidates": {}, "counties": {}, "units": {}})
+        party = (row.get("PartyCode") or "").strip()
+        name = " ".join(p for p in (row.get("CanNameFirst", ""), row.get("CanNameMiddle", ""), row.get("CanNameLast", "")) if p.strip())
+        name = " ".join(name.split()) or "Write-in"
+        write_in = party == "WRI" or bool(WRITE_IN.search(name))
+        candidate = contest["candidates"].setdefault(
+            name, Candidate(name=name, party="" if write_in else party_code(party), votes=0, write_in=write_in)
+        )
+        votes = to_int(row.get("CanVotes"))
+        candidate.votes += votes
+        county = county_key(row.get("CountyName", ""))
+        contest["counties"].setdefault(county, {})[name] = votes
+        contest["units"][county] = (to_int(row.get("PrecinctsReporting")), to_int(row.get("Precincts")))
+    races = []
+    for (code, title), c in contests.items():
+        district = int(c["house"].group(1)) if c["house"] else 0
+        races.append(
+            Race(
+                office="S" if code == "USS" else "H",
+                district=district,
+                label="U.S. Senate" if code == "USS" else f"U.S. House District {district}",
+                special="special" in title.lower() or "unexpired" in title.lower(),
+                candidates=list(c["candidates"].values()),
+                reporting={
+                    "done": sum(done for done, _ in c["units"].values()),
+                    "total": sum(total for _, total in c["units"].values()),
+                    "unit": "precincts",
+                },
+                counties=county_totals(c["counties"], list(c["candidates"])),
+            )
+        )
+    return sorted(races, key=lambda r: (r.office != "S", r.district))
+
+
+def fetch_florida() -> StateResults:
+    # The file's CDN keeps a stale copy at the bare URL; the Downloads page
+    # links the current one with a ?v= version, so take the link from there.
+    downloads = session.get("https://floridaelectionwatch.gov/Downloads", timeout=60)
+    downloads.raise_for_status()
+    link = re.search(r'href="(https://flelectionfiles\.floridados\.gov/enightfilespublic/20261103_ElecResultsFL\.txt[^"]*)"', downloads.text)
+    response = session.get(unescape(link.group(1)) if link else FL_FILE, timeout=120)
+    response.raise_for_status()
+    return StateResults(
+        state="FL",
+        name="Florida",
+        source_name="Florida Division of Elections",
+        source_url="https://floridaelectionwatch.gov/",
+        last_updated=last_modified(response),
+        races=fl_races(response.content.decode("utf-8-sig", errors="replace")),
+    )
+
+
+# ---- Louisiana ----------------------------------------------------------------
+
+LA_DATA = "https://voterportal.sos.la.gov/ElectionResults/ElectionResults/Data"
+LA_DATE = "20261103"
+# The Secretary of State numbers parishes 01-64 alphabetically, the same order
+# as their FIPS codes. Names as the map spells them.
+LA_PARISHES = [
+    "Acadia", "Allen", "Ascension", "Assumption", "Avoyelles", "Beauregard", "Bienville", "Bossier", "Caddo",
+    "Calcasieu", "Caldwell", "Cameron", "Catahoula", "Claiborne", "Concordia", "De Soto", "East Baton Rouge",
+    "East Carroll", "East Feliciana", "Evangeline", "Franklin", "Grant", "Iberia", "Iberville", "Jackson", "Jefferson",
+    "Jefferson Davis", "Lafayette", "Lafourche", "LaSalle", "Lincoln", "Livingston", "Madison", "Morehouse",
+    "Natchitoches", "Orleans", "Ouachita", "Plaquemines", "Pointe Coupee", "Rapides", "Red River", "Richland",
+    "Sabine", "St. Bernard", "St. Charles", "St. Helena", "St. James", "St. John the Baptist", "St. Landry",
+    "St. Martin", "St. Mary", "St. Tammany", "Tangipahoa", "Tensas", "Terrebonne", "Union", "Vermilion", "Vernon",
+    "Washington", "Webster", "West Baton Rouge", "West Carroll", "West Feliciana", "Winn",
+]
+LA_HOUSE = re.compile(r"U\.\s*S\.\s*Representative\s*--\s*(\d+)", re.I)
+LA_CHOICE = re.compile(r"^(.*?)\s*\(([A-Z]+)\)\s*$")
+
+
+def la_blob(path: str):
+    time.sleep(POLITE_DELAY)
+    return get_json(LA_DATA, blob=f"{LA_DATE}/{path}")
+
+
+def as_list(value) -> list:
+    return value if isinstance(value, list) else [value] if value else []
+
+
+def la_choice(desc: str) -> tuple[str, str]:
+    """'"Jamie" Davis (DEM)' -> ('"Jamie" Davis', 'DEM')."""
+    match = LA_CHOICE.match(desc.strip())
+    name, party = (match.group(1), match.group(2)) if match else (desc.strip(), "")
+    return " ".join(name.split()), {"NOPTY": "IND", "NOPARTY": "IND", "OTHER": "OTH"}.get(party, party)
+
+
+def fetch_louisiana() -> StateResults:
+    contests = as_list(la_blob("RacesCandidates_Multiparish.htm")["Races"]["Race"])
+    totals = {r["ID"]: r for r in as_list(la_blob("Votes_Multiparish.htm")["Races"]["Race"])}
+    races, registered = [], None
+    for contest in contests:
+        title = contest.get("SpecificTitle") or ""
+        senate = re.match(r"U\.\s*S\.\s*Senator", title, re.I)
+        house = LA_HOUSE.search(title)
+        if not senate and not house:
+            continue
+        choices = as_list(contest.get("Choice"))
+        total = totals.get(contest["ID"], {})
+        votes = {c["ID"]: to_int(c.get("VoteTotal")) for c in as_list(total.get("Choice"))}
+        candidates = []
+        for choice in choices:
+            name, party = la_choice(choice.get("Desc") or "")
+            candidates.append(Candidate(name=name, party=party_code(party), votes=votes.get(choice["ID"], 0), write_in=bool(WRITE_IN.search(name))))
+        by_parish = {}
+        for parish in as_list(la_blob(f"VotesRaceByParish/Votes_{contest['ID']}.htm")["Parishes"]["Parish"]):
+            index = to_int(parish.get("ParishValue"))
+            if not 0 < index <= len(LA_PARISHES):
+                continue
+            parish_votes = {c["ID"]: to_int(c.get("VoteTotal")) for c in as_list(parish.get("Choice"))}
+            by_parish[LA_PARISHES[index - 1]] = [parish_votes.get(c["ID"], 0) for c in choices]
+        if senate:
+            registered = to_int(total.get("VoterCountQualified")) or None
+        district = 0 if senate else int(house.group(1))
+        races.append(
+            Race(
+                office="S" if senate else "H",
+                district=district,
+                label="U.S. Senate" if senate else f"U.S. House District {district}",
+                candidates=candidates,
+                reporting={"done": to_int(total.get("PrecinctsReporting")), "total": to_int(total.get("PrecinctsExpected")), "unit": "precincts"},
+                counties=by_parish,
+            )
+        )
+    written = None
+    try:
+        written = datetime.fromisoformat(la_blob("RacesCandidates_Multiparish.htm")["Races"]["WriteTime"]).replace(tzinfo=ZoneInfo("America/Chicago")).isoformat()
+    except (KeyError, ValueError, requests.RequestException):
+        pass
+    return StateResults(
+        state="LA",
+        name="Louisiana",
+        source_name="Louisiana Secretary of State",
+        source_url="https://voterportal.sos.la.gov/graphical",
+        last_updated=written,
+        races=races,
+        registered=registered,
+    )
+
+
+# ---- Alaska --------------------------------------------------------------------
+
+AK_CSV = "https://www.elections.alaska.gov/enr/26GENR/results/GA_ENR_Precinct_State_of_Alaska.csv"
+
+
+def ak_name(raw: str) -> str:
+    """'Sullivan, Dan S.' -> 'Dan S. Sullivan'; 'Sullivan, Daniel J. Jr.' -> 'Daniel J. Sullivan Jr.'"""
+    last, _, first = raw.partition(",")
+    if not first:
+        return raw.strip()
+    first = first.strip()
+    suffix = re.search(r"\s+(Jr\.?|Sr\.?|II|III|IV)$", first)
+    if suffix:
+        first = first[: suffix.start()]
+    return " ".join(f"{first} {last.strip()}{(' ' + suffix.group(1)) if suffix else ''}".split())
+
+
+def ak_races(text: str) -> tuple[list[Race], int | None, int | None]:
+    """The statewide precinct CSV: one row per precinct, contest and candidate.
+    Alaska ranks choices; these are first-choice counts."""
+    contests: dict[str, dict] = {}
+    registered, ballots = {}, {}
+    for row in csv.DictReader(io.StringIO(text)):
+        title = (row.get("Contest_title") or "").strip()
+        precinct = row.get("Pct_Id") or row.get("Precinct_name")
+        registered[precinct] = to_int(row.get("Reg_voters"))
+        if title not in ("U.S. Senator", "U.S. Representative"):
+            continue
+        contest = contests.setdefault(title, {"candidates": {}, "precincts": {}})
+        name = ak_name(row.get("candidate_name") or "")
+        candidate = contest["candidates"].setdefault(
+            name, Candidate(name=name, party=party_code(row.get("Party_Code")), votes=0, write_in=bool(WRITE_IN.search(name)))
+        )
+        candidate.votes += to_int(row.get("total_votes"))
+        contest["precincts"][precinct] = to_int(row.get("total_ballots"))
+        if title == "U.S. Senator":
+            ballots[precinct] = to_int(row.get("total_ballots"))
+    races = []
+    for title, c in contests.items():
+        senate = title == "U.S. Senator"
+        races.append(
+            Race(
+                office="S" if senate else "H",
+                district=0,
+                label="U.S. Senate (first choices)" if senate else "U.S. House At-Large (first choices)",
+                candidates=list(c["candidates"].values()),
+                reporting={"done": sum(1 for b in c["precincts"].values() if b), "total": len(c["precincts"]), "unit": "precincts"},
+            )
+        )
+    return races, sum(registered.values()) or None, sum(ballots.values()) or None
+
+
+# elections.alaska.gov serves an old intermediate certificate instead of the
+# one that signed its own. This is GlobalSign's published intermediate (from the
+# certificate's AIA link), added to the usual roots; verification stays on.
+AK_INTERMEDIATE = Path(__file__).with_name("certs") / "globalsign-gcc-r46-ov-tls-ca-2025.pem"
+
+
+def ak_ca_bundle() -> str:
+    bundle = Path(tempfile.gettempdir()) / "politmus-alaska-ca.pem"
+    bundle.write_text(Path(certifi.where()).read_text() + AK_INTERMEDIATE.read_text())
+    return str(bundle)
+
+
+def fetch_alaska() -> StateResults:
+    response = session.get(AK_CSV, timeout=120, verify=ak_ca_bundle())
+    response.raise_for_status()
+    races, registered, ballots = ak_races(response.content.decode("utf-8-sig", errors="replace"))
+    return StateResults(
+        state="AK",
+        name="Alaska",
+        source_name="Alaska Division of Elections",
+        source_url="https://www.elections.alaska.gov/election-results/",
+        last_updated=last_modified(response),
+        races=races,
+        registered=registered,
+        ballots=ballots,
+    )
+
+
 ADAPTERS: dict[str, Callable[[], StateResults]] = {
     "GA": lambda: fetch_enhanced_voting("GA"),
     "VA": lambda: fetch_enhanced_voting("VA"),
@@ -875,6 +1234,10 @@ ADAPTERS: dict[str, Callable[[], StateResults]] = {
     "RI": lambda: fetch_enhanced_voting("RI"),
     "SC": fetch_south_carolina,
     "DE": fetch_delaware,
+    "MN": fetch_minnesota,
+    "FL": fetch_florida,
+    "LA": fetch_louisiana,
+    "AK": fetch_alaska,
     **{state: (lambda s=state: fetch_totalvote(s)) for state in TOTALVOTE},
 }
 
@@ -917,12 +1280,17 @@ def attach_profiles(results: StateResults) -> None:
         known = by_race.get((race.office, race.district))
         if not known:
             continue
-        for candidate in race.candidates:
+        # Each Politmus candidate goes to one ballot line, the leading one when
+        # two share a surname (Alaska has two Sullivans).
+        used: set[str] = set()
+        for candidate in sorted(race.candidates, key=lambda c: -c.votes):
             if candidate.write_in:
                 continue
-            match = next((k for k in known["candidates"] if k.get("name") and same_person(k["name"], candidate.name)), None)
+            matches = [k for k in known["candidates"] if k.get("name") and k["fec_candidate_id"] not in used and same_person(k["name"], candidate.name)]
+            match = max(matches, key=lambda k: len(name_tokens(k["name"]) & name_tokens(candidate.name)), default=None)
             if not match:
                 continue
+            used.add(match["fec_candidate_id"])
             candidate.incumbent = candidate.incumbent or match.get("incumbent_challenge") == "I"
             candidate.profile = {
                 "officialId": match["official_id"],
@@ -945,12 +1313,9 @@ def attach_profiles(results: StateResults) -> None:
 OFFICIAL_RESULTS_URLS = {
     "TX": "https://goelect.txelections.civixapps.com/ivis-enr-ui/races",
     "KY": "https://vrsws.sos.ky.gov/liveresults",
-    "MN": "https://electionresults.sos.mn.gov/",
-    "FL": "https://floridaelectionwatch.gov/",
     "NJ": "https://www.nj.gov/state/elections/election-night-results.shtml",
     "IA": "https://electionresults.iowa.gov/IA/",
     "ID": "https://voteidaho.gov/election-results/",
-    "AK": "https://www.elections.alaska.gov/election-results/",
     "MS": "https://www.sos.ms.gov/elections-voting/election-results",
 }
 

@@ -4,7 +4,14 @@ from election_results import (
     EV_HOUSE,
     EV_SENATE,
     NC_HOUSE,
+    LA_PARISHES,
+    MN_COUNTIES,
     RI_TOWN_COUNTY,
+    ak_name,
+    ak_races,
+    fl_races,
+    la_choice,
+    mn_races,
     TV_HOUSE,
     TV_SENATE,
     clean_name,
@@ -148,3 +155,71 @@ def test_south_carolina_contest_sheet():
         ("Write-In", "", 1, True),
     ]
     assert counties == {"Abbeville": [3, 9, 0], "Aiken": [30, 90, 1]}
+
+
+def test_minnesota_county_file():
+    text = "\n".join(
+        [
+            "MN;01;;0102;U.S. Senator;;0403;Peggy Flanagan;;;DFL;51;51;2964;33.10;8954",
+            "MN;01;;0102;U.S. Senator;;0302;Michele Tafoya;;;R;51;51;5800;64.8;8954",
+            "MN;27;;0102;U.S. Senator;;0403;Peggy Flanagan;;;DFL;400;420;300000;70;400000",
+            "MN;27;;0102;U.S. Senator;;0302;Michele Tafoya;;;R;400;420;100000;25;400000",
+            "MN;27;;0102;U.S. Senator;;9901;WRITE-IN;;;WI;400;420;50;0.01;400000",
+            "MN;27;;0108;U.S. Representative District 5;05;0401;Ilhan Omar;;I;DFL;200;200;262702;80;300000",
+            "MN;27;;0302;State Senator District 1;01;0401;Someone;;;DFL;1;1;5;50;10",
+        ]
+    )
+    senate, house = mn_races(text)
+    assert MN_COUNTIES[26] == "Hennepin" and len(MN_COUNTIES) == 87
+    assert [(c.name, c.party, c.votes, c.write_in) for c in senate.candidates] == [
+        ("Peggy Flanagan", "DEM", 302964, False),
+        ("Michele Tafoya", "REP", 105800, False),
+        ("Write-in", "", 50, True),
+    ]
+    assert senate.counties["Hennepin"] == [300000, 100000, 50]
+    assert senate.reporting == {"done": 451, "total": 471, "unit": "precincts"}
+    assert (house.office, house.district, house.candidates[0].incumbent) == ("H", 5, True)
+
+
+def test_florida_file_skips_repeated_rows():
+    header = "ElectionDate\tPartyCode\tPartyName\tRaceCode\tRaceName\tCountyCode\tCountyName\tJuris1num\tJuris2num\tPrecincts\tPrecinctsReporting\tCanNameLast\tCanNameFirst\tCanNameMiddle\tCanVotes"
+    row = "11/03/2026\t{p}\tx\t{rc}\t{rn}\tALA\tAlachua\t \t \t63\t63\t{last}\t{first}\t\t{v}"
+    lines = [
+        header,
+        row.format(p="REP", rc="USS", rn="United States Senator", last="Moody", first="Ashley", v=34791),
+        row.format(p="REP", rc="USS", rn="United States Senator", last="Moody", first="Ashley", v=34791),
+        row.format(p="DEM", rc="USS", rn="United States Senator", last="Nixon", first="Angie", v=69665),
+        row.format(p="REP", rc="USR", rn="Representative in Congress, District 3", last="Cammack", first="Kat", v=100),
+        row.format(p="REP", rc="GOV", rn="Governor", last="Donalds", first="Byron", v=1),
+    ]
+    senate, house = fl_races("\n".join(lines))
+    assert [(c.name, c.votes) for c in senate.candidates] == [("Ashley Moody", 34791), ("Angie Nixon", 69665)]
+    assert senate.counties == {"Alachua": [34791, 69665]}
+    assert (house.district, house.candidates[0].name) == (3, "Kat Cammack")
+
+
+def test_louisiana_choices_and_parishes():
+    assert la_choice('"Jamie" Davis (DEM)') == ('"Jamie" Davis', "DEM")
+    assert la_choice('E. "Liddy" Glass (NOPTY)') == ('E. "Liddy" Glass', "IND")
+    assert len(LA_PARISHES) == 64 and LA_PARISHES[35] == "Orleans"
+
+
+def test_alaska_precinct_file():
+    assert ak_name("Sullivan, Dan S.") == "Dan S. Sullivan"
+    assert ak_name("Sullivan, Daniel J. Jr.") == "Daniel J. Sullivan Jr."
+    head = "Pct_Id,Reg_voters,Contest_title,candidate_name,Party_Code,total_ballots,total_votes"
+    text = "\n".join(
+        [
+            head,
+            '01-600,2235,U.S. Senator,"Peltola, Mary",DEM,491,263',
+            '01-600,2235,U.S. Senator,"Sullivan, Dan S.",REP,491,200',
+            '01-610,1000,U.S. Senator,"Peltola, Mary",DEM,0,0',
+            '01-610,1000,U.S. Senator,"Sullivan, Dan S.",REP,0,0',
+            '01-600,2235,State House District 1,"Someone, A.",REP,491,400',
+        ]
+    )
+    races, registered, ballots = ak_races(text)
+    assert races[0].label == "U.S. Senate (first choices)"
+    assert [(c.name, c.votes) for c in races[0].candidates] == [("Mary Peltola", 263), ("Dan S. Sullivan", 200)]
+    assert races[0].reporting == {"done": 1, "total": 2, "unit": "precincts"}
+    assert (registered, ballots) == (3235, 491)

@@ -91,8 +91,9 @@ export const RESULTS_SNAPSHOT_URL =
   'https://raw.githubusercontent.com/Walastik/politmus-data-workers/election-results-data/2026-11-03.json'
 
 /**
- * GitHub's raw file CDN caches for up to five minutes; a query string that
- * changes every minute keeps the page within a minute of the last run.
+ * GitHub's raw file CDN caches each URL for five minutes; a query string that
+ * changes every minute skips that. It also caches which commit the branch
+ * points to for a few minutes, so a new run shows up within about ten.
  */
 export function snapshotRequestUrl(base: string, now = Date.now()): string {
   if (!/^https?:/.test(base)) return base
@@ -425,8 +426,10 @@ export function resultHighlights(snapshot: ResultsSnapshot): Highlight[] {
     })
   }
 
-  // Most money raised per vote.
+  // Most money raised per vote, among fully reported races: a partial count
+  // makes every vote look expensive.
   const priced = races
+    .filter((ref) => (reportingShare(ref.race) ?? 0) >= 1)
     .flatMap((ref) => ref.standing.ranked.slice(0, 2).map((c) => ({ ref, c, perVote: dollarsPerVote(c) })))
     .filter((x): x is { ref: RaceRef; c: ResultCandidate; perVote: number } => x.perVote !== null && x.c.votes > 5000)
     .sort((a, b) => b.perVote - a.perVote)

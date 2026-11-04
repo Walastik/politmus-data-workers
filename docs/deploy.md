@@ -103,7 +103,9 @@ loads it from
 `https://raw.githubusercontent.com/Walastik/politmus-data-workers/election-results-data/2026-11-03.json`
 (`RESULTS_SNAPSHOT_URL` in `packages/core/src/electionResults.ts`).
 
-- Publishing new counts needs no deploy. Changing the page, or where it reads
+- New counts need no deploy. GitHub's raw CDN caches which commit a
+  branch points to for about five minutes, so the page can trail a run by
+  five to ten minutes. Changing the page, or where it reads
   the snapshot from, does.
 - Run it by hand from the Actions tab: **Election Results**, optionally with a
   comma-separated `states` list. A state whose site fails keeps its previous
