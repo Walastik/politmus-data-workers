@@ -1,0 +1,80 @@
+name: Election Results
+
+# Reads unofficial counts from the state election offices' results sites
+# (backend/election_results.py) and publishes the snapshot the /results page
+# loads. The snapshot lives alone on the `election-results-data` branch, as a
+# single commit that each run replaces, so the repo doesn't grow a commit
+# every few minutes. The page reads it from raw.githubusercontent.com.
+#
+# GitHub runs the schedule on a best-effort basis: runs can start late or be
+# skipped when Actions is busy. Turn the schedule off once states certify.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      states:
+        description: 'Comma-separated postal codes to refresh (blank for every state)'
+        required: false
+        default: ''
+
+# One run at a time; a run that starts while another is going waits for it.
+concurrency:
+  group: election-results
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  DATA_BRANCH: election-results-data
+  SNAPSHOT: 2026-11-03.json
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install requests
+        run: pip install requests==2.34.2
+
+      # Start from the last published snapshot, so a state whose site is down
+      # this run keeps its previous counts.
+      - name: Fetch the last snapshot
+        run: |
+          mkdir -p snapshot
+          if git fetch --depth 1 origin "$DATA_BRANCH"; then
+            git show "FETCH_HEAD:$SNAPSHOT" > "snapshot/$SNAPSHOT" || rm -f "snapshot/$SNAPSHOT"
+          fi
+
+      - name: Read state results sites
+        working-directory: backend
+        env:
+          STATES: ${{ inputs.states }}
+        run: |
+          python election_results.py --out "../snapshot/$SNAPSHOT" ${STATES:+--states "$STATES"}
+
+      - name: Publish the snapshot
+        working-directory: snapshot
+        run: |
+          git init -q -b "$DATA_BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cat > README.md <<'EOF'
+          Election night results snapshot written by the Election Results
+          workflow (.github/workflows/election-results.yml) on main. Each run
+          replaces this branch's only commit. Counts are unofficial until each
+          state certifies them.
+          EOF
+          git add "$SNAPSHOT" README.md
+          git commit -q -m "Election results snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "HEAD:$DATA_BRANCH"

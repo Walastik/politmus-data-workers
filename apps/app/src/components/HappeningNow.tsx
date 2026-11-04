@@ -20,6 +20,7 @@ import {
   type PollsClose,
 } from '@politmus/core/happeningNow'
 import { splitPollingHours } from '@politmus/core/pollingHours'
+import type { resultsLinkPhase } from '@politmus/core/electionResults'
 import {
   getVoterResources,
   incumbencyLabel,
@@ -59,6 +60,37 @@ export function QuietHero({ placeName }: { placeName: string | null }) {
         Here’s what Congress has been doing lately, and how the people who represent you voted.
       </Text>
     </View>
+  )
+}
+
+// Points to /results on Election Day and while states are still counting.
+export function ResultsCard({ phase }: { phase: NonNullable<ReturnType<typeof resultsLinkPhase>> }) {
+  const tonight = phase === 'tonight'
+  return (
+    <Pressable
+      onPress={() => router.push('/results')}
+      accessibilityRole="link"
+      className="rounded-xl border border-blue-700/60 bg-blue-950/40 p-5 active:bg-blue-950/70"
+    >
+      <View className="flex-row items-center gap-2">
+        <Icons.TrendingUp size={14} colorClassName="accent-blue-300" />
+        <Text className="text-xs font-semibold uppercase tracking-wider text-blue-300">
+          {tonight ? 'Results tonight' : 'Election results'}
+        </Text>
+      </View>
+      <Text accessibilityRole="header" className="mt-1 text-2xl font-bold tracking-tight text-slate-50">
+        {tonight ? 'Watch the counts come in' : 'See who’s leading in the 2026 election'}
+      </Text>
+      <Text className="mt-1 text-sm text-slate-300">
+        {tonight
+          ? 'Once polls close, follow each state’s count as it’s posted: Senate and House leads, county maps and the closest races.'
+          : 'Unofficial counts from state election offices: Senate and House leads, county maps, upsets and the closest races.'}
+      </Text>
+      <View className="mt-3 flex-row items-center gap-1.5 self-start rounded-lg bg-blue-600 px-3 py-2">
+        <Text className="text-sm font-semibold text-white">See the results</Text>
+        <Icons.ArrowRight size={14} colorClassName="accent-white" />
+      </View>
+    </Pressable>
   )
 }
 

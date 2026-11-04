@@ -92,6 +92,30 @@ Secrets (`CONGRESS_GOV_API_KEY`, `OPENSTATES_API_KEY`, `GOOGLE_CIVIC_API_KEY`,
 `politmus-api`; scheduled ingest runs from GitHub Actions over `fly ssh` (see
 the root README).
 
+## Election results (`/results`)
+
+The results page doesn't use the API. The **Election Results** workflow
+(`.github/workflows/election-results.yml`) runs `backend/election_results.py`
+on GitHub's runners every 5 minutes. The script reads each state's
+unofficial counts from its election office's site and force-pushes the
+snapshot as the only commit on the `election-results-data` branch. The page
+loads it from
+`https://raw.githubusercontent.com/Walastik/politmus-data-workers/election-results-data/2026-11-03.json`
+(`RESULTS_SNAPSHOT_URL` in `packages/core/src/electionResults.ts`).
+
+- Publishing new counts needs no deploy. Changing the page, or where it reads
+  the snapshot from, does.
+- Run it by hand from the Actions tab: **Election Results**, optionally with a
+  comma-separated `states` list. A state whose site fails keeps its previous
+  counts.
+- Locally: `cd backend && python election_results.py --out ../apps/app/public/dev-results.json`,
+  then set `EXPO_PUBLIC_RESULTS_URL=/dev-results.json` in
+  `apps/app/.env.local` to read that file instead (it's git- and
+  Docker-ignored, so it never ships).
+- Turn the schedule off (or disable the workflow) once states certify. To
+  run it from the Mac mini instead, run the same script there and publish to
+  the same branch, or point `RESULTS_SNAPSHOT_URL` somewhere else and deploy.
+
 ## Sign-in (Clerk) and Google OAuth
 
 - Production Clerk instance: `clerk.politmus.com` (the `pk_live_` key in

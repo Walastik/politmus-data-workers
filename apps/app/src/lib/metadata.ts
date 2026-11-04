@@ -37,6 +37,11 @@ const PAGES = {
     title: 'Candidates',
     description: 'Candidates running for Congress, race by race, with their campaign finance.',
   },
+  '/results': {
+    title: 'Election Results',
+    description:
+      'Unofficial 2026 midterm results straight from state election offices: a live map, county breakdowns, turnout and the races that stand out.',
+  },
   '/voting': {
     title: 'Voting Locations',
     description: 'Polling places, early voting sites and ballot drop-off locations for your address.',
