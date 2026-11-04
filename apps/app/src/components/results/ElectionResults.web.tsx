@@ -531,15 +531,17 @@ function USMap(props: MapProps) {
             </button>
             {selected && !countiesTopo ? <span className="er-updated">Loading counties…</span> : null}
           </div>
-        ) : (
-          <div className="er-hint">Tap a state to dig into its counties</div>
-        )}
-        <Legend office={office} countyView={selected ? countyView : null} />
+        ) : null}
         {tip ? (
           <div className="er-tooltip" style={{ left: tip.x, top: tip.y }}>
             {tip.content}
           </div>
         ) : null}
+      </div>
+      {/* Below the map, not over it, so a zoomed-in state is never covered. */}
+      <div className="er-mapfoot">
+        <Legend office={office} countyView={selected ? countyView : null} />
+        {selected ? null : <div className="er-hint">Tap a state to dig into its counties</div>}
       </div>
     </div>
   )
