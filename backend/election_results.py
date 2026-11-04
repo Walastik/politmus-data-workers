@@ -11,9 +11,8 @@ Sources (all official state election offices):
 - Enhanced Voting results sites: Georgia, Virginia, Rhode Island
 - NC State Board of Elections results files
 - Ohio Secretary of State live results API
-- Clarity ENR statewide sites: Colorado, Iowa
+- Clarity ENR statewide sites: Colorado, Iowa, South Carolina
 - TotalVote results sites: Montana, Nebraska, New Mexico, South Dakota, Oregon
-- South Carolina Election Commission results spreadsheets
 - Delaware Department of Elections results files
 - Minnesota Secretary of State and Florida Division of Elections media files
 - Louisiana Secretary of State results data; Alaska Division of Elections precinct file
@@ -459,29 +458,44 @@ def fetch_ohio() -> StateResults:
 
 # ---- Clarity ENR (Colorado, Iowa) --------------------------------------------
 
+CLARITY_HOST = "https://results.enr.clarityelections.com"
+# election id, name, source, host
 CLARITY = {
-    "CO": ("127407", "Colorado", "Colorado Secretary of State"),
-    "IA": ("127077", "Iowa", "Iowa Secretary of State"),
+    "CO": ("127407", "Colorado", "Colorado Secretary of State", CLARITY_HOST),
+    "IA": ("127077", "Iowa", "Iowa Secretary of State", CLARITY_HOST),
+    # Linked from scvotes.gov; the spreadsheets posted there stopped at midnight.
+    "SC": ("127300", "South Carolina", "South Carolina Election Commission", "https://www.enr-scvotes.org"),
 }
 # "Representative to the 120th United States Congress - District 1" (CO),
-# "United States Representative District 1" (IA).
-CLARITY_HOUSE = re.compile(r"^(?:Representative to the \d+\w* United States Congress|United States Representative)\D*(\d+)\s*$", re.I)
-CLARITY_SENATE = re.compile(r"(United States|U\.?S\.?) Senat", re.I)
+# "United States Representative District 1" (IA),
+# "U.S.  House of Representatives, District  1" (SC).
+CLARITY_HOUSE = re.compile(
+    r"^(?:Representative to the \d+\w* United States Congress|United States Representative|U\.?S\.?\s+House of Representatives,?)\D*(\d+)\s*$",
+    re.I,
+)
+CLARITY_SENATE = re.compile(r"(United States|U\.?S\.?)\s+Senat", re.I)
 
 
-def clarity_get(path: str):
-    response = session.get(f"https://results.enr.clarityelections.com/{path}", timeout=60)
+def clarity_name(name: str, party: str) -> str:
+    """South Carolina prefixes the party: 'REP Darline Graham' -> 'Darline Graham'."""
+    if party and name.startswith(f"{party} "):
+        return name[len(party) + 1 :].strip()
+    return name
+
+
+def clarity_get(path: str, host: str = CLARITY_HOST):
+    response = session.get(f"{host}/{path}", timeout=60)
     response.raise_for_status()
     return response
 
 
 def fetch_clarity(state: str) -> StateResults:
-    eid, name, source_name = CLARITY[state]
-    version = clarity_get(f"{state}/{eid}/current_ver.txt").text.strip()
+    eid, name, source_name, host = CLARITY[state]
+    version = clarity_get(f"{state}/{eid}/current_ver.txt", host).text.strip()
     base = f"{state}/{eid}/{version}"
-    summary = clarity_get(f"{base}/json/en/summary.json").json()
-    details = {c["K"]: c for c in clarity_get(f"{base}/json/details.json").json()["Contests"]}
-    settings = clarity_get(f"{base}/json/en/electionsettings.json").json()
+    summary = clarity_get(f"{base}/json/en/summary.json", host).json()
+    details = {c["K"]: c for c in clarity_get(f"{base}/json/details.json", host).json()["Contests"]}
+    settings = clarity_get(f"{base}/json/en/electionsettings.json", host).json()
 
     races = []
     for contest in summary:
@@ -491,7 +505,12 @@ def fetch_clarity(state: str) -> StateResults:
         if not senate and not house:
             continue
         candidates = [
-            Candidate(name=n, party=party_code(p), votes=int(v or 0), write_in=bool(WRITE_IN.search(n)))
+            Candidate(
+                name=clarity_name(n, p),
+                party="" if WRITE_IN.search(n) else party_code(p),
+                votes=int(v or 0),
+                write_in=bool(WRITE_IN.search(n)),
+            )
             for n, p, v in zip(contest["CH"], contest["P"], contest["V"])
         ]
         detail = details.get(contest["K"])
@@ -506,14 +525,19 @@ def fetch_clarity(state: str) -> StateResults:
                 label="U.S. Senate" if senate else f"U.S. House District {int(house.group(1))}",
                 candidates=candidates,
                 # A statewide Clarity site reports by county.
-                reporting={"done": contest.get("PR"), "total": contest.get("TP"), "unit": "counties"},
+                # South Carolina leaves PR at 0 while counting; don't show "0 of 46".
+                reporting={
+                    "done": contest.get("PR") if contest.get("PR") or not any(c.votes for c in candidates) else None,
+                    "total": contest.get("TP"),
+                    "unit": "counties",
+                },
                 counties=counties,
             )
         )
 
     counties, registered, ballots = {}, None, None
     try:
-        xml = clarity_get(f"{base}/reports/detailxml.zip")
+        xml = clarity_get(f"{base}/reports/detailxml.zip", host)
         with zipfile.ZipFile(io.BytesIO(xml.content)) as archive:
             root = ElementTree.fromstring(archive.read(archive.namelist()[0]))
         turnout = root.find("ElectionVoterTurnout")
@@ -532,7 +556,7 @@ def fetch_clarity(state: str) -> StateResults:
         state=state,
         name=name,
         source_name=source_name,
-        source_url=f"https://results.enr.clarityelections.com/{state}/{eid}/web.{version}/",
+        source_url=f"{host}/{state}/{eid}/web.{version}/",
         last_updated=settings.get("websiteupdatedat"),
         races=races,
         counties=counties,
@@ -711,98 +735,6 @@ def fetch_totalvote(state: str) -> StateResults:
         races=races,
         registered=to_int(registered.group(1)) if registered else None,
         ballots=to_int(ballots.group(1)) if ballots else None,
-    )
-
-
-# ---- South Carolina ----------------------------------------------------------
-
-SC_PAGE = "https://scvotes.gov/2026-general-election-results/"
-SC_SENATE = re.compile(r"^U\.?S\.?\s+Senate", re.I)
-SC_HOUSE = re.compile(r"^U\.?S\.?\s+House of Representatives,?\s+District\s+(\d+)", re.I)
-
-
-def sc_contest(rows) -> tuple[list[Candidate], dict[str, list[int]]]:
-    """A contest sheet: a row of candidate names ('REP Lindsey Graham') over
-    blocks of vote-type columns, each block ending in 'Total Votes'."""
-    names_row, header = rows[1], rows[2]
-    totals = [i for i, h in enumerate(header) if (h or "").strip() == "Total Votes"]
-    starts = [i for i, cell in enumerate(names_row) if cell and cell.strip()]
-    candidates, columns = [], []
-    for start in starts:
-        column = next((t for t in totals if t >= start), None)
-        if column is None:
-            continue
-        label = names_row[start].strip()
-        party, _, person = label.partition(" ") if re.match(r"^[A-Z]{3}\s", label) else ("", "", label)
-        candidates.append(Candidate(name=" ".join(person.split()), party=party_code(party), votes=0, write_in=bool(WRITE_IN.search(label))))
-        columns.append(column)
-    counties = {}
-    for row in rows[3:]:
-        county = (row[0] or "").strip() if row else ""
-        if not county or county.lower().startswith("total"):
-            continue
-        counties[county_key(county)] = [to_int(row[c]) if c < len(row) else 0 for c in columns]
-    for i, candidate in enumerate(candidates):
-        candidate.votes = sum(v[i] for v in counties.values())
-    return candidates, counties
-
-
-def fetch_south_carolina() -> StateResults:
-    page = session.get(SC_PAGE, timeout=60)
-    page.raise_for_status()
-    # The page lists each posted spreadsheet in order; the last 'Results' one is newest.
-    links = re.findall(r'<a[^>]*href="([^"]+\.xlsx)"[^>]*>(.*?)</a>', page.text, re.S)
-    links = [(url, html_text(label)) for url, label in links if "result" in url.lower()]
-    if not links:
-        raise RuntimeError("no results spreadsheets posted yet")
-    url, label = links[-1]
-    sheets = read_xlsx(session.get(url, timeout=120).content)
-    contents = {row[0]: row[1] for row in sheets.get("Table of Contents", []) if len(row) > 1 and row[0] and row[0].isdigit()}
-
-    counties = {}
-    for row in sheets.get("Registered Voters", [])[1:]:
-        if row and row[0] and not row[0].lower().startswith("total") and len(row) > 2:
-            counties[county_key(row[0])] = {"registered": to_int(row[1]), "ballots": to_int(row[2])}
-
-    races = []
-    for page_number, title in contents.items():
-        senate, house = SC_SENATE.search(title), SC_HOUSE.search(title)
-        if not (senate or house) or page_number not in sheets:
-            continue
-        candidates, by_county = sc_contest(sheets[page_number])
-        district = 0 if senate else int(house.group(1))
-        races.append(
-            Race(
-                office="S" if senate else "H",
-                district=district,
-                label="U.S. Senate" if senate else f"U.S. House District {district}",
-                candidates=candidates,
-                # The spreadsheets carry no reporting status; counties with votes are in.
-                reporting={"done": sum(1 for v in by_county.values() if any(v)), "total": len(by_county), "unit": "counties"},
-                counties=by_county,
-            )
-        )
-
-    stamp = re.search(r"(\d{4}-\d{2}-\d{2})-(\d{1,4})\s*-?(AM|PM)", url, re.I)
-    updated = None
-    if stamp:
-        digits = stamp.group(2)
-        hour, minute = (int(digits[:-2]), int(digits[-2:])) if len(digits) > 2 else (int(digits), 0)
-        when = datetime.strptime(f"{stamp.group(1)} {hour}:{minute:02d}{stamp.group(3).upper()}", "%Y-%m-%d %I:%M%p")
-        # '12AM' on the 3rd is the midnight that ends election night.
-        if stamp.group(3).upper() == "AM" and hour == 12:
-            when = when.replace(day=when.day + 1)
-        updated = when.replace(tzinfo=ZoneInfo("America/New_York")).isoformat()
-    return StateResults(
-        state="SC",
-        name="South Carolina",
-        source_name="South Carolina Election Commission",
-        source_url=SC_PAGE,
-        last_updated=updated,
-        races=races,
-        counties=counties,
-        registered=sum(c["registered"] for c in counties.values()) or None,
-        ballots=sum(c["ballots"] for c in counties.values()) or None,
     )
 
 
@@ -1232,7 +1164,7 @@ ADAPTERS: dict[str, Callable[[], StateResults]] = {
     "CO": lambda: fetch_clarity("CO"),
     "IA": lambda: fetch_clarity("IA"),
     "RI": lambda: fetch_enhanced_voting("RI"),
-    "SC": fetch_south_carolina,
+    "SC": lambda: fetch_clarity("SC"),
     "DE": fetch_delaware,
     "MN": fetch_minnesota,
     "FL": fetch_florida,

@@ -1,4 +1,5 @@
 from election_results import (
+    clarity_name,
     CLARITY_HOUSE,
     CLARITY_SENATE,
     EV_HOUSE,
@@ -18,7 +19,6 @@ from election_results import (
     county_key,
     display_name,
     fold_localities,
-    sc_contest,
     tv_county_votes,
     tv_district,
     tv_updated,
@@ -66,6 +66,8 @@ def test_federal_contest_names():
     assert CLARITY_SENATE.search("United States Senator")
     assert CLARITY_HOUSE.search("Representative to the 120th United States Congress - District 8").group(1) == "8"
     assert CLARITY_HOUSE.search("United States Representative District 3").group(1) == "3"
+    assert CLARITY_HOUSE.search("U.S.  House of Representatives, District  7").group(1) == "7"
+    assert CLARITY_SENATE.search("U.S.  Senate")
     assert not CLARITY_HOUSE.search("State Board of Education Member - Congressional District 1")
     assert NC_HOUSE.match("US HOUSE OF REPRESENTATIVES DISTRICT 05 (VOTE FOR 1)").group(1) == "05"
     assert oh_race_key("U.S. Senator") == ("S", 0)
@@ -138,25 +140,6 @@ def test_totalvote_county_export_merges_vote_centers():
     assert tv_county_votes({"s": sheet}, ["Mike Rounds", "Brian L Bengs"]) == {"Brown": [220, 110], "Lewis and Clark": [2, 1]}
 
 
-def test_south_carolina_contest_sheet():
-    block = ["Election Day", "Early Voting", "Total Votes"]
-    rows = [
-        ["U.S.  Senate (Vote For 1)"],
-        [None, None, "REP Darline Graham", None, None, "DEM Annie Andrews", None, None, "Write-In", None, None, ""],
-        ["County", "Registered Voters", *block, *block, *block, "Total"],
-        ["Abbeville", "15697", "1", "2", "3", "4", "5", "9", "0", "0", "0", "12"],
-        ["Aiken", "116511", "10", "20", "30", "40", "50", "90", "1", "0", "1", "121"],
-        ["Total:", "", "11", "22", "33", "44", "55", "99", "1", "0", "1", "133"],
-    ]
-    candidates, counties = sc_contest(rows)
-    assert [(c.name, c.party, c.votes, c.write_in) for c in candidates] == [
-        ("Darline Graham", "REP", 33, False),
-        ("Annie Andrews", "DEM", 99, False),
-        ("Write-In", "", 1, True),
-    ]
-    assert counties == {"Abbeville": [3, 9, 0], "Aiken": [30, 90, 1]}
-
-
 def test_minnesota_county_file():
     text = "\n".join(
         [
@@ -223,3 +206,8 @@ def test_alaska_precinct_file():
     assert [(c.name, c.votes) for c in races[0].candidates] == [("Mary Peltola", 263), ("Dan S. Sullivan", 200)]
     assert races[0].reporting == {"done": 1, "total": 2, "unit": "precincts"}
     assert (registered, ballots) == (3235, 491)
+
+
+def test_clarity_names_drop_a_party_prefix():
+    assert clarity_name("REP Darline Graham", "REP") == "Darline Graham"
+    assert clarity_name("Jon Ossoff", "DEM") == "Jon Ossoff"
