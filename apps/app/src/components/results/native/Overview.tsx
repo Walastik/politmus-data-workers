@@ -167,8 +167,13 @@ export function SeatGrid({
 
 // ---- Building blocks shared by the panels ----
 
+// Announces its changes politely on Android, like the web panel's aria-live.
 export function Panel({ children }: { children: ReactNode }) {
-  return <View className="gap-3.5 rounded-[20px] border border-[#26324d] bg-[#131d33] p-4">{children}</View>
+  return (
+    <View accessibilityLiveRegion="polite" className="gap-3.5 rounded-[20px] border border-[#26324d] bg-[#131d33] p-4">
+      {children}
+    </View>
+  )
 }
 
 export function Heading({ children }: { children: ReactNode }) {

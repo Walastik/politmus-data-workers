@@ -19,7 +19,7 @@ export default function ResultsScreen() {
       <Stack.Screen options={{ headerShown: true, title: 'Election results', headerBackTitle: 'Back' }} />
       <ScrollView ref={scroll} className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic">
         {/* The native screen scrolls back to the map when a highlight opens a state; web ignores it. */}
-        <ElectionResults scrollTo={(y) => scroll.current?.scrollTo({ y, animated: true })} />
+        <ElectionResults scrollTo={(y, animated) => scroll.current?.scrollTo({ y, animated })} />
       </ScrollView>
     </>
   )

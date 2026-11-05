@@ -17,7 +17,16 @@ const HIGHLIGHT_TONE: Record<Highlight['kind'], string> = {
 
 // What stands out so far: cards in a row that scrolls sideways. Tapping
 // one opens its state and race.
-export function Highlights({ highlights, onOpen }: { highlights: Highlight[]; onOpen: (h: Highlight) => void }) {
+export function Highlights({
+  highlights,
+  onOpen,
+  bleed = true,
+}: {
+  highlights: Highlight[]
+  onOpen: (h: Highlight) => void
+  // Run to the screen edges (a phone); off beside the tablet panel.
+  bleed?: boolean
+}) {
   if (!highlights.length) return null
   return (
     <View className="gap-2.5">
@@ -27,14 +36,14 @@ export function Highlights({ highlights, onOpen }: { highlights: Highlight[]; on
         </Text>
         <Text className="text-xs text-slate-500">Tap one to jump to it</Text>
       </View>
-      {/* Bleeds to the screen edges so cards scroll under the page margin. */}
+      {/* On a phone it bleeds to the screen edges, so cards scroll under the page margin. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         snapToInterval={262}
         decelerationRate="fast"
-        className="-mx-4"
-        contentContainerClassName="gap-3 px-4 pb-1"
+        className={bleed ? '-mx-4' : 'overflow-hidden rounded-2xl'}
+        contentContainerClassName={bleed ? 'gap-3 px-4 pb-1' : 'gap-3 pb-1'}
       >
         {highlights.map((h, i) => {
           const tone = HIGHLIGHT_TONE[h.kind]

@@ -218,10 +218,29 @@ export function USMap({
       </Svg>
       {/* One touch target for the whole map: a tap is matched to a county or
           state by its position (shapeContains), undoing the zoom. */}
+      {/* What a screen reader says for the map itself; a sibling of the
+          markers, so it doesn't swallow their buttons. */}
+      <View
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={
+          selected
+            ? `${selectedShape?.name ?? selected} county map${countyView === 'turnout' ? ', by turnout' : ''}`
+            : office === 'S'
+              ? 'Senate results map'
+              : 'House results map'
+        }
+        pointerEvents="none"
+        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+      />
+      {/* Hidden from screen readers, which would tap its center: they get
+          the marker buttons and the lists below, which cover every state
+          and county. */}
       <Pressable
         onPress={(e) => onMapPress(e.nativeEvent.locationX, e.nativeEvent.locationY)}
-        accessibilityLabel={office === 'S' ? 'Senate results map' : 'House results map'}
-        accessibilityHint={selected ? 'Tap a county for its numbers' : 'Tap a state to open it'}
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
       />
       {width ? (
@@ -232,6 +251,7 @@ export function USMap({
           <Pressable
             onPress={() => onSelect(null)}
             accessibilityRole="button"
+            accessibilityLabel="All states"
             hitSlop={8}
             className="min-h-[34px] justify-center rounded-full border border-[#26324d] bg-slate-900/85 px-3"
           >

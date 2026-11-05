@@ -11,7 +11,8 @@ import type { CountyView, MapOffice } from '@politmus/core/resultsMap'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Text, View } from 'react-native'
+import { AccessibilityInfo, ActivityIndicator, Platform, Text, View, useWindowDimensions } from 'react-native'
+import { useReducedMotion } from 'react-native-reanimated'
 
 import { CountyCard } from './native/CountyCard'
 import { Hero, Toolbar } from './native/Hero'
@@ -32,7 +33,7 @@ function firstRace(results: StateResults | undefined, office: MapOffice): RaceRe
 // The results explorer on iOS and Android (the web page is
 // ElectionResults.web.tsx). On a phone everything stacks in one column:
 // hero, chamber switch, map, then the races. See docs/results-mobile-plan.md.
-export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number) => void } = {}) {
+export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number, animated: boolean) => void } = {}) {
   const snapshotQuery = useSnapshot()
   const snapshot = snapshotQuery.data ?? null
 
@@ -67,6 +68,11 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number) =
       setSelected(state)
       setFlagged(null)
       setTapped(null)
+      // Android reads the panel's live region; VoiceOver needs telling.
+      if (Platform.OS === 'ios' && snapshot) {
+        const name = state ? (snapshot.states[state]?.name ?? snapshot.senate?.find((s) => s.state === state)?.stateName ?? state) : null
+        AccessibilityInfo.announceForAccessibility(name ? `${name} open` : 'All states')
+      }
       if (!state || !snapshot) return setRaceId(null)
       if (nextRace) return setRaceId(nextRace)
       const first = firstRace(snapshot.states[state], office)
@@ -82,8 +88,12 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number) =
   const highlights = useMemo(() => (snapshot ? resultHighlights(snapshot) : []), [snapshot])
   // Where the map sits in the page, so a highlight or a county in a list
   // can bring it back into view (web scrolls to the top instead).
+  const stageY = useRef(0)
   const mapY = useRef(0)
-  const showMap = () => scrollTo?.(Math.max(0, mapY.current - 12))
+  const reduceMotion = useReducedMotion()
+  const showMap = () => scrollTo?.(Math.max(0, stageY.current + mapY.current - 12), !reduceMotion)
+  // Tablets get the side-by-side layout (Tailwind's md breakpoint).
+  const wide = useWindowDimensions().width >= 768
 
   const senateStates = useMemo(() => new Set((snapshot?.senate ?? []).map((info) => info.state)), [snapshot])
 
@@ -106,79 +116,98 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number) =
   // A link with a state and no race opens on the chamber being viewed.
   const race = results?.races.find((r) => raceKey(results.state, r) === raceId) ?? (results && !raceId ? firstRace(results, office) : null)
 
+  const highlightsBlock = (
+    <Highlights
+      highlights={highlights}
+      bleed={!wide}
+      onOpen={(h) => {
+        if (h.raceKey?.includes('-H')) setOffice('H')
+        selectState(h.state, h.raceKey)
+        if (h.county) {
+          setFlagged(h.county)
+          setCountyView(h.kind.startsWith('turnout') ? 'turnout' : 'lead')
+        }
+        showMap()
+      }}
+    />
+  )
+
   return (
     <View className="gap-4 bg-slate-900 px-4 pb-12 pt-5">
       <Hero snapshot={snapshot} />
       <Toolbar office={office} onOffice={setOffice} generatedAt={snapshot.generatedAt} />
+      {/* On a phone everything stacks; from the md breakpoint (tablets) the
+          panel sits beside the map, as on the web page. */}
       <View
         onLayout={(e) => {
-          mapY.current = e.nativeEvent.layout.y
+          stageY.current = e.nativeEvent.layout.y
         }}
-        className="overflow-hidden rounded-[20px] border border-[#26324d] bg-slate-900"
+        className="gap-4 md:flex-row md:items-start"
       >
-        <USMap
-          snapshot={snapshot}
-          office={office}
-          senateStates={senateStates}
-          selected={selected}
-          race={race}
-          results={results}
-          countiesTopo={countiesTopo.data ?? null}
-          countyView={countyView}
-          flagged={flagged}
-          tapped={tapped?.fips ?? null}
-          onSelect={selectState}
-          onCounty={(county) => setTapped((current) => (current?.fips === county.fips ? null : county))}
-        />
-        <View className="gap-2 border-t border-[#26324d] bg-slate-900/60 px-3.5 py-2.5">
-          <Legend
-            office={office}
-            countyView={selected ? countyView : null}
-            pending={(snapshot.senate ?? []).some((info) => !senateRace(snapshot.states[info.state]))}
-            aggregated={Object.values(snapshot.states).some(isAggregated)}
-          />
-          {selected ? null : <Text className="text-xs text-slate-500">Tap a state to dig into its counties</Text>}
+        <View className="min-w-0 gap-4 md:flex-1">
+          <View
+            onLayout={(e) => {
+              mapY.current = e.nativeEvent.layout.y
+            }}
+            className="overflow-hidden rounded-[20px] border border-[#26324d] bg-slate-900"
+          >
+            <USMap
+              snapshot={snapshot}
+              office={office}
+              senateStates={senateStates}
+              selected={selected}
+              race={race}
+              results={results}
+              countiesTopo={countiesTopo.data ?? null}
+              countyView={countyView}
+              flagged={flagged}
+              tapped={tapped?.fips ?? null}
+              onSelect={selectState}
+              onCounty={(county) => setTapped((current) => (current?.fips === county.fips ? null : county))}
+            />
+            <View className="gap-2 border-t border-[#26324d] bg-slate-900/60 px-3.5 py-2.5">
+              <Legend
+                office={office}
+                countyView={selected ? countyView : null}
+                pending={(snapshot.senate ?? []).some((info) => !senateRace(snapshot.states[info.state]))}
+                aggregated={Object.values(snapshot.states).some(isAggregated)}
+              />
+              {selected ? null : <Text className="text-xs text-slate-500">Tap a state to dig into its counties</Text>}
+            </View>
+          </View>
+          {selected && tapped ? (
+            <CountyCard fips={tapped.fips} featureName={tapped.name} results={results} race={race} onClose={() => setTapped(null)} />
+          ) : null}
+          {wide ? highlightsBlock : null}
+        </View>
+        <View className="md:w-[380px]">
+          {selected ? (
+            <StatePanel
+              key={selected}
+              state={selected}
+              results={results}
+              info={snapshot.senate?.find((info) => info.state === selected)}
+              race={race}
+              office={office}
+              countyView={countyView}
+              onCountyView={setCountyView}
+              onRace={(key) => {
+                setRaceId(key)
+                setTapped(null)
+              }}
+              onFlag={(county) => {
+                setFlagged(county)
+                if (county) showMap()
+              }}
+              flagged={flagged}
+              onBack={() => selectState(null)}
+            />
+          ) : (
+            <Overview snapshot={snapshot} office={office} onSelect={selectState} />
+          )}
         </View>
       </View>
-      {selected && tapped ? (
-        <CountyCard fips={tapped.fips} featureName={tapped.name} results={results} race={race} onClose={() => setTapped(null)} />
-      ) : null}
-      {selected ? (
-        <StatePanel
-          key={selected}
-          state={selected}
-          results={results}
-          info={snapshot.senate?.find((info) => info.state === selected)}
-          race={race}
-          office={office}
-          countyView={countyView}
-          onCountyView={setCountyView}
-          onRace={(key) => {
-            setRaceId(key)
-            setTapped(null)
-          }}
-          onFlag={(county) => {
-            setFlagged(county)
-            if (county) showMap()
-          }}
-          flagged={flagged}
-          onBack={() => selectState(null)}
-        />
-      ) : (
-        <Overview snapshot={snapshot} office={office} onSelect={selectState} />
-      )}
-      <Highlights
-        highlights={highlights}
-        onOpen={(h) => {
-          if (h.raceKey?.includes('-H')) setOffice('H')
-          selectState(h.state, h.raceKey)
-          if (h.county) {
-            setFlagged(h.county)
-            setCountyView(h.kind.startsWith('turnout') ? 'turnout' : 'lead')
-          }
-          showMap()
-        }}
-      />
+      {wide ? null : highlightsBlock}
       <Sources snapshot={snapshot} />
     </View>
   )
