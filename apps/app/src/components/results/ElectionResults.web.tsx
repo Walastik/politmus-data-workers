@@ -47,10 +47,13 @@ import {
   NO_RACE_FILL,
   countyFill,
   layoutMarkers,
+  panBy,
   stateFill,
   turnoutColor,
+  zoomAbout,
   zoomToBounds,
   type CountyView,
+  type MapZoom,
   type MapOffice as Office,
 } from '@politmus/core/resultsMap'
 import { getVoterResources } from '@politmus/core/types'
@@ -366,6 +369,156 @@ interface Tip {
   content: ReactNode
 }
 
+const HOME: MapZoom = { k: 1, x: 0, y: 0 }
+
+// Zooming and dragging the national map, so crowded markers are easy to
+// pick out. A trackpad pinch (or Ctrl/⌘ and the scroll wheel) zooms about
+// the pointer, two fingers pinch on a touch screen, and once zoomed in the
+// map drags with the mouse or one finger. A plain scroll, and one finger at
+// 1x, still scroll the page.
+function useMapGestures(
+  ref: React.RefObject<HTMLDivElement | null>,
+  view: MapZoom,
+  setView: React.Dispatch<React.SetStateAction<MapZoom>>,
+  enabled: boolean,
+) {
+  const [active, setActive] = useState(false)
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const last = useRef<{ x: number; y: number; distance: number } | null>(null)
+  const dragged = useRef(false)
+  const settle = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const zoomed = view.k > 1.01
+
+  // Screen point to map units in the frame.
+  const toMap = useCallback(
+    (clientX: number, clientY: number) => {
+      const box = ref.current?.getBoundingClientRect()
+      if (!box || !box.width) return null
+      return { x: ((clientX - box.left) / box.width) * W, y: ((clientY - box.top) / box.height) * H, scale: W / box.width }
+    },
+    [ref],
+  )
+  // Gestures move the map live, without the zoom's easing.
+  const touch = useCallback(() => {
+    setActive(true)
+    clearTimeout(settle.current)
+    settle.current = setTimeout(() => setActive(false), 160)
+  }, [])
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element || !enabled) return
+    // Trackpad pinches arrive as wheel events with ctrlKey (Chrome, Firefox,
+    // Edge); Safari sends its own gesture events.
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      const at = toMap(event.clientX, event.clientY)
+      if (!at) return
+      touch()
+      // A mouse wheel notch is ~100 units, a trackpad pinch a few at a time;
+      // capping each event keeps a notch to about 1.5x.
+      const delta = Math.max(-40, Math.min(40, event.deltaY))
+      setView((v) => zoomAbout(v, Math.exp(-delta * 0.01), at.x, at.y))
+    }
+    let gestureScale = 1
+    const onGestureStart = (event: Event) => {
+      event.preventDefault()
+      gestureScale = 1
+    }
+    const onGestureChange = (event: Event) => {
+      event.preventDefault()
+      const e = event as Event & { scale: number; clientX: number; clientY: number }
+      const at = toMap(e.clientX, e.clientY)
+      if (!at) return
+      touch()
+      setView((v) => zoomAbout(v, e.scale / gestureScale, at.x, at.y))
+      gestureScale = e.scale
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    element.addEventListener('gesturestart', onGestureStart)
+    element.addEventListener('gesturechange', onGestureChange)
+    return () => {
+      element.removeEventListener('wheel', onWheel)
+      element.removeEventListener('gesturestart', onGestureStart)
+      element.removeEventListener('gesturechange', onGestureChange)
+    }
+  }, [ref, enabled, setView, toMap, touch])
+
+  const spread = () => {
+    const [a, b] = [...pointers.current.values()]
+    return b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y) } : { ...a, distance: 0 }
+  }
+
+  const handlers = enabled
+    ? {
+        onPointerDown: (event: React.PointerEvent) => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return
+          pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+          last.current = spread()
+          if (pointers.current.size === 1) dragged.current = false
+        },
+        onPointerMove: (event: React.PointerEvent) => {
+          if (!pointers.current.has(event.pointerId) || !last.current) return
+          pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+          const now = spread()
+          const at = toMap(now.x, now.y)
+          if (!at) return
+          const two = pointers.current.size > 1
+          // One pointer only drags once zoomed in; at 1x it scrolls the page.
+          if (!two && !zoomed) return
+          const dx = now.x - last.current.x
+          const dy = now.y - last.current.y
+          if (!dragged.current && Math.hypot(dx, dy) < 4 && !two) return
+          if (!dragged.current) {
+            dragged.current = true
+            ref.current?.setPointerCapture?.(event.pointerId)
+          }
+          touch()
+          const factor = two && last.current.distance ? now.distance / last.current.distance : 1
+          setView((v) => zoomAbout(panBy(v, dx * at.scale, dy * at.scale), factor, at.x, at.y))
+          last.current = now
+        },
+        onPointerUp: (event: React.PointerEvent) => {
+          pointers.current.delete(event.pointerId)
+          last.current = pointers.current.size ? spread() : null
+        },
+        onPointerCancel: (event: React.PointerEvent) => {
+          pointers.current.delete(event.pointerId)
+          last.current = pointers.current.size ? spread() : null
+        },
+        // A drag ends with a click on whatever was under it; that isn't a tap.
+        onClickCapture: (event: React.MouseEvent) => {
+          if (!dragged.current) return
+          event.stopPropagation()
+          dragged.current = false
+        },
+      }
+    : {}
+
+  return { active, handlers }
+}
+
+// Zoom without pinching: buttons, and a note on how.
+function ZoomControls({ zoomed, onZoom, onReset }: { zoomed: boolean; onZoom: (factor: number) => void; onReset: () => void }) {
+  return (
+    <div className="er-zoombar" role="group" aria-label="Map zoom">
+      <span className="er-hint">{zoomed ? 'Drag to move around' : 'Pinch, or Ctrl/⌘ + scroll, to zoom'}</span>
+      {zoomed ? (
+        <button type="button" className="er-zoombtn er-zoombtn-wide" onClick={onReset} aria-label="Show the whole country">
+          Whole map
+        </button>
+      ) : null}
+      <button type="button" className="er-zoombtn" onClick={() => onZoom(1 / 1.6)} disabled={!zoomed} aria-label="Zoom out">
+        −
+      </button>
+      <button type="button" className="er-zoombtn" onClick={() => onZoom(1.6)} aria-label="Zoom in">
+        +
+      </button>
+    </div>
+  )
+}
+
 function USMap(props: MapProps) {
   const { snapshot, topo, countiesTopo, office, selected, race, results, senateInfo, countyView, flagged, onSelect } = props
   const [ref, width] = useElementWidth<HTMLDivElement>()
@@ -379,7 +532,14 @@ function USMap(props: MapProps) {
   const byPostal = useMemo(() => new Map(states.map((f) => [STATE_FIPS[f.id], f])), [states])
 
   const selectedFeature = selected ? byPostal.get(selected) : undefined
-  const zoom = useMemo(() => zoomToBounds(selectedFeature ? path.bounds(selectedFeature) : null), [selectedFeature])
+  // The national view people pinch, scroll-zoom and drag (1x until they do).
+  // A state opens with zoomToBounds, and closing it returns here.
+  const [national, setNational] = useState<MapZoom>(HOME)
+  const zoom = useMemo(
+    () => (selectedFeature ? zoomToBounds(path.bounds(selectedFeature)) : national),
+    [selectedFeature, national],
+  )
+  const gesture = useMapGestures(ref, national, setNational, !selected)
 
   const counties = useMemo(() => {
     if (!countiesTopo || !selectedFeature) return []
@@ -407,7 +567,12 @@ function USMap(props: MapProps) {
 
   return (
     <div className="er-mapcard">
-      <div className="er-map" ref={ref} onMouseLeave={() => setTip(null)}>
+      <div
+        className={`er-map${national.k > 1.01 && !selected ? ' is-zoomed' : ''}${gesture.active ? ' is-gesturing' : ''}`}
+        ref={ref}
+        onMouseLeave={() => setTip(null)}
+        {...gesture.handlers}
+      >
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={office === 'S' ? 'Senate results map' : 'House results map'}>
           <defs>
             <pattern id={HATCH_PATTERN_ID} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -473,6 +638,7 @@ function USMap(props: MapProps) {
           office={office}
           size={bubbleSize}
           width={width}
+          view={national}
           hidden={Boolean(selected)}
           onSelect={onSelect}
           onHover={showTip}
@@ -502,6 +668,13 @@ function USMap(props: MapProps) {
           aggregated={Object.values(snapshot.states).some(isAggregated)}
         />
         {selected ? null : <div className="er-hint">Tap a state to dig into its counties</div>}
+        {selected ? null : (
+          <ZoomControls
+            zoomed={national.k > 1.01}
+            onZoom={(factor) => setNational((view) => zoomAbout(view, factor, W / 2, H / 2))}
+            onReset={() => setNational(HOME)}
+          />
+        )}
       </div>
     </div>
   )
@@ -513,6 +686,7 @@ function Bubbles({
   office,
   size,
   width,
+  view,
   hidden,
   onSelect,
   onHover,
@@ -523,12 +697,14 @@ function Bubbles({
   office: Office
   size: number
   width: number
+  // The national zoom: faces keep their size and spread apart as it grows.
+  view: MapZoom
   hidden: boolean
   onSelect: (state: string) => void
   onHover: (event: React.MouseEvent, content: ReactNode) => void
   onLeave: () => void
 }) {
-  const { markers: items, columnWidth, depth } = layoutMarkers({
+  const laid = layoutMarkers({
     snapshot,
     office,
     centroid: (postal) => {
@@ -536,8 +712,15 @@ function Bubbles({
       return f ? (path.centroid(f) as [number, number]) : null
     },
     size,
-    width,
+    // Laid out as if the map were that much wider, then drawn in the
+    // zoomed frame, dropping markers panned out of view.
+    width: width * view.k,
   })
+  const { columnWidth, depth } = laid
+  const slack = (size * 2 * W) / Math.max(width, 1)
+  const items = laid.markers
+    .map((m) => ({ ...m, x: m.x * view.k + view.x, y: m.y * view.k + view.y, cx: m.cx * view.k + view.x, cy: m.cy * view.k + view.y }))
+    .filter((m) => m.x > -slack && m.x < W + slack && m.y > -slack && m.y < H + slack)
 
   return (
     <div className={`er-bubbles${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden}>
