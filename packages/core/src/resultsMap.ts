@@ -312,3 +312,36 @@ export function shapeContains(geometry: { type: string; coordinates?: unknown },
 export function unzoomPoint(point: MapPoint, zoom: MapZoom): MapPoint {
   return [(point[0] - zoom.x) / zoom.k, (point[1] - zoom.y) / zoom.k]
 }
+
+// ---- Pinch-to-zoom on the national map ----
+// The view is a MapZoom (translate x, y in map units, then scale k). These
+// run on the UI thread during a gesture, hence the 'worklet' directives
+// (a plain string elsewhere).
+
+export const MAX_PAN_ZOOM = 5
+
+// Keeps the zoom between 1 and MAX_PAN_ZOOM and the map covering the frame.
+export function clampView(view: MapZoom): MapZoom {
+  'worklet'
+  const k = Math.min(MAX_PAN_ZOOM, Math.max(1, view.k))
+  return {
+    k,
+    x: Math.min(0, Math.max(MAP_WIDTH - MAP_WIDTH * k, view.x)),
+    y: Math.min(0, Math.max(MAP_HEIGHT - MAP_HEIGHT * k, view.y)),
+  }
+}
+
+// Zooms by a factor about a point in the frame (map units), so the spot
+// under a pinch stays under the fingers.
+export function zoomAbout(view: MapZoom, factor: number, focalX: number, focalY: number): MapZoom {
+  'worklet'
+  const k = Math.min(MAX_PAN_ZOOM, Math.max(1, view.k * factor))
+  const ux = (focalX - view.x) / view.k
+  const uy = (focalY - view.y) / view.k
+  return clampView({ k, x: focalX - ux * k, y: focalY - uy * k })
+}
+
+export function panBy(view: MapZoom, dx: number, dy: number): MapZoom {
+  'worklet'
+  return clampView({ k: view.k, x: view.x + dx, y: view.y + dy })
+}

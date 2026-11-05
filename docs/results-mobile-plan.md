@@ -209,6 +209,16 @@ nothing.
   the marker buttons (with web's labels) and the lists, which reach every
   state and county. Opening or closing a state is announced (a live region
   on Android, `announceForAccessibility` on iOS).
+- **Zooming the national map (after step 7).** Crowded Southeast and
+  Northeast markers were hard to tap on a phone, so the national map
+  pinches (two fingers zoom about the point between them and drag), drags
+  with one finger once zoomed (at 1x one finger still scrolls the page),
+  and has + / - / Whole map buttons under it. Faces keep their size: when
+  the fingers lift, `layoutMarkers` runs again as if the map were that
+  much wider, so neighbors spread apart; mid-pinch the marker layer scales
+  along. The zoom math (`zoomAbout`, `panBy`, `clampView`, up to 5x) is in
+  `resultsMap.ts` as worklets. Opening a state zooms from wherever the map
+  is, and closing it returns there.
 - **Testing taps:** `adb shell input tap x y` and `adb shell input keyevent 4`
   (Back) drive the Android emulator; the iOS simulators have no tap tool
   here, so iOS taps and the back swipe need a person.
@@ -248,8 +258,9 @@ nothing.
   before and after.
 
 ## Out of scope
-Store builds and release (EAS, Clerk native setup; see `deploy.md`), push
-notifications for results, and pinch-to-zoom on the national map.
+Store builds and release (EAS, Clerk native setup; see `deploy.md`) and push
+notifications for results. (Pinch-to-zoom on the national map was added
+after step 7, since crowded markers were hard to tap: see below.)
 
 ## Starting the next session
 Open a new session in a fresh worktree from `main` and say:
