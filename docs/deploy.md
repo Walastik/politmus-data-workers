@@ -113,14 +113,30 @@ loads it from
   and credits civicAPI in the footer, which its terms require. Its counts can
   trail the states by hours and it doesn't name its sources; its race calls
   are ignored. `--no-civicapi` skips the fallback.
-- Run it by hand from the Actions tab: **Election Results**, optionally with a
-  comma-separated `states` list. A state whose site fails keeps its previous
-  counts.
+- **How it keeps running:** GitHub's scheduler runs this repo's schedules
+  hours late (on Election Night a `*/5` schedule never fired), so the
+  workflow doesn't rely on it. Each run refreshes every 5 minutes for about
+  5½ hours (`REFRESH_SECONDS`, `LOOP_MINUTES`), then starts the next run
+  itself, just before GitHub's 6-hour job limit. The `*/5` schedule is only a
+  backup that restarts the chain if it breaks. One run goes at a time; an
+  extra run waits behind it. A pass that fails (a site down) is logged as a
+  warning and the loop carries on; a state whose site fails keeps its
+  previous counts.
+- **Starting it:** if no Election Results run is in progress, start one from
+  the Actions tab (**Election Results**, `states` blank) or
+  `gh workflow run election-results.yml`.
+- **One-off refresh:** a manual run with a comma-separated `states` list
+  refreshes just those states once and doesn't loop. It waits for the running
+  loop to finish first, so for a quick refresh, cancel the loop, run it, then
+  start the loop again.
 - Locally: `cd backend && python election_results.py --out ../apps/app/public/dev-results.json`,
   then set `EXPO_PUBLIC_RESULTS_URL=/dev-results.json` in
   `apps/app/.env.local` to read that file instead (it's git- and
   Docker-ignored, so it never ships).
-- Turn the schedule off (or disable the workflow) once states certify. To
+- **Stopping it:** once states certify, disable the workflow (Actions tab, or
+  `gh workflow disable election-results.yml`), then cancel the run in
+  progress. A loop left running keeps refreshing until its 5½ hours are up;
+  its hand-off is then refused, which shows as a failed last step. To
   run it from the Mac mini instead, run the same script there and publish to
   the same branch, or point `RESULTS_SNAPSHOT_URL` somewhere else and deploy.
 
