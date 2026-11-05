@@ -92,6 +92,38 @@ Secrets (`CONGRESS_GOV_API_KEY`, `OPENSTATES_API_KEY`, `GOOGLE_CIVIC_API_KEY`,
 `politmus-api`; scheduled ingest runs from GitHub Actions over `fly ssh` (see
 the root README).
 
+## Election results (`/results`)
+
+The results page doesn't use the API. The **Election Results** workflow
+(`.github/workflows/election-results.yml`) runs `backend/election_results.py`
+on GitHub's runners every 5 minutes. The script reads each state's
+unofficial counts from its election office's site and force-pushes the
+snapshot as the only commit on the `election-results-data` branch. The page
+loads it from
+`https://raw.githubusercontent.com/Walastik/politmus-data-workers/election-results-data/2026-11-03.json`
+(`RESULTS_SNAPSHOT_URL` in `packages/core/src/electionResults.ts`).
+
+- New counts need no deploy. GitHub's raw CDN caches which commit a
+  branch points to for about five minutes, so the page can trail a run by
+  five to ten minutes. Changing the page, or where it reads
+  the snapshot from, does.
+- States we can't read directly (Texas, California, Michigan and others) fall
+  back to [civicAPI](https://civicapi.org), an independent aggregator. The page
+  marks those states (dashed ring, "civicAPI" tag, a note in the state panel)
+  and credits civicAPI in the footer, which its terms require. Its counts can
+  trail the states by hours and it doesn't name its sources; its race calls
+  are ignored. `--no-civicapi` skips the fallback.
+- Run it by hand from the Actions tab: **Election Results**, optionally with a
+  comma-separated `states` list. A state whose site fails keeps its previous
+  counts.
+- Locally: `cd backend && python election_results.py --out ../apps/app/public/dev-results.json`,
+  then set `EXPO_PUBLIC_RESULTS_URL=/dev-results.json` in
+  `apps/app/.env.local` to read that file instead (it's git- and
+  Docker-ignored, so it never ships).
+- Turn the schedule off (or disable the workflow) once states certify. To
+  run it from the Mac mini instead, run the same script there and publish to
+  the same branch, or point `RESULTS_SNAPSHOT_URL` somewhere else and deploy.
+
 ## Sign-in (Clerk) and Google OAuth
 
 - Production Clerk instance: `clerk.politmus.com` (the `pk_live_` key in

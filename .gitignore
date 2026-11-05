@@ -12,3 +12,7 @@ backend/scripts/debate_llm_config.py
 
 # npm workspaces install at the repo root
 node_modules/
+
+# Election results snapshot written locally by backend/election_results.py;
+# the site reads the one the Election Results workflow publishes.
+apps/app/public/dev-results.json

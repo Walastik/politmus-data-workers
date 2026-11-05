@@ -5,6 +5,7 @@ import {
   nextCalendarElection,
   statesWithEarlyVotingOpen,
 } from '@politmus/core/earlyVoting'
+import { resultsLinkPhase } from '@politmus/core/electionResults'
 import { daysUntil } from '@politmus/core/feed'
 import {
   ballotRacesFor,
@@ -25,6 +26,7 @@ import {
   FeedPreview,
   OnYourBallot,
   QuietHero,
+  ResultsCard,
   WhereToVote,
 } from '@/components/HappeningNow'
 import { Icons } from '@/components/icons'
@@ -59,6 +61,7 @@ export default function NowScreen() {
   const district = houseDistrict(lookupData)
   const racesQuery = useRaces(electionFocus ? stateCode : null)
   const hasPlace = Boolean(location.place) && lookup.status !== 'error'
+  const resultsPhase = resultsLinkPhase(today)
   const pollsClose = electionDay && hasPlace ? pollsCloseFor(voterData, lookupData?.point ?? null, electionDate) : null
 
   // Voting sites need a street address; a device location without one only
@@ -87,6 +90,8 @@ export default function NowScreen() {
         <Text className="text-slate-400">Loading…</Text>
       ) : (
         <>
+          {/* After Election Day the results lead; on the day, they follow the countdown. */}
+          {resultsPhase === 'counting' ? <ResultsCard phase={resultsPhase} /> : null}
           {electionFocus ? (
             <ElectionHero
               electionDate={electionDate}
@@ -101,6 +106,7 @@ export default function NowScreen() {
           ) : (
             <QuietHero placeName={stateCode ? getVoterResources(stateCode).name : null} />
           )}
+          {resultsPhase === 'tonight' ? <ResultsCard phase={resultsPhase} /> : null}
 
           <LocationBar
             prompt={
