@@ -1,25 +1,36 @@
 import {
   PARTY_COLOR,
   PARTY_SHORT,
+  countyMatchKey,
+  countyNameForFeature,
+  countyStanding,
+  countyTurnout,
   formatMargin,
   isAggregated,
   partyKey,
   raceStanding,
   reportingShare,
   share,
+  type RaceResult,
   type ResultsSnapshot,
+  type StateResults,
 } from '@politmus/core/electionResults'
 import {
   HATCH_PATTERN_ID,
   MAP_HEIGHT,
   MAP_WIDTH,
+  countyFill,
   layoutMarkers,
+  shapeContains,
   stateFill,
+  unzoomPoint,
+  zoomToBounds,
+  type CountyView,
   type MapMarker,
   type MapOffice,
 } from '@politmus/core/resultsMap'
 import { useEffect, useMemo, useState } from 'react'
-import { Text, View, type LayoutChangeEvent } from 'react-native'
+import { PixelRatio, Platform, Pressable, Text, View, type LayoutChangeEvent } from 'react-native'
 import Animated, {
   Easing,
   useAnimatedProps,
@@ -29,12 +40,18 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated'
-import Svg, { Circle, Defs, Ellipse, Line, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop } from 'react-native-svg'
+import Svg, { Circle, Defs, Ellipse, G, Line, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop, type GProps } from 'react-native-svg'
 
 import { Face } from './Face'
-import { stateShapes } from './mapShapes'
+import { countyShapes, stateShapes, type CountyShape } from './mapShapes'
 
 const AnimatedPath = Animated.createAnimatedComponent(Path)
+const AnimatedG = Animated.createAnimatedComponent(G)
+
+// Inside a viewBox, react-native-svg on Android multiplies a group's
+// translation by the screen density (the path coordinates it doesn't), so
+// the zoom's translation is divided back down there.
+const TRANSLATE_SCALE = Platform.OS === 'android' ? PixelRatio.get() : 1
 
 // The face size in points for a map this wide. A phone map is about 360pt
 // wide, where web's smallest (32px) crowds the 35 Senate races.
@@ -42,30 +59,103 @@ function faceSize(width: number) {
   return width < 520 ? 28 : width < 820 ? 40 : 50
 }
 
+export interface CountyTap {
+  fips: string
+  name: string
+}
+
 // The national map: states filled by leader and margin, with a Senate face
 // on a 3D column, or a House seat-count pill, on each state with a race.
+// Tapping a state zooms in to it and draws its counties.
 export function USMap({
   snapshot,
   office,
   senateStates,
+  selected,
+  race,
+  results,
+  countiesTopo,
+  countyView,
+  flagged,
+  tapped,
+  onSelect,
+  onCounty,
 }: {
   snapshot: ResultsSnapshot
   office: MapOffice
   senateStates: Set<string>
+  selected: string | null
+  race: RaceResult | null
+  results: StateResults | undefined
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  countiesTopo: any
+  countyView: CountyView
+  flagged: string | null
+  tapped: string | null
+  onSelect: (state: string | null) => void
+  onCounty: (county: CountyTap) => void
 }) {
   const [width, setWidth] = useState(0)
-  const { states, nation } = stateShapes()
+  const { states, byPostal, nation } = stateShapes()
   const height = (width * MAP_HEIGHT) / MAP_WIDTH
+  const reduceMotion = useReducedMotion()
+  const selectedShape = selected ? byPostal.get(selected) : undefined
+
+  // Zoom with the same bounds math as web, animated on the UI thread by
+  // setting the group's matrix, so the paths never re-render mid-zoom.
+  const zoom = zoomToBounds(selectedShape?.bounds)
+  const k = useSharedValue(zoom.k)
+  const x = useSharedValue(zoom.x)
+  const y = useSharedValue(zoom.y)
+  useEffect(() => {
+    const to = (value: number) => (reduceMotion ? value : withTiming(value, { duration: 800, easing: Easing.bezier(0.2, 0.7, 0.1, 1) }))
+    k.set(to(zoom.k))
+    x.set(to(zoom.x))
+    y.set(to(zoom.y))
+  }, [k, x, y, zoom.k, zoom.x, zoom.y, reduceMotion])
+  // `matrix` is G's native prop (what its transform props become), though
+  // GProps doesn't declare it.
+  const zoomProps = useAnimatedProps(
+    () => ({ matrix: [k.get(), 0, 0, k.get(), x.get() / TRANSLATE_SCALE, y.get() / TRANSLATE_SCALE] }) as Partial<GProps>,
+  )
+
+  // countyShapes caches each state's paths, so this is cheap to call.
+  const counties = countiesTopo && selectedShape ? countyShapes(countiesTopo, selectedShape.fips) : []
+  // County names in results, by match key.
+  const countyKeys = useMemo(() => {
+    const keys = new Map<string, string>()
+    for (const name of Object.keys(results?.counties ?? {})) keys.set(countyMatchKey(name), name)
+    for (const name of Object.keys(race?.counties ?? {})) keys.set(countyMatchKey(name), name)
+    return keys
+  }, [results, race])
+  const resultName = (c: CountyShape) => countyKeys.get(countyMatchKey(countyNameForFeature(c.fips, c.name)))
+  const onMapPress = (px: number, py: number) => {
+    if (!width) return
+    // Screen points to the 975 × 610 frame, then out of the zoom.
+    const point = unzoomPoint([(px * MAP_WIDTH) / width, (py * MAP_WIDTH) / width], zoom)
+    if (selected) {
+      const county = counties.find((c) => shapeContains(c.feature.geometry, point))
+      if (county) return onCounty({ fips: county.fips, name: county.name })
+      if (selectedShape && shapeContains(selectedShape.feature.geometry, point)) return
+    }
+    const state = states.find((st) => shapeContains(st.feature.geometry, point))
+    onSelect(state && state.postal !== selected ? state.postal : null)
+  }
+  const outlined = counties.filter((c) => c.fips === tapped || (flagged !== null && resultName(c) === flagged))
 
   return (
     <View
       onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
       style={{ aspectRatio: MAP_WIDTH / MAP_HEIGHT }}
       className="w-full overflow-hidden"
-      accessibilityRole="image"
-      accessibilityLabel={office === 'S' ? 'Senate results map' : 'House results map'}
     >
-      <Svg width="100%" height="100%" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} style={{ position: 'absolute' }}>
+      <Svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+        style={{ position: 'absolute' }}
+        pointerEvents="none"
+      >
         <Defs>
           <RadialGradient id="er-sky" cx="50%" cy="0%" rx="60%" ry="90%" fx="50%" fy="0%" gradientUnits="objectBoundingBox">
             <Stop offset="0" stopColor="#16223d" />
@@ -78,26 +168,99 @@ export function USMap({
           </Pattern>
         </Defs>
         <Rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#er-sky)" />
-        {states.map((s) => (
-          <Path
-            key={s.postal}
-            d={s.d}
-            fill={stateFill(snapshot, s.postal, office, senateStates)}
-            stroke="#0b1222"
-            strokeWidth={0.8}
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        <Path d={nation} fill="none" stroke="#334155" strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
+        <AnimatedG animatedProps={zoomProps}>
+          {states.map((s) => {
+            const isSelected = s.postal === selected
+            return (
+              <Path
+                key={s.postal}
+                d={s.d}
+                fill={isSelected && counties.length ? '#0f172a' : stateFill(snapshot, s.postal, office, senateStates)}
+                opacity={selected && !isSelected ? 0.18 : 1}
+                stroke={isSelected ? '#e2e8f0' : '#0b1222'}
+                strokeWidth={isSelected ? 1.6 : 0.8}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
+          {counties.map((c) => {
+            const name = resultName(c)
+            const standing = race && name ? countyStanding(race, name) : null
+            const turnout = results && name ? countyTurnout(results, name) : null
+            return (
+              <Path
+                key={c.fips}
+                d={c.d}
+                fill={countyFill(countyView, standing, turnout)}
+                stroke="rgba(11, 18, 34, 0.65)"
+                strokeWidth={0.4}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
+          {selectedShape && counties.length ? (
+            <Path d={selectedShape.d} fill="none" stroke="#e2e8f0" strokeWidth={1.4} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+          ) : null}
+          {/* The tapped county in white and the flagged one in yellow, drawn last so the outline is on top. */}
+          {outlined.map((c) => (
+            <Path
+              key={`outline-${c.fips}`}
+              d={c.d}
+              fill="none"
+              stroke={c.fips === tapped ? '#ffffff' : '#fde68a'}
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+              pointerEvents="none"
+            />
+          ))}
+          <Path d={nation} fill="none" stroke="#334155" strokeWidth={0.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+        </AnimatedG>
       </Svg>
-      {width ? <Markers snapshot={snapshot} office={office} width={width} height={height} /> : null}
+      {/* One touch target for the whole map: a tap is matched to a county or
+          state by its position (shapeContains), undoing the zoom. */}
+      <Pressable
+        onPress={(e) => onMapPress(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+        accessibilityLabel={office === 'S' ? 'Senate results map' : 'House results map'}
+        accessibilityHint={selected ? 'Tap a county for its numbers' : 'Tap a state to open it'}
+        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+      />
+      {width ? (
+        <Markers snapshot={snapshot} office={office} width={width} height={height} hidden={Boolean(selected)} onSelect={onSelect} />
+      ) : null}
+      {selected ? (
+        <View className="absolute left-3 top-2.5 flex-row items-center gap-2">
+          <Pressable
+            onPress={() => onSelect(null)}
+            accessibilityRole="button"
+            hitSlop={8}
+            className="min-h-[34px] justify-center rounded-full border border-[#26324d] bg-slate-900/85 px-3"
+          >
+            <Text className="text-[13px] font-semibold text-slate-200">← All states</Text>
+          </Pressable>
+          {!countiesTopo ? <Text className="text-xs text-slate-500">Loading counties…</Text> : null}
+        </View>
+      ) : null}
     </View>
   )
 }
 
 // ---- Markers ----
 
-function Markers({ snapshot, office, width, height }: { snapshot: ResultsSnapshot; office: MapOffice; width: number; height: number }) {
+function Markers({
+  snapshot,
+  office,
+  width,
+  height,
+  hidden,
+  onSelect,
+}: {
+  snapshot: ResultsSnapshot
+  office: MapOffice
+  width: number
+  height: number
+  hidden: boolean
+  onSelect: (state: string) => void
+}) {
   const { byPostal } = stateShapes()
   const size = faceSize(width)
   const layout = useMemo(
@@ -105,9 +268,22 @@ function Markers({ snapshot, office, width, height }: { snapshot: ResultsSnapsho
     [snapshot, office, byPostal, size, width],
   )
   const scale = width / MAP_WIDTH
+  // Faded out while a state is open. Hidden markers must stop taking touches
+  // too, or they catch taps meant for the counties under them (#88 on web).
+  const reduceMotion = useReducedMotion()
+  const opacity = useSharedValue(hidden ? 0 : 1)
+  useEffect(() => {
+    opacity.set(reduceMotion ? (hidden ? 0 : 1) : withTiming(hidden ? 0 : 1, { duration: 350 }))
+  }, [opacity, hidden, reduceMotion])
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.get() }))
 
   return (
-    <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, width, height }}>
+    <Animated.View
+      pointerEvents={hidden ? 'none' : 'box-none'}
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+      style={[{ position: 'absolute', left: 0, top: 0, width, height }, fade]}
+    >
       {/* Callout lines from the small Northeastern states out to their markers. */}
       <Svg width={width} height={height} style={{ position: 'absolute' }} pointerEvents="none">
         {layout.markers
@@ -126,16 +302,36 @@ function Markers({ snapshot, office, width, height }: { snapshot: ResultsSnapsho
       </Svg>
       {layout.markers.map((m) =>
         m.tally ? (
-          <HousePill key={m.key} marker={m} scale={scale} width={width} compact={size < 32} />
+          <HousePill key={m.key} marker={m} scale={scale} width={width} compact={size < 32} onSelect={onSelect} />
         ) : (
-          <Tower key={m.key} marker={m} scale={scale} size={size} columnWidth={layout.columnWidth} depth={layout.depth} />
+          <Tower
+            key={m.key}
+            marker={m}
+            scale={scale}
+            size={size}
+            columnWidth={layout.columnWidth}
+            depth={layout.depth}
+            onSelect={onSelect}
+          />
         ),
       )}
-    </View>
+    </Animated.View>
   )
 }
 
-function HousePill({ marker, scale, width, compact }: { marker: MapMarker; scale: number; width: number; compact: boolean }) {
+function HousePill({
+  marker,
+  scale,
+  width,
+  compact,
+  onSelect,
+}: {
+  marker: MapMarker
+  scale: number
+  width: number
+  compact: boolean
+  onSelect: (state: string) => void
+}) {
   const tally = marker.tally!
   const aggregated = isAggregated(marker.results)
   const label = tally.map((t) => `${PARTY_SHORT[t.party]}${compact ? '' : ' '}${t.leading}`).join(' · ')
@@ -145,18 +341,21 @@ function HousePill({ marker, scale, width, compact }: { marker: MapMarker; scale
   const left = Math.min(width - half - 2, Math.max(half + 2, marker.x * scale))
   return (
     <View
-      pointerEvents="none"
+      pointerEvents="box-none"
       style={{ position: 'absolute', left: left - 60, width: 120, top: marker.y * scale, alignItems: 'center', transform: [{ translateY: '-50%' }], zIndex: 2 }}
-      accessibilityLabel={`${marker.results.name} House results${aggregated ? ', via civicAPI' : ''}`}
     >
-      <View
+      <Pressable
+        onPress={() => onSelect(marker.key)}
+        accessibilityRole="button"
+        accessibilityLabel={`${marker.results.name} House results${aggregated ? ', via civicAPI' : ''}`}
+        hitSlop={{ top: 14, bottom: 14, left: 4, right: 4 }}
         style={{ backgroundColor: PARTY_COLOR[tally[0].party] }}
         className={`rounded-full ${compact ? 'px-1' : 'px-2 py-0.5'} ${aggregated ? 'border border-dashed border-slate-200/70' : ''}`}
       >
         <Text style={{ fontVariant: ['tabular-nums'], fontSize: compact ? 9 : 12 }} className="font-extrabold text-white">
           {label}
         </Text>
-      </View>
+      </Pressable>
     </View>
   )
 }
@@ -171,12 +370,14 @@ function Tower({
   size,
   columnWidth,
   depth,
+  onSelect,
 }: {
   marker: MapMarker
   scale: number
   size: number
   columnWidth: number
   depth: number
+  onSelect: (state: string) => void
 }) {
   const reduceMotion = useReducedMotion()
   const lift = useSharedValue(reduceMotion ? marker.lift : 0)
@@ -209,6 +410,7 @@ function Tower({
         leaderShare={share(leader.votes, standing.totalVotes)}
         aggregated={isAggregated(marker.results)}
         label={`${marker.results.name}: ${leader.name} leads by ${standing.margin.toFixed(1)} points, ${counted}% counted`}
+        onPress={() => onSelect(marker.key)}
       />
       <MarginPill x={x} y={y} lift={lift} size={size} depth={depth} color={color} margin={formatMargin(standing.margin)} />
     </>
@@ -287,6 +489,7 @@ function FaceMarker({
   leaderShare,
   aggregated,
   label,
+  onPress,
 }: {
   x: number
   y: number
@@ -300,18 +503,27 @@ function FaceMarker({
   leaderShare: number
   aggregated: boolean
   label: string
+  onPress: () => void
 }) {
   // The face sits atop its column, overlapping the cap by half its depth.
   const ride = useAnimatedStyle(() => ({ transform: [{ translateY: -lift.get() }] }))
   const radius = 47
   const circumference = 2 * Math.PI * radius
   const inset = Math.max(3, Math.round(size * 0.1))
+  // At least a 44pt target around the face.
+  const slop = Math.max(0, Math.ceil((44 - size) / 2))
   return (
     <Animated.View
-      pointerEvents="none"
-      accessibilityLabel={label}
+      pointerEvents="box-none"
       style={[{ position: 'absolute', left: x - size / 2, top: y + depth / 2 - size, width: size, height: size, zIndex: 2 }, ride]}
     >
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        hitSlop={slop}
+        style={{ position: 'absolute', left: 0, top: 0, width: size, height: size }}
+      >
       <Svg width={size} height={size} viewBox="0 0 100 100" style={{ position: 'absolute' }}>
         <Circle cx="50" cy="50" r={radius} fill="#0f172a" stroke="#334155" strokeWidth="6" />
         <Circle
@@ -335,6 +547,7 @@ function FaceMarker({
           className="border border-dashed border-slate-200/70"
         />
       ) : null}
+      </Pressable>
     </Animated.View>
   )
 }

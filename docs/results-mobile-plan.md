@@ -197,6 +197,16 @@ nothing.
   Politmus photos, so initials there are expected.
 - **No em-dashes in app sentences** (house style); a dash for an empty value
   is fine.
+- **Android and a zoomed SVG group (found in step 4).** Inside a `viewBox`,
+  react-native-svg on Android multiplies a `G`'s translation by the screen
+  density, so the zoomed map drew off-screen; `USMap` divides it back down
+  there. Its touch targets on Android don't follow the transform either, so
+  the map takes taps with one `Pressable` and matches them to counties and
+  states with `shapeContains` (in `resultsMap.ts`) instead of `onPress` on
+  each path.
+- **Testing taps:** `adb shell input tap x y` and `adb shell input keyevent 4`
+  (Back) drive the Android emulator; the iOS simulators have no tap tool
+  here, so iOS taps and the back swipe need a person.
 
 ## Steps (one PR each)
 1. **Shared layout:** move the map math to `packages/core/src/resultsMap.ts`
