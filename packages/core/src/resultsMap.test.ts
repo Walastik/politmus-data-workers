@@ -7,18 +7,22 @@ import {
   HATCH_FILL,
   MAP_HEIGHT,
   MAP_WIDTH,
+  MAX_PAN_ZOOM,
   MAX_ZOOM,
   NO_COUNTY_FILL,
   NO_RACE_FILL,
   columnHeight,
   columnSize,
   countyFill,
+  clampView,
   layoutMarkers,
+  panBy,
   shapeContains,
   spreadMarkers,
   stateFill,
   turnoutColor,
   unzoomPoint,
+  zoomAbout,
   zoomToBounds,
   type MapPoint,
 } from './resultsMap'
@@ -317,5 +321,33 @@ describe('hit testing', () => {
     const [x, y] = unzoomPoint(onScreen, zoom)
     expect(x).toBeCloseTo(150)
     expect(y).toBeCloseTo(130)
+  })
+})
+
+describe('pinch-to-zoom view', () => {
+  const home = { k: 1, x: 0, y: 0 }
+
+  it('keeps the spot under the fingers fixed while zooming', () => {
+    const view = zoomAbout(home, 2, 500, 300)
+    expect(view.k).toBe(2)
+    // The map point that was at (500, 300) is still drawn there.
+    expect(500 * view.k + view.x).toBeCloseTo(500)
+    expect((500 - view.x) / view.k).toBeCloseTo(500)
+    expect((300 - view.y) / view.k).toBeCloseTo(300)
+  })
+
+  it('stays between 1x and the maximum, covering the frame', () => {
+    expect(zoomAbout(home, 0.5, 100, 100)).toEqual(home)
+    expect(zoomAbout(home, 100, 0, 0).k).toBe(MAX_PAN_ZOOM)
+    const view = clampView({ k: 2, x: 50, y: -5000 })
+    expect(view.x).toBe(0)
+    expect(view.y).toBe(MAP_HEIGHT - MAP_HEIGHT * 2)
+  })
+
+  it('pans only within the zoomed map', () => {
+    const zoomed = { k: 2, x: -400, y: -200 }
+    expect(panBy(zoomed, 100, 50)).toEqual({ k: 2, x: -300, y: -150 })
+    expect(panBy(zoomed, 9999, 0).x).toBe(0)
+    expect(panBy(home, 30, 30)).toEqual(home)
   })
 })

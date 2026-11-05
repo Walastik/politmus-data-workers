@@ -21,13 +21,16 @@ import {
   MAP_WIDTH,
   countyFill,
   layoutMarkers,
+  panBy,
   shapeContains,
   stateFill,
   unzoomPoint,
+  zoomAbout,
   zoomToBounds,
   type CountyView,
   type MapMarker,
   type MapOffice,
+  type MapZoom,
 } from '@politmus/core/resultsMap'
 import { useEffect, useMemo, useState } from 'react'
 import { PixelRatio, Platform, Pressable, Text, View, type LayoutChangeEvent } from 'react-native'
@@ -40,7 +43,9 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated'
+import { GestureDetector, usePanGesture, usePinchGesture, useSimultaneousGestures } from 'react-native-gesture-handler'
 import Svg, { Circle, Defs, Ellipse, G, Line, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop, type GProps } from 'react-native-svg'
+import { scheduleOnRN } from 'react-native-worklets'
 
 import { Face } from './Face'
 import { countyShapes, stateShapes, type CountyShape } from './mapShapes'
@@ -101,9 +106,12 @@ export function USMap({
   const reduceMotion = useReducedMotion()
   const selectedShape = selected ? byPostal.get(selected) : undefined
 
-  // Zoom with the same bounds math as web, animated on the UI thread by
-  // setting the group's matrix, so the paths never re-render mid-zoom.
-  const zoom = zoomToBounds(selectedShape?.bounds)
+  // The national view people pinch and drag (1x until they do). A state
+  // opens with the same bounds math as web, and closing it returns here.
+  const [national, setNational] = useState<MapZoom>(HOME)
+  const zoom = selectedShape ? zoomToBounds(selectedShape.bounds) : national
+  // Animated on the UI thread by setting the group's matrix, so the paths
+  // never re-render mid-zoom; a pinch sets these directly.
   const k = useSharedValue(zoom.k)
   const x = useSharedValue(zoom.x)
   const y = useSharedValue(zoom.y)
@@ -129,6 +137,70 @@ export function USMap({
     return keys
   }, [results, race])
   const resultName = (c: CountyShape) => countyKeys.get(countyMatchKey(countyNameForFeature(c.fips, c.name)))
+  // ---- Pinch and drag (national map only) ----
+  // Points on the map in its own units: px divided by points per unit.
+  const c = width / MAP_WIDTH || 1
+  const pinching = useSharedValue(false)
+  const active = useSharedValue(0)
+  const focal = useSharedValue<[number, number]>([0, 0])
+  const commit = (next: MapZoom) => setNational(next)
+  const settle = () => {
+    'worklet'
+    active.set(Math.max(0, active.get() - 1))
+    if (active.get() === 0) scheduleOnRN(commit, { k: k.get(), x: x.get(), y: y.get() })
+  }
+  const pinch = usePinchGesture({
+    enabled: !selected,
+    onActivate: (e) => {
+      'worklet'
+      active.set(active.get() + 1)
+      pinching.set(true)
+      focal.set([e.focalX / c, e.focalY / c])
+    },
+    onUpdate: (e) => {
+      'worklet'
+      const fx = e.focalX / c
+      const fy = e.focalY / c
+      const [px, py] = focal.get()
+      // Two fingers moving together drag the map; spreading them zooms
+      // about the point between them.
+      const moved = panBy({ k: k.get(), x: x.get(), y: y.get() }, fx - px, fy - py)
+      const next = zoomAbout(moved, e.scaleChange, fx, fy)
+      k.set(next.k)
+      x.set(next.x)
+      y.set(next.y)
+      focal.set([fx, fy])
+    },
+    onDeactivate: () => {
+      'worklet'
+      pinching.set(false)
+      settle()
+    },
+  })
+  // One finger drags only once zoomed in, so at 1x the page still scrolls.
+  const pan = usePanGesture({
+    enabled: !selected && national.k > 1.01,
+    maxPointers: 1,
+    onActivate: () => {
+      'worklet'
+      active.set(active.get() + 1)
+    },
+    onUpdate: (e) => {
+      'worklet'
+      if (pinching.get()) return
+      const next = panBy({ k: k.get(), x: x.get(), y: y.get() }, e.changeX / c, e.changeY / c)
+      x.set(next.x)
+      y.set(next.y)
+    },
+    onDeactivate: () => {
+      'worklet'
+      settle()
+    },
+  })
+  const gestures = useSimultaneousGestures(pinch, pan)
+  // The zoom buttons step about the middle of what's on screen.
+  const zoomBy = (factor: number) => setNational((view) => zoomAbout(view, factor, MAP_WIDTH / 2, MAP_HEIGHT / 2))
+
   const onMapPress = (px: number, py: number) => {
     if (!width) return
     // Screen points to the 975 × 610 frame, then out of the zoom.
@@ -144,122 +216,170 @@ export function USMap({
   const outlined = counties.filter((c) => c.fips === tapped || (flagged !== null && resultName(c) === flagged))
 
   return (
-    <View
-      onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
-      style={{ aspectRatio: MAP_WIDTH / MAP_HEIGHT }}
-      className="w-full overflow-hidden"
-    >
-      <Svg
-        width="100%"
-        height="100%"
-        viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-        style={{ position: 'absolute' }}
-        pointerEvents="none"
-      >
-        <Defs>
-          <RadialGradient id="er-sky" cx="50%" cy="0%" rx="60%" ry="90%" fx="50%" fy="0%" gradientUnits="objectBoundingBox">
-            <Stop offset="0" stopColor="#16223d" />
-            <Stop offset="0.7" stopColor="#0f172a" />
-            <Stop offset="1" stopColor="#0f172a" />
-          </RadialGradient>
-          <Pattern id={HATCH_PATTERN_ID} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <Rect width="6" height="6" fill="#1e293b" />
-            <Line x1="0" y1="0" x2="0" y2="6" stroke="#475569" strokeWidth="2" />
-          </Pattern>
-        </Defs>
-        <Rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#er-sky)" />
-        <AnimatedG animatedProps={zoomProps}>
-          {states.map((s) => {
-            const isSelected = s.postal === selected
-            return (
-              <Path
-                key={s.postal}
-                d={s.d}
-                fill={isSelected && counties.length ? '#0f172a' : stateFill(snapshot, s.postal, office, senateStates)}
-                opacity={selected && !isSelected ? 0.18 : 1}
-                stroke={isSelected ? '#e2e8f0' : '#0b1222'}
-                strokeWidth={isSelected ? 1.6 : 0.8}
-                vectorEffect="non-scaling-stroke"
-              />
-            )
-          })}
-          {counties.map((c) => {
-            const name = resultName(c)
-            const standing = race && name ? countyStanding(race, name) : null
-            const turnout = results && name ? countyTurnout(results, name) : null
-            return (
-              <Path
-                key={c.fips}
-                d={c.d}
-                fill={countyFill(countyView, standing, turnout)}
-                stroke="rgba(11, 18, 34, 0.65)"
-                strokeWidth={0.4}
-                vectorEffect="non-scaling-stroke"
-              />
-            )
-          })}
-          {selectedShape && counties.length ? (
-            <Path d={selectedShape.d} fill="none" stroke="#e2e8f0" strokeWidth={1.4} vectorEffect="non-scaling-stroke" pointerEvents="none" />
-          ) : null}
-          {/* The tapped county in white and the flagged one in yellow, drawn last so the outline is on top. */}
-          {outlined.map((c) => (
-            <Path
-              key={`outline-${c.fips}`}
-              d={c.d}
-              fill="none"
-              stroke={c.fips === tapped ? '#ffffff' : '#fde68a'}
-              strokeWidth={2}
-              vectorEffect="non-scaling-stroke"
-              pointerEvents="none"
-            />
-          ))}
-          <Path d={nation} fill="none" stroke="#334155" strokeWidth={0.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
-        </AnimatedG>
-      </Svg>
-      {/* One touch target for the whole map: a tap is matched to a county or
-          state by its position (shapeContains), undoing the zoom. */}
-      {/* What a screen reader says for the map itself; a sibling of the
-          markers, so it doesn't swallow their buttons. */}
-      <View
-        accessible
-        accessibilityRole="image"
-        accessibilityLabel={
-          selected
-            ? `${selectedShape?.name ?? selected} county map${countyView === 'turnout' ? ', by turnout' : ''}`
-            : office === 'S'
-              ? 'Senate results map'
-              : 'House results map'
-        }
-        pointerEvents="none"
-        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
-      />
-      {/* Hidden from screen readers, which would tap its center: they get
-          the marker buttons and the lists below, which cover every state
-          and county. */}
-      <Pressable
-        onPress={(e) => onMapPress(e.nativeEvent.locationX, e.nativeEvent.locationY)}
-        accessible={false}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
-      />
-      {width ? (
-        <Markers snapshot={snapshot} office={office} width={width} height={height} hidden={Boolean(selected)} onSelect={onSelect} />
-      ) : null}
-      {selected ? (
-        <View className="absolute left-3 top-2.5 flex-row items-center gap-2">
-          <Pressable
-            onPress={() => onSelect(null)}
-            accessibilityRole="button"
-            accessibilityLabel="All states"
-            hitSlop={8}
-            className="min-h-[34px] justify-center rounded-full border border-[#26324d] bg-slate-900/85 px-3"
+    <>
+      <GestureDetector gesture={gestures}>
+        <View
+          onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
+          style={{ aspectRatio: MAP_WIDTH / MAP_HEIGHT }}
+          className="w-full overflow-hidden"
+        >
+          <Svg
+            width="100%"
+            height="100%"
+            viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+            style={{ position: 'absolute' }}
+            pointerEvents="none"
           >
-            <Text className="text-[13px] font-semibold text-slate-200">← All states</Text>
-          </Pressable>
-          {!countiesTopo ? <Text className="text-xs text-slate-500">Loading counties…</Text> : null}
+            <Defs>
+              <RadialGradient id="er-sky" cx="50%" cy="0%" rx="60%" ry="90%" fx="50%" fy="0%" gradientUnits="objectBoundingBox">
+                <Stop offset="0" stopColor="#16223d" />
+                <Stop offset="0.7" stopColor="#0f172a" />
+                <Stop offset="1" stopColor="#0f172a" />
+              </RadialGradient>
+              <Pattern id={HATCH_PATTERN_ID} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <Rect width="6" height="6" fill="#1e293b" />
+                <Line x1="0" y1="0" x2="0" y2="6" stroke="#475569" strokeWidth="2" />
+              </Pattern>
+            </Defs>
+            <Rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#er-sky)" />
+            <AnimatedG animatedProps={zoomProps}>
+              {states.map((s) => {
+                const isSelected = s.postal === selected
+                return (
+                  <Path
+                    key={s.postal}
+                    d={s.d}
+                    fill={isSelected && counties.length ? '#0f172a' : stateFill(snapshot, s.postal, office, senateStates)}
+                    opacity={selected && !isSelected ? 0.18 : 1}
+                    stroke={isSelected ? '#e2e8f0' : '#0b1222'}
+                    strokeWidth={isSelected ? 1.6 : 0.8}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )
+              })}
+              {counties.map((c) => {
+                const name = resultName(c)
+                const standing = race && name ? countyStanding(race, name) : null
+                const turnout = results && name ? countyTurnout(results, name) : null
+                return (
+                  <Path
+                    key={c.fips}
+                    d={c.d}
+                    fill={countyFill(countyView, standing, turnout)}
+                    stroke="rgba(11, 18, 34, 0.65)"
+                    strokeWidth={0.4}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )
+              })}
+              {selectedShape && counties.length ? (
+                <Path d={selectedShape.d} fill="none" stroke="#e2e8f0" strokeWidth={1.4} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+              ) : null}
+              {/* The tapped county in white and the flagged one in yellow, drawn last so the outline is on top. */}
+              {outlined.map((c) => (
+                <Path
+                  key={`outline-${c.fips}`}
+                  d={c.d}
+                  fill="none"
+                  stroke={c.fips === tapped ? '#ffffff' : '#fde68a'}
+                  strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="none"
+                />
+              ))}
+              <Path d={nation} fill="none" stroke="#334155" strokeWidth={0.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+            </AnimatedG>
+          </Svg>
+          {/* One touch target for the whole map: a tap is matched to a county or
+              state by its position (shapeContains), undoing the zoom. */}
+          {/* What a screen reader says for the map itself; a sibling of the
+              markers, so it doesn't swallow their buttons. */}
+          <View
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel={
+              selected
+                ? `${selectedShape?.name ?? selected} county map${countyView === 'turnout' ? ', by turnout' : ''}`
+                : office === 'S'
+                  ? 'Senate results map'
+                  : 'House results map'
+            }
+            pointerEvents="none"
+            style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+          />
+          {/* Hidden from screen readers, which would tap its center: they get
+              the marker buttons and the lists below, which cover every state
+              and county. */}
+          <Pressable
+            onPress={(e) => onMapPress(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+          />
+          {width ? (
+            <Markers
+              snapshot={snapshot}
+              office={office}
+              width={width}
+              height={height}
+              hidden={Boolean(selected)}
+              view={national}
+              live={{ k, x, y }}
+              onSelect={onSelect}
+            />
+          ) : null}
+            {selected ? (
+            <View className="absolute left-3 top-2.5 flex-row items-center gap-2">
+              <Pressable
+                onPress={() => onSelect(null)}
+                accessibilityRole="button"
+                accessibilityLabel="All states"
+                hitSlop={8}
+                className="min-h-[34px] justify-center rounded-full border border-[#26324d] bg-slate-900/85 px-3"
+              >
+                <Text className="text-[13px] font-semibold text-slate-200">← All states</Text>
+              </Pressable>
+              {!countiesTopo ? <Text className="text-xs text-slate-500">Loading counties…</Text> : null}
+            </View>
+          ) : null}
         </View>
-      ) : null}
+      </GestureDetector>
+      {/* Under the map, not on it: on a phone every corner has a face. */}
+      {selected ? null : <ZoomButtons zoomed={national.k > 1.01} onZoom={zoomBy} onReset={() => setNational(HOME)} />}
+    </>
+  )
+}
+
+const HOME: MapZoom = { k: 1, x: 0, y: 0 }
+
+// Zoom in and out without pinching (one hand, or a screen reader).
+function ZoomButtons({ zoomed, onZoom, onReset }: { zoomed: boolean; onZoom: (factor: number) => void; onReset: () => void }) {
+  const button = 'h-9 min-w-9 items-center justify-center rounded-full border border-[#26324d] bg-[#131d33] px-2.5'
+  return (
+    <View className="flex-row items-center justify-between gap-2 border-t border-[#26324d] px-3.5 py-2">
+      <Text className="shrink text-xs text-slate-500">{zoomed ? 'Drag to move around' : 'Pinch or tap + to zoom in'}</Text>
+      <View className="flex-row gap-2">
+        {zoomed ? (
+          <Pressable onPress={onReset} accessibilityRole="button" accessibilityLabel="Show the whole country" hitSlop={4} className={button}>
+            <Text className="text-xs font-bold text-slate-200">Whole map</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => onZoom(1 / 1.6)}
+          disabled={!zoomed}
+          accessibilityRole="button"
+          accessibilityLabel="Zoom out"
+          accessibilityState={{ disabled: !zoomed }}
+          hitSlop={4}
+          className={`${button} ${zoomed ? '' : 'opacity-40'}`}
+        >
+          <Text className="text-lg font-semibold leading-5 text-slate-200">−</Text>
+        </Pressable>
+        <Pressable onPress={() => onZoom(1.6)} accessibilityRole="button" accessibilityLabel="Zoom in" hitSlop={4} className={button}>
+          <Text className="text-lg font-semibold leading-5 text-slate-200">+</Text>
+        </Pressable>
+      </View>
     </View>
   )
 }
@@ -272,6 +392,8 @@ function Markers({
   width,
   height,
   hidden,
+  view,
+  live,
   onSelect,
 }: {
   snapshot: ResultsSnapshot
@@ -279,15 +401,37 @@ function Markers({
   width: number
   height: number
   hidden: boolean
+  // The national zoom the markers are laid out for, and the map's live zoom.
+  view: MapZoom
+  live: { k: SharedValue<number>; x: SharedValue<number>; y: SharedValue<number> }
   onSelect: (state: string) => void
 }) {
   const { byPostal } = stateShapes()
+  // Faces keep their size when zoomed; the layout runs as if the map were
+  // that much wider, so crowded neighbors spread apart.
   const size = faceSize(width)
-  const layout = useMemo(
-    () => layoutMarkers({ snapshot, office, centroid: (postal) => byPostal.get(postal)?.centroid, size, width }),
-    [snapshot, office, byPostal, size, width],
-  )
   const scale = width / MAP_WIDTH
+  const layout = useMemo(() => {
+    const laid = layoutMarkers({ snapshot, office, centroid: (postal) => byPostal.get(postal)?.centroid, size, width: width * view.k })
+    // Into the zoomed frame, dropping markers panned out of view.
+    const project = (u: number, axis: 'x' | 'y') => u * view.k + view[axis]
+    const markers = laid.markers
+      .map((m) => ({ ...m, x: project(m.x, 'x'), y: project(m.y, 'y'), cx: project(m.cx, 'x'), cy: project(m.cy, 'y') }))
+      .filter((m) => m.x * scale > -size && m.x * scale < width + size && m.y * scale > -size && m.y * scale < height + size * 2)
+    return { ...laid, markers }
+  }, [snapshot, office, byPostal, size, width, height, scale, view])
+  // Mid-pinch the markers ride along with the map (scaled), then lay out
+  // again at the new zoom when the fingers lift.
+  const follow = useAnimatedStyle(() => {
+    const d = live.k.get() / view.k
+    return {
+      transform: [
+        { translateX: (live.x.get() - view.x * d) * scale },
+        { translateY: (live.y.get() - view.y * d) * scale },
+        { scale: d },
+      ],
+    }
+  })
   // Faded out while a state is open. Hidden markers must stop taking touches
   // too, or they catch taps meant for the counties under them (#88 on web).
   const reduceMotion = useReducedMotion()
@@ -302,7 +446,7 @@ function Markers({
       pointerEvents={hidden ? 'none' : 'box-none'}
       accessibilityElementsHidden={hidden}
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
-      style={[{ position: 'absolute', left: 0, top: 0, width, height }, fade]}
+      style={[{ position: 'absolute', left: 0, top: 0, width, height, transformOrigin: '0 0' }, fade, follow]}
     >
       {/* Callout lines from the small Northeastern states out to their markers. */}
       <Svg width={width} height={height} style={{ position: 'absolute' }} pointerEvents="none">
