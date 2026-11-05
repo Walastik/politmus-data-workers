@@ -8,6 +8,7 @@ import { DarkTheme, router, Stack, ThemeProvider, useGlobalSearchParams, usePath
 import { StatusBar } from 'expo-status-bar'
 import { useEffect, useState } from 'react'
 import { Platform, Pressable, Text } from 'react-native'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
 import Monogram from '@/components/Monogram'
 import { ApiProvider } from '@/lib/api'
@@ -46,27 +47,30 @@ export default function RootLayout() {
   useAppFocus()
 
   return (
-    // The browser keeps its own session on web; SecureStore is native only.
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY} tokenCache={Platform.OS === 'web' ? undefined : tokenCache} {...WEB_CLERK_PROPS}>
-      <QueryClientProvider client={queryClient}>
-        <ApiProvider>
-          <CivicLocationProvider>
-            <ThemeProvider value={theme}>
-              <StatusBar style="light" />
-              <Stack
-                screenOptions={({ navigation }) => ({
-                  headerShown: false,
-                  // A profile opened from a shared link has nothing to go back to.
-                  headerLeft: Platform.OS === 'web' && !navigation.canGoBack() ? () => <HomeLink /> : undefined,
-                })}
-              />
-              <DrawerLinks />
-              <DocumentTitle />
-            </ThemeProvider>
-          </CivicLocationProvider>
-        </ApiProvider>
-      </QueryClientProvider>
-    </ClerkProvider>
+    // Gesture handler (the results map's pinch-to-zoom) needs a root view.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* The browser keeps its own session on web; SecureStore is native only. */}
+      <ClerkProvider publishableKey={PUBLISHABLE_KEY} tokenCache={Platform.OS === 'web' ? undefined : tokenCache} {...WEB_CLERK_PROPS}>
+        <QueryClientProvider client={queryClient}>
+          <ApiProvider>
+            <CivicLocationProvider>
+              <ThemeProvider value={theme}>
+                <StatusBar style="light" />
+                <Stack
+                  screenOptions={({ navigation }) => ({
+                    headerShown: false,
+                    // A profile opened from a shared link has nothing to go back to.
+                    headerLeft: Platform.OS === 'web' && !navigation.canGoBack() ? () => <HomeLink /> : undefined,
+                  })}
+                />
+                <DrawerLinks />
+                <DocumentTitle />
+              </ThemeProvider>
+            </CivicLocationProvider>
+          </ApiProvider>
+        </QueryClientProvider>
+      </ClerkProvider>
+    </GestureHandlerRootView>
   )
 }
 
