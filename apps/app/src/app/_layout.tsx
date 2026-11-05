@@ -11,6 +11,7 @@ import { Platform, Pressable, Text } from 'react-native'
 
 import Monogram from '@/components/Monogram'
 import { ApiProvider } from '@/lib/api'
+import { useAppFocus } from '@/lib/appFocus'
 import { CivicLocationProvider } from '@/lib/civicLocation'
 import { pageTitle } from '@/lib/metadata'
 
@@ -42,6 +43,7 @@ const WEB_CLERK_PROPS =
 
 export default function RootLayout() {
   const [queryClient] = useState(() => new QueryClient())
+  useAppFocus()
 
   return (
     // The browser keeps its own session on web; SecureStore is native only.
