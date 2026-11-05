@@ -5,11 +5,17 @@ Run from anywhere:  python3 brand/generate.py
 Outputs (all written next to this script, except the favicon):
   politmus-monogram.svg          full-detail mark, transparent background
   app-icon-ios.svg               1024x1024, full bleed paper background (iOS masks the corners)
+  app-icon-ios-dark.svg          iOS 18+ dark icon: transparent, so iOS draws its dark backdrop
+  app-icon-ios-tinted.svg        iOS 18+ tinted icon: a grayscale P on black (iOS tints by lightness)
   app-icon-android-foreground.svg   adaptive icon foreground, glyph inside the 66/108 safe zone
   app-icon-android-background.svg   adaptive icon background (textured paper)
   app-icon-android-monochrome.svg   Android 13+ themed icon layer (alpha only)
   ../apps/app/public/monogram.svg   copy of the full-detail mark for the website header
   ../apps/app/public/favicon.svg    simplified mark that stays legible at 16-32px
+
+The app icon PNGs in apps/app/assets/images are these SVGs rendered at their
+size in a browser (headless Chrome), since only a browser draws the
+watercolor filters; app.json points at them.
 
 The glyph lives in a 600x800 box: stem on the left, D-shaped bowl on the right,
 and the bowl's lower ribbon folding over the stem.
@@ -80,7 +86,7 @@ def defs(p: str, *, texture: bool) -> str:
     </filter>"""
 
 
-def glyph(p: str, *, stroke: float, texture: bool, detail: bool, shadow: bool) -> str:
+def glyph(p: str, *, stroke: float, texture: bool, detail: bool, shadow: bool, ink: str = INK) -> str:
     """The P drawn in glyph space (600x800). Wrap it in a transform to place it."""
     out = []
     if shadow:
@@ -108,7 +114,7 @@ def glyph(p: str, *, stroke: float, texture: bool, detail: bool, shadow: bool) -
     if detail:
         lines += [f'<path fill="none" d="{d}"/>' for d in (SHOULDER, FOLD_TOP, FOLD_BOTTOM)]
     out.append(
-        f'<g stroke="{INK}" stroke-width="{stroke}" stroke-linecap="round" '
+        f'<g stroke="{ink}" stroke-width="{stroke}" stroke-linecap="round" '
         f'stroke-linejoin="round">{"".join(lines)}</g>'
     )
     return "\n  ".join(out)
@@ -183,6 +189,34 @@ def build() -> dict[Path, str]:
         f'  <g transform="{place(0.83)}">\n  '
         + glyph("i-", stroke=24, texture=True, detail=True, shadow=True)
         + "\n  </g>",
+        title="Politmus",
+        size=1024,
+    )
+
+    # iOS 18+ dark appearance: no paper, so iOS draws its own dark backdrop
+    # behind the glyph (Expo keeps this variant's transparency). The ink
+    # outline turns paper-coloured, since black would vanish on dark, and the
+    # violet drop shadow goes with the paper.
+    files[HERE / "app-icon-ios-dark.svg"] = svg(
+        "0 0 1024 1024",
+        f"  <defs>{defs('d-', texture=True)}\n  </defs>\n"
+        f'  <g transform="{place(0.83)}">\n  '
+        + glyph("d-", stroke=24, texture=True, detail=True, shadow=False, ink=PAPER)
+        + "\n  </g>",
+        title="Politmus",
+        size=1024,
+    )
+
+    # iOS 18+ tinted appearance: iOS reads only lightness and recolours it, so
+    # the P is the same one-colour mask as Android's themed icon, in white on
+    # an opaque black square (Expo flattens this variant onto white otherwise).
+    files[HERE / "app-icon-ios-tinted.svg"] = svg(
+        "0 0 1024 1024",
+        f"  <defs>{monochrome_mask('t-')}\n  </defs>\n"
+        f'  <rect width="1024" height="1024" fill="#000"/>\n'
+        f'  <g transform="{place(0.83)}">\n'
+        f'    <rect x="-60" y="-60" width="720" height="920" fill="#fff" mask="url(#t-mask)"/>\n'
+        f"  </g>",
         title="Politmus",
         size=1024,
     )

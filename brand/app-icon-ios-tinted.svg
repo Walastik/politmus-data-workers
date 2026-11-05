@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img">
+  <title>Politmus</title>
+  <defs>
+    <linearGradient id="t-foldFade" gradientUnits="userSpaceOnUse" x1="0" y1="536" x2="0" y2="660">
+      <stop offset="0" stop-color="#000" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="t-mask" maskUnits="userSpaceOnUse" x="-60" y="-60" width="720" height="920">
+      <path fill="#fff" fill-rule="evenodd" d="M0 14Q0 0 14 0H320A268 268 0 0 1 320 536H180V786Q180 800 166 800H14Q0 800 0 786ZM180 164H310A99 99 0 0 1 310 362H180Z"/>
+      <path fill="#000" fill-opacity=".45" d="M0 164H180V362H92C32 362 0 398 0 468Z"/>
+      <path fill="url(#t-foldFade)" d="M0 594C0 558 26 536 78 536H180V660H0Z"/>
+      <g fill="none" stroke="#000" stroke-width="30"><path d="M-20 164H181"/><path d="M181 362H92C40 362 6 392 -24 446"/><path d="M181 536H78C34 536 6 552 -24 578"/></g>
+    </mask>
+  </defs>
+  <rect width="1024" height="1024" fill="#000"/>
+  <g transform="translate(268.0 180.0) scale(0.83)">
+    <rect x="-60" y="-60" width="720" height="920" fill="#fff" mask="url(#t-mask)"/>
+  </g>
+</svg>
