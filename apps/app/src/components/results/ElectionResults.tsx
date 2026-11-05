@@ -2,6 +2,7 @@ import {
   houseRaces,
   isAggregated,
   raceKey,
+  resultHighlights,
   senateRace,
   type RaceResult,
   type StateResults,
@@ -9,11 +10,12 @@ import {
 import type { CountyView, MapOffice } from '@politmus/core/resultsMap'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Text, View } from 'react-native'
 
 import { CountyCard } from './native/CountyCard'
 import { Hero, Toolbar } from './native/Hero'
+import { Highlights, Sources } from './native/Highlights'
 import { Legend } from './native/Legend'
 import { COUNTIES_URL } from './native/mapShapes'
 import { Overview } from './native/Overview'
@@ -30,7 +32,7 @@ function firstRace(results: StateResults | undefined, office: MapOffice): RaceRe
 // The results explorer on iOS and Android (the web page is
 // ElectionResults.web.tsx). On a phone everything stacks in one column:
 // hero, chamber switch, map, then the races. See docs/results-mobile-plan.md.
-export default function ElectionResults() {
+export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number) => void } = {}) {
   const snapshotQuery = useSnapshot()
   const snapshot = snapshotQuery.data ?? null
 
@@ -77,6 +79,12 @@ export default function ElectionResults() {
   // arrow) closes the state first, like Escape on web.
   usePreventRemove(selected !== null, () => selectState(null))
 
+  const highlights = useMemo(() => (snapshot ? resultHighlights(snapshot) : []), [snapshot])
+  // Where the map sits in the page, so a highlight or a county in a list
+  // can bring it back into view (web scrolls to the top instead).
+  const mapY = useRef(0)
+  const showMap = () => scrollTo?.(Math.max(0, mapY.current - 12))
+
   const senateStates = useMemo(() => new Set((snapshot?.senate ?? []).map((info) => info.state)), [snapshot])
 
   if (!snapshot) {
@@ -102,7 +110,12 @@ export default function ElectionResults() {
     <View className="gap-4 bg-slate-900 px-4 pb-12 pt-5">
       <Hero snapshot={snapshot} />
       <Toolbar office={office} onOffice={setOffice} generatedAt={snapshot.generatedAt} />
-      <View className="overflow-hidden rounded-[20px] border border-[#26324d] bg-slate-900">
+      <View
+        onLayout={(e) => {
+          mapY.current = e.nativeEvent.layout.y
+        }}
+        className="overflow-hidden rounded-[20px] border border-[#26324d] bg-slate-900"
+      >
         <USMap
           snapshot={snapshot}
           office={office}
@@ -144,13 +157,29 @@ export default function ElectionResults() {
             setRaceId(key)
             setTapped(null)
           }}
-          onFlag={setFlagged}
+          onFlag={(county) => {
+            setFlagged(county)
+            if (county) showMap()
+          }}
           flagged={flagged}
           onBack={() => selectState(null)}
         />
       ) : (
         <Overview snapshot={snapshot} office={office} onSelect={selectState} />
       )}
+      <Highlights
+        highlights={highlights}
+        onOpen={(h) => {
+          if (h.raceKey?.includes('-H')) setOffice('H')
+          selectState(h.state, h.raceKey)
+          if (h.county) {
+            setFlagged(h.county)
+            setCountyView(h.kind.startsWith('turnout') ? 'turnout' : 'lead')
+          }
+          showMap()
+        }}
+      />
+      <Sources snapshot={snapshot} />
     </View>
   )
 }
