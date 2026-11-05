@@ -218,7 +218,11 @@ nothing.
   much wider, so neighbors spread apart; mid-pinch the marker layer scales
   along. The zoom math (`zoomAbout`, `panBy`, `clampView`, up to 5x) is in
   `resultsMap.ts` as worklets. Opening a state zooms from wherever the map
-  is, and closing it returns there.
+  is, and closing it returns there. The web page zooms the same way with
+  the same math: a trackpad pinch or Ctrl/⌘ + scroll about the pointer, a
+  two-finger pinch on touch screens, mouse or one-finger drag once zoomed
+  (a plain scroll, and one finger at 1x, still scroll the page), and the
+  same buttons under the map.
 - **Testing taps:** `adb shell input tap x y` and `adb shell input keyevent 4`
   (Back) drive the Android emulator; the iOS simulators have no tap tool
   here, so iOS taps and the back swipe need a person.
