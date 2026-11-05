@@ -14,9 +14,11 @@ import {
   columnSize,
   countyFill,
   layoutMarkers,
+  shapeContains,
   spreadMarkers,
   stateFill,
   turnoutColor,
+  unzoomPoint,
   zoomToBounds,
   type MapPoint,
 } from './resultsMap'
@@ -279,5 +281,41 @@ describe('layoutMarkers', () => {
     expect(faces).toBeGreaterThanOrEqual(size * 1.08 - 1e-6)
     expect(ga.lift).toBe(44)
     expect(sc.lift).toBe(COLUMN_STUB)
+  })
+})
+
+describe('hit testing', () => {
+  const square = (x0: number, y0: number, x1: number, y1: number) => [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+    [x0, y0],
+  ]
+
+  it('finds a point inside a polygon, but not in its hole', () => {
+    const donut = { type: 'Polygon', coordinates: [square(0, 0, 10, 10), square(4, 4, 6, 6)] }
+    expect(shapeContains(donut, [2, 2])).toBe(true)
+    expect(shapeContains(donut, [5, 5])).toBe(false)
+    expect(shapeContains(donut, [12, 5])).toBe(false)
+  })
+
+  it('checks every part of a multipolygon (islands)', () => {
+    const islands = { type: 'MultiPolygon', coordinates: [[square(0, 0, 2, 2)], [square(5, 5, 7, 7)]] }
+    expect(shapeContains(islands, [6, 6])).toBe(true)
+    expect(shapeContains(islands, [3, 3])).toBe(false)
+    expect(shapeContains({ type: 'Point', coordinates: [1, 1] }, [1, 1])).toBe(false)
+  })
+
+  it('undoes the zoom on a tap', () => {
+    const zoom = zoomToBounds([
+      [100, 100],
+      [295, 161],
+    ])
+    const inside: [number, number] = [150, 130]
+    const onScreen: [number, number] = [inside[0] * zoom.k + zoom.x, inside[1] * zoom.k + zoom.y]
+    const [x, y] = unzoomPoint(onScreen, zoom)
+    expect(x).toBeCloseTo(150)
+    expect(y).toBeCloseTo(130)
   })
 })

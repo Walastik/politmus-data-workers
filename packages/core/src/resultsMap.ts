@@ -277,3 +277,38 @@ export function layoutMarkers({
 
   return { markers, columnWidth, depth }
 }
+
+// ---- Hit testing ----
+// Native taps are matched to shapes with these rather than by
+// react-native-svg, whose touch targets on Android don't follow a zoomed
+// group's transform.
+
+type Ring = number[][]
+
+function inRing([x, y]: MapPoint, ring: Ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]
+    const [xj, yj] = ring[j]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
+function inPolygon(point: MapPoint, rings: Ring[]) {
+  // The first ring is the outline; any others are holes.
+  return rings.length > 0 && inRing(point, rings[0]) && !rings.slice(1).some((hole) => inRing(point, hole))
+}
+
+// Whether a point in the map frame falls inside a projected GeoJSON shape.
+export function shapeContains(geometry: { type: string; coordinates?: unknown }, point: MapPoint): boolean {
+  if (geometry.type === 'Polygon') return inPolygon(point, geometry.coordinates as Ring[])
+  if (geometry.type === 'MultiPolygon') return (geometry.coordinates as Ring[][]).some((rings) => inPolygon(point, rings))
+  return false
+}
+
+// A tap on the map (in the frame's units) undone from the zoom, so it can
+// be matched against the shapes.
+export function unzoomPoint(point: MapPoint, zoom: MapZoom): MapPoint {
+  return [(point[0] - zoom.x) / zoom.k, (point[1] - zoom.y) / zoom.k]
+}
