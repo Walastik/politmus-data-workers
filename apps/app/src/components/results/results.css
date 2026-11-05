@@ -63,7 +63,7 @@
 .er-nation { fill: none; stroke: #334155; stroke-width: .6; vector-effect: non-scaling-stroke; pointer-events: none; }
 
 /* Candidate bubbles float over the map in an HTML layer. */
-.er-bubbles { position: absolute; inset: 0; pointer-events: none; transition: opacity .35s; }
+.er-bubbles { position: absolute; inset: 0; z-index: 1; pointer-events: none; transition: opacity .35s; }
 .er-bubbles.is-hidden { opacity: 0; }
 .er-bubble { display: block; position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; border: 0; background: none; padding: 0; }
 .er-bubble:hover .er-face, .er-bubble:focus-visible .er-face { transform: scale(1.18); }
