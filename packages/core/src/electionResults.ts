@@ -20,6 +20,10 @@ export interface StateResults {
     lastUpdated: string | null
     fetchedAt: string
     official: boolean
+    // Counts from civicAPI, an independent aggregator, for states we can't
+    // read directly; stateUrl is the state's own results page.
+    aggregator?: boolean
+    stateUrl?: string | null
   }
   registered: number | null
   ballots: number | null
@@ -33,7 +37,7 @@ export interface RaceResult {
   label: string
   special: boolean
   totalVotes: number
-  reporting: { done: number | null; total: number | null; unit: 'counties' | 'precincts' | 'towns' }
+  reporting: { done: number | null; total: number | null; unit: 'counties' | 'precincts' | 'towns' | 'percent' }
   candidates: ResultCandidate[]
   // County name -> votes per candidate, in `candidates` order.
   counties: Record<string, number[]>
@@ -184,6 +188,7 @@ export function reportingShare(race: RaceResult): number | null {
 export function reportingLabel(race: RaceResult): string {
   const { done, total, unit } = race.reporting
   if (done === null || !total) return 'Reporting status not published'
+  if (unit === 'percent') return done >= 100 ? 'All reporting' : `About ${Math.round(done)}% reporting`
   if (done >= total) return `All ${total.toLocaleString('en-US')} ${unit} reporting`
   return `${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${unit} reporting`
 }
@@ -283,6 +288,12 @@ export function countyTurnout(state: StateResults, county: string): number | nul
 }
 
 // Every race in the state has all its counties or precincts reporting.
+export function isAggregated(state: StateResults | undefined): boolean {
+  return Boolean(state?.source.aggregator)
+}
+
+export const AGGREGATOR = { name: 'civicAPI', url: 'https://civicapi.org' }
+
 export function countingComplete(state: StateResults): boolean {
   return state.races.length > 0 && state.races.every((race) => (reportingShare(race) ?? 0) >= 1)
 }
@@ -427,9 +438,10 @@ export function resultHighlights(snapshot: ResultsSnapshot): Highlight[] {
   }
 
   // Most money raised per vote, among fully reported races: a partial count
-  // makes every vote look expensive.
+  // makes every vote look expensive. civicAPI's "fully reported" can mean
+  // precincts while mail ballots are still counted, so its races sit this out.
   const priced = races
-    .filter((ref) => (reportingShare(ref.race) ?? 0) >= 1)
+    .filter((ref) => (reportingShare(ref.race) ?? 0) >= 1 && !isAggregated(ref.state))
     .flatMap((ref) => ref.standing.ranked.slice(0, 2).map((c) => ({ ref, c, perVote: dollarsPerVote(c) })))
     .filter((x): x is { ref: RaceRef; c: ResultCandidate; perVote: number } => x.perVote !== null && x.c.votes > 5000)
     .sort((a, b) => b.perVote - a.perVote)
@@ -488,7 +500,10 @@ export function resultHighlights(snapshot: ResultsSnapshot): Highlight[] {
   if (turnouts[0]) highlights.push(turnoutCard(turnouts[0], 'turnout-high'))
   if (turnouts.length > 1) highlights.push(turnoutCard(turnouts[turnouts.length - 1], 'turnout-low'))
 
-  return interleave(highlights, HIGHLIGHT_ORDER, MAX_HIGHLIGHTS)
+  // Say so when a story rests on aggregator counts.
+  return interleave(highlights, HIGHLIGHT_ORDER, MAX_HIGHLIGHTS).map((h) =>
+    isAggregated(snapshot.states[h.state]) ? { ...h, detail: `${h.detail} Counts via civicAPI.` } : h,
+  )
 }
 
 const HIGHLIGHT_ORDER: HighlightKind[] = [

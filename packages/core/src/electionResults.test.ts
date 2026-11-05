@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  isAggregated,
   resultsLinkPhase,
   snapshotRequestUrl,
   countingComplete,
@@ -233,5 +234,15 @@ describe('priciest votes', () => {
       }) as never
     expect(resultHighlights(snapshot(6)).some((h) => h.kind === 'priciest-votes')).toBe(false)
     expect(resultHighlights(snapshot(10)).some((h) => h.kind === 'priciest-votes')).toBe(true)
+  })
+})
+
+describe('aggregator states', () => {
+  it('labels percent reporting and marks civicAPI states', () => {
+    const race = { reporting: { done: 86, total: 100, unit: 'percent' as const } } as never
+    expect(reportingLabel(race)).toBe('About 86% reporting')
+    expect(reportingLabel({ reporting: { done: 100, total: 100, unit: 'percent' } } as never)).toBe('All reporting')
+    expect(isAggregated({ source: { aggregator: true } } as never)).toBe(true)
+    expect(isAggregated({ source: {} } as never)).toBe(false)
   })
 })

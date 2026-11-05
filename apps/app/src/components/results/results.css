@@ -182,3 +182,12 @@
   .er-score-card { flex: 1 1 0; min-width: 0; }
   .er-score-value { font-size: 22px; flex-wrap: wrap; gap: 4px 8px; }
 }
+
+/* civicAPI (aggregator) states: a dashed ring on the map, a tag in lists, a note in the panel. */
+.er-bubble-agg .er-face::after, .er-bubble-agg.er-bubble-house .er-pill { outline: 1.5px dashed rgba(226, 232, 240, .7); outline-offset: 3px; }
+.er-bubble-agg .er-face::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; outline-offset: 0; pointer-events: none; }
+.er-swatch-agg { background: transparent !important; border: none; border-radius: 50%; outline: 1.5px dashed rgba(226, 232, 240, .7); outline-offset: -1px; }
+.er-agg-tag { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .02em; color: #fcd34d; border: 1px dashed rgba(252, 211, 77, .6); vertical-align: 1px; }
+.er-agg-note { margin-top: 6px; padding: 10px 12px; border-radius: 12px; border: 1px dashed rgba(252, 211, 77, .55); background: rgba(120, 83, 9, .18); color: #e2e8f0; font-size: 12.5px; line-height: 1.5; }
+.er-agg-note b { color: #fcd34d; }
+.er-agg-note a { color: #93c5fd; }

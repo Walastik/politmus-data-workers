@@ -107,6 +107,12 @@ loads it from
   branch points to for about five minutes, so the page can trail a run by
   five to ten minutes. Changing the page, or where it reads
   the snapshot from, does.
+- States we can't read directly (Texas, California, Michigan and others) fall
+  back to [civicAPI](https://civicapi.org), an independent aggregator. The page
+  marks those states (dashed ring, "civicAPI" tag, a note in the state panel)
+  and credits civicAPI in the footer, which its terms require. Its counts can
+  trail the states by hours and it doesn't name its sources; its race calls
+  are ignored. `--no-civicapi` skips the fallback.
 - Run it by hand from the Actions tab: **Election Results**, optionally with a
   comma-separated `states` list. A state whose site fails keeps its previous
   counts.

@@ -20,6 +20,9 @@ Sources (all official state election offices):
 The Election Results GitHub Action runs this every few minutes and publishes
 the snapshot to the election-results-data branch (see docs/deploy.md).
 
+States without a reader fall back to civicAPI (https://civicapi.org), an
+independent aggregator; those entries are marked "aggregator" in the snapshot.
+
 Counts are unofficial until each state certifies them. Candidates are matched
 to Politmus races (FEC data) for photos, money raised and incumbency.
 """
@@ -105,6 +108,9 @@ class StateResults:
     counties: dict[str, dict] = field(default_factory=dict)
     registered: int | None = None
     ballots: int | None = None
+    # Counts from an aggregator (civicAPI), not read from the state itself.
+    aggregator: bool = False
+    state_url: str | None = None
 
 
 PARTY_CODES = {
@@ -1243,6 +1249,9 @@ def attach_profiles(results: StateResults) -> None:
 # Nov. 4, 2026. Texas, Kentucky and Minnesota block automated access, so their
 # counts stay on their own sites.
 OFFICIAL_RESULTS_URLS = {
+    "CA": "https://electionresults.sos.ca.gov/",
+    "MI": "https://mielections.us/election/results/",
+    "IL": "https://www.elections.il.gov/",
     "TX": "https://goelect.txelections.civixapps.com/ivis-enr-ui/races",
     "KY": "https://vrsws.sos.ky.gov/liveresults",
     "NJ": "https://www.nj.gov/state/elections/election-night-results.shtml",
@@ -1288,6 +1297,131 @@ def senate_races() -> list[dict]:
     return sorted(races, key=lambda r: r["state"])
 
 
+# ---- civicAPI fallback ----------------------------------------------------------
+#
+# For races we can't read from the state (blocked sites, no statewide feed), the
+# page falls back to civicAPI (https://civicapi.org), an independent aggregator.
+# It doesn't name its sources and can trail the states by hours, so these states
+# are marked as aggregator data everywhere the page shows them. Its race calls
+# ("winner") are ignored. civicAPI asks for a credit and link, which the page shows.
+
+CIVIC_API = "https://civicapi.org/api/v2"
+CIVIC_HOUSE_RACE = "87524"  # "United States House of Representatives", 2026: every district
+STATE_NAMES_ALL = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
+    "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina",
+    "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania",
+    "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+    "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+
+def civic_get(path: str, **params):
+    time.sleep(POLITE_DELAY)
+    return get_json(f"{CIVIC_API}{path}", **params)
+
+
+def civic_candidates(rows) -> list[Candidate]:
+    return [
+        Candidate(
+            name=" ".join((c.get("name") or "").split()),
+            party="" if WRITE_IN.search(c.get("name") or "") else party_code(c.get("party")),
+            votes=to_int(c.get("votes")),
+            incumbent=bool(c.get("incumbent")),
+            write_in=bool(WRITE_IN.search(c.get("name") or "")),
+        )
+        for c in rows or []
+    ]
+
+
+def civic_reporting(percent) -> dict:
+    return {"done": round(float(percent), 1) if percent is not None else None, "total": 100, "unit": "percent"}
+
+
+def civic_counties(detail: dict, candidates: list[Candidate]) -> dict[str, list[int]]:
+    counties = {}
+    for region in (detail.get("region_results") or {}).values():
+        if (region.get("type") or "").lower() not in ("county", "parish", "borough", "city", "independent city"):
+            continue
+        votes = {" ".join((c.get("name") or "").split()): to_int(c.get("votes")) for c in region.get("candidates") or []}
+        counties[county_key(region.get("name") or "")] = [votes.get(c.name, 0) for c in candidates]
+    return counties
+
+
+def fetch_civicapi(skip: set[str]) -> dict[str, StateResults]:
+    """Senate races and House seats in every state not in `skip`, one entry per state."""
+    by_state: dict[str, StateResults] = {}
+
+    def entry(state: str, updated: str | None) -> StateResults:
+        """A state's time is its Senate race's own; the national House record
+        changes whenever any district does, so it only fills in for House-only states."""
+        results = by_state.setdefault(
+            state,
+            StateResults(
+                state=state,
+                name=STATE_NAMES_ALL.get(state, state),
+                source_name="civicAPI",
+                source_url="https://civicapi.org",
+                last_updated=None,
+                races=[],
+                aggregator=True,
+                state_url=OFFICIAL_RESULTS_URLS.get(state),
+            ),
+        )
+        if updated and not results.last_updated:
+            results.last_updated = updated
+        return results
+
+    found = civic_get("/race/search", startDate=ELECTION_DATE, endDate=ELECTION_DATE, country="US", query="Senate", limit=500)
+    for race in found.get("races") or []:
+        state = race.get("province")
+        if race.get("type") != "US Senate" or state not in STATE_NAMES_ALL or state in skip:
+            continue
+        detail = civic_get(f"/race/{race['id']}")
+        if detail.get("test_data"):
+            continue
+        candidates = civic_candidates(detail.get("candidates"))
+        name = detail.get("election_name") or ""
+        entry(state, detail.get("last_updated")).races.append(
+            Race(
+                office="S",
+                district=0,
+                label="U.S. Senate",
+                special="special" in name.lower(),
+                candidates=candidates,
+                reporting=civic_reporting(detail.get("percent_reporting")),
+                counties=civic_counties(detail, candidates),
+            )
+        )
+
+    house = civic_get(f"/race/{CIVIC_HOUSE_RACE}")
+    for key, region in (house.get("region_results") or {}).items():
+        match = re.match(r"^([a-z]{2})-(al|\d+)$", key)
+        if not match:
+            continue
+        state = match.group(1).upper()
+        if state not in STATE_NAMES_ALL or state in skip:
+            continue
+        district = 0 if match.group(2) == "al" else int(match.group(2))
+        entry(state, house.get("last_updated")).races.append(
+            Race(
+                office="H",
+                district=district,
+                label=f"U.S. House District {district}" if district else "U.S. House At-Large",
+                candidates=civic_candidates(region.get("candidates")),
+                reporting=civic_reporting(region.get("percent_reporting")),
+            )
+        )
+    for results in by_state.values():
+        results.races.sort(key=lambda r: (r.office != "S", r.district))
+    return by_state
+
+
 # ---- Snapshot ----------------------------------------------------------------
 
 
@@ -1324,6 +1458,7 @@ def state_json(results: StateResults) -> dict:
             "lastUpdated": results.last_updated,
             "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "official": False,
+            **({"aggregator": True, "stateUrl": results.state_url} if results.aggregator else {}),
         },
         "registered": results.registered,
         "ballots": results.ballots,
@@ -1336,6 +1471,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--states", help="Comma-separated postal codes (default: every adapter)")
+    parser.add_argument("--no-civicapi", action="store_true", help="Skip the civicAPI fallback for states we don't read")
     args = parser.parse_args()
 
     wanted = [s.strip().upper() for s in args.states.split(",")] if args.states else list(ADAPTERS)
@@ -1349,6 +1485,18 @@ def main() -> int:
             states[code] = state_json(results)
             print(f"  {len(results.races)} races, {len(results.counties)} counties", file=sys.stderr)
         except Exception as error:  # keep the rest of the snapshot when one state fails
+            print(f"  failed: {error!r}", file=sys.stderr)
+
+    if not args.no_civicapi:
+        print("civicAPI (states we don't read)…", file=sys.stderr)
+        official = {code for code, s in states.items() if not s["source"].get("aggregator")}
+        try:
+            fallback = fetch_civicapi(skip=official)
+            for code, results in fallback.items():
+                attach_profiles(results)
+                states[code] = state_json(results)
+            print(f"  {len(fallback)} states, {sum(len(r.races) for r in fallback.values())} races", file=sys.stderr)
+        except Exception as error:  # keep the previous civicAPI entries
             print(f"  failed: {error!r}", file=sys.stderr)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

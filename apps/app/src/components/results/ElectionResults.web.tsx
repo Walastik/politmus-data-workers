@@ -4,7 +4,9 @@ import {
   PARTY_COLOR,
   PARTY_LABEL,
   PARTY_SHORT,
+  AGGREGATOR,
   RESULTS_SNAPSHOT_URL,
+  isAggregated,
   snapshotRequestUrl,
   STATE_FIPS,
   countingComplete,
@@ -305,6 +307,7 @@ export default function ElectionResults() {
 function Hero({ snapshot }: { snapshot: ResultsSnapshot }) {
   const tally = senateTally(snapshot)
   const counted = Object.values(snapshot.states).filter((s) => senateRace(s)).length
+  const viaAggregator = Object.values(snapshot.states).filter((s) => senateRace(s) && isAggregated(s)).length
   const totalSenate = snapshot.senate?.length ?? counted
   const houseSeats = Object.values(snapshot.states).reduce((sum, s) => sum + houseRaces(s).length, 0)
   const flips = houseFlips(snapshot)
@@ -316,7 +319,8 @@ function Hero({ snapshot }: { snapshot: ResultsSnapshot }) {
         </div>
         <h1 className="er-title">How the midterms are counting</h1>
         <p className="er-sub">
-          Every number here comes straight from a state election office, and updates as they post new counts. Nobody calls
+          Most numbers here come straight from a state election office and update as they post new counts. States we can’t
+          read directly come from civicAPI, an independent aggregator, and are marked with a dashed ring. Nobody calls
           races here: a candidate leads until the state certifies its results.
         </p>
       </div>
@@ -330,7 +334,7 @@ function Hero({ snapshot }: { snapshot: ResultsSnapshot }) {
               </span>
             ))}
             <small>
-              in {counted} of {totalSenate} races
+              in {counted} of {totalSenate} races{viaAggregator ? `, ${viaAggregator} via civicAPI` : ''}
             </small>
           </div>
         </div>
@@ -540,7 +544,12 @@ function USMap(props: MapProps) {
       </div>
       {/* Below the map, not over it, so a zoomed-in state is never covered. */}
       <div className="er-mapfoot">
-        <Legend office={office} countyView={selected ? countyView : null} />
+        <Legend
+          office={office}
+          countyView={selected ? countyView : null}
+          pending={(snapshot.senate ?? []).some((info) => !senateRace(snapshot.states[info.state]))}
+          aggregated={Object.values(snapshot.states).some(isAggregated)}
+        />
         {selected ? null : <div className="er-hint">Tap a state to dig into its counties</div>}
       </div>
     </div>
@@ -628,7 +637,15 @@ function Bubbles({
     return [{ key: results.state, x, y, cx, cy, delay, results, tally: null, race }]
   })
 
-  spreadBubbles(items, (size / Math.max(width, 1)) * W * 1.08)
+  const gap = (size / Math.max(width, 1)) * W * 1.08
+  // The small Northeastern states sit in a column out in the Atlantic, in
+  // north-to-south order, each at least one bubble below the last.
+  let below = -Infinity
+  for (const item of items.filter((i) => i.key in CALLOUTS).sort((a, b) => CALLOUTS[a.key][1] - CALLOUTS[b.key][1])) {
+    item.y = Math.max(CALLOUTS[item.key][1], below + gap * 1.15)
+    below = item.y
+  }
+  spreadBubbles(items, gap)
 
   return (
     <div className={`er-bubbles${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden}>
@@ -654,10 +671,10 @@ function Bubbles({
             <button
               key={item.key}
               type="button"
-              className="er-bubble er-bubble-house"
+              className={`er-bubble er-bubble-house${isAggregated(item.results) ? ' er-bubble-agg' : ''}`}
               style={{ left, top, animationDelay: item.delay }}
               onClick={() => onSelect(item.key)}
-              aria-label={`${item.results.name} House results`}
+              aria-label={`${item.results.name} House results${isAggregated(item.results) ? ', via civicAPI' : ''}`}
             >
               <span className="er-pill" style={{ background: PARTY_COLOR[item.tally[0].party] }}>
                 {item.tally.map((t) => `${PARTY_SHORT[t.party]} ${t.leading}`).join(' · ')}
@@ -676,7 +693,7 @@ function Bubbles({
           <button
             key={item.key}
             type="button"
-            className="er-bubble"
+            className={`er-bubble${isAggregated(item.results) ? ' er-bubble-agg' : ''}`}
             style={{ left, top, animationDelay: item.delay }}
             onClick={() => onSelect(item.key)}
             onMouseMove={(e) => onHover(e, <RaceTip results={item.results} race={item.race!} />)}
@@ -710,7 +727,17 @@ function Bubbles({
   )
 }
 
-function Legend({ office, countyView }: { office: Office; countyView: CountyView | null }) {
+function Legend({
+  office,
+  countyView,
+  pending,
+  aggregated,
+}: {
+  office: Office
+  countyView: CountyView | null
+  pending: boolean
+  aggregated: boolean
+}) {
   if (countyView === 'turnout') {
     return (
       <div className="er-legend">
@@ -738,7 +765,13 @@ function Legend({ office, countyView }: { office: Office; countyView: CountyView
       <div className="er-legend-row">Brighter means a bigger lead</div>
       {countyView === null ? (
         <>
-          {office === 'S' ? (
+          {aggregated ? (
+            <div className="er-legend-row">
+              <span className="er-swatch er-swatch-agg" />
+              Dashed ring: counts via civicAPI, not the state
+            </div>
+          ) : null}
+          {office === 'S' && pending ? (
             <div className="er-legend-row">
               <span className="er-swatch" style={{ background: 'repeating-linear-gradient(45deg,#1e293b 0 3px,#475569 3px 5px)' }} />
               Counts on the state’s own site
@@ -815,7 +848,10 @@ function RaceTip({ results, race }: { results: StateResults; race: RaceResult })
           <b>{formatPercent(share(c.votes, standing.totalVotes))}</b>
         </div>
       ))}
-      <div className="er-tt-note">{reportingLabel(race)}</div>
+      <div className="er-tt-note">
+        {reportingLabel(race)}
+        {isAggregated(results) ? ' · via civicAPI' : ''}
+      </div>
     </>
   )
 }
@@ -884,14 +920,15 @@ function Overview({
       <>
         <h2>House races we’re counting</h2>
         <p className="er-source">
-          Every House seat in {states.map((s) => s.name).join(', ')}. A yellow dot marks a seat where the sitting member is
-          behind.
+          Every House seat, by state. A yellow dot marks a seat where the sitting member is behind. States tagged civicAPI
+          come from an independent aggregator, not the state.
         </p>
         {states.map((s) => (
           <div key={s.state}>
             <button type="button" className="er-row" onClick={() => onSelect(s.state)}>
               <span className="er-row-main">
                 <b>{s.name}</b>
+                {isAggregated(s) ? <span className="er-agg-tag">civicAPI</span> : null}
               </span>
               <span className="er-row-side">
                 {houseTally(s).map((t) => (
@@ -927,6 +964,7 @@ function Overview({
               <span className="er-dot" style={{ background: PARTY_COLOR[partyKey(standing.leader?.party)] }} />
               <span>
                 <b>{s.name}</b> <span className="er-row-faint">{standing.leader?.name}</span>
+                {isAggregated(s) ? <span className="er-agg-tag">civicAPI</span> : null}
               </span>
             </span>
             <span className="er-row-side" style={{ color: PARTY_COLOR[partyKey(standing.leader?.party)] }}>
@@ -1068,13 +1106,33 @@ function StatePanel({
     <>
       <div>
         <h2>{name}</h2>
-        <p className="er-source" style={{ marginTop: 4 }}>
-          Unofficial results from the{' '}
-          <a href={results.source.url} target="_blank" rel="noreferrer">
-            {results.source.name}
-          </a>
-          {results.source.lastUpdated ? `, updated ${formatSourceTime(results.source.lastUpdated)}` : ''}.
-        </p>
+        {isAggregated(results) ? (
+          <div className="er-agg-note" role="note">
+            <b>Counts via civicAPI, not from {name} directly.</b> We can’t read {name}’s own results feed, so these come from{' '}
+            <a href={AGGREGATOR.url} target="_blank" rel="noreferrer">
+              civicAPI
+            </a>
+            , an independent aggregator that doesn’t publish its sources. They can trail the state’s count by hours.
+            {results.source.lastUpdated ? ` civicAPI last updated this ${formatSourceTime(results.source.lastUpdated)}.` : ''}
+            {results.source.stateUrl ? (
+              <>
+                {' '}
+                <a href={results.source.stateUrl} target="_blank" rel="noreferrer">
+                  Check {name}’s official results
+                </a>
+                .
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <p className="er-source" style={{ marginTop: 4 }}>
+            Unofficial results from the{' '}
+            <a href={results.source.url} target="_blank" rel="noreferrer">
+              {results.source.name}
+            </a>
+            {results.source.lastUpdated ? `, updated ${formatSourceTime(results.source.lastUpdated)}` : ''}.
+          </p>
+        )}
       </div>
       {results.ballots ? (
         <div className="er-stats">
@@ -1373,13 +1431,14 @@ function Highlights({ highlights, onOpen }: { highlights: Highlight[]; onOpen: (
 }
 
 function Sources({ snapshot }: { snapshot: ResultsSnapshot }) {
+  const aggregated = Object.values(snapshot.states).filter(isAggregated)
   return (
     <footer className="er-footer">
-      <b>Where these numbers come from.</b> Each state’s election office publishes its own unofficial counts; we read them
-      directly and change nothing. Totals keep moving as mail, provisional and overseas ballots are counted, and are final
-      only once each state certifies. Money raised is from FEC filings.
+      <b>Where these numbers come from.</b> Each state’s election office publishes its own unofficial counts; where we
+      can, we read them directly and change nothing. Totals keep moving as mail, provisional and overseas ballots are
+      counted, and are final only once each state certifies. Money raised is from FEC filings.
       <ul>
-        {Object.values(snapshot.states).map((s) => (
+        {Object.values(snapshot.states).filter((s) => !isAggregated(s)).map((s) => (
           <li key={s.state}>
             {s.name}:{' '}
             <a href={s.source.url} target="_blank" rel="noreferrer">
@@ -1389,6 +1448,16 @@ function Sources({ snapshot }: { snapshot: ResultsSnapshot }) {
           </li>
         ))}
       </ul>
+      {aggregated.length ? (
+        <p>
+          <b>Via civicAPI.</b> Results for {aggregated.map((s) => s.name).join(', ')} are provided by{' '}
+          <a href={AGGREGATOR.url} target="_blank" rel="noreferrer">
+            civicAPI
+          </a>
+          , an independent aggregator, because we can’t read those states’ feeds directly. civicAPI doesn’t say where its
+          numbers come from, and they can trail the states by hours; check each state’s own site for its official count.
+        </p>
+      ) : null}
     </footer>
   )
 }

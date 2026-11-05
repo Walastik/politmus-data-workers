@@ -1,5 +1,10 @@
 from election_results import (
     clarity_name,
+    civic_candidates,
+    civic_counties,
+    civic_reporting,
+    state_json,
+    StateResults,
     CLARITY_HOUSE,
     CLARITY_SENATE,
     EV_HOUSE,
@@ -211,3 +216,41 @@ def test_alaska_precinct_file():
 def test_clarity_names_drop_a_party_prefix():
     assert clarity_name("REP Darline Graham", "REP") == "Darline Graham"
     assert clarity_name("Jon Ossoff", "DEM") == "Jon Ossoff"
+
+
+def test_civicapi_candidates_ignore_race_calls():
+    rows = [
+        {"name": "James  Talarico", "party": "Democratic", "votes": 5408693, "incumbent": False, "winner": True},
+        {"name": "Ken Paxton", "party": "Republican", "votes": "4417403", "incumbent": False},
+        {"name": "Write-in", "party": "Nonpartisan", "votes": 12},
+    ]
+    candidates = civic_candidates(rows)
+    assert [(c.name, c.party, c.votes, c.write_in) for c in candidates] == [
+        ("James Talarico", "DEM", 5408693, False),
+        ("Ken Paxton", "REP", 4417403, False),
+        ("Write-in", "", 12, True),
+    ]
+    assert not hasattr(candidates[0], "winner")
+    assert civic_reporting(86.04) == {"done": 86.0, "total": 100, "unit": "percent"}
+
+
+def test_civicapi_counties_follow_candidate_order():
+    candidates = civic_candidates([{"name": "A Lead", "party": "DEM", "votes": 3}, {"name": "B Trail", "party": "REP", "votes": 2}])
+    detail = {
+        "region_results": {
+            "harris": {"name": "Harris", "type": "County", "candidates": [{"name": "B Trail", "votes": 2}, {"name": "A Lead", "votes": 3}]},
+            "district-1": {"name": "House District 1", "type": "State House District", "candidates": []},
+        }
+    }
+    assert civic_counties(detail, candidates) == {"Harris": [3, 2]}
+
+
+def test_aggregator_states_are_marked_in_the_snapshot():
+    results = StateResults(
+        state="TX", name="Texas", source_name="civicAPI", source_url="https://civicapi.org", last_updated=None,
+        races=[], aggregator=True, state_url="https://example.org",
+    )
+    source = state_json(results)["source"]
+    assert source["aggregator"] is True and source["stateUrl"] == "https://example.org"
+    official = StateResults(state="GA", name="Georgia", source_name="x", source_url="y", last_updated=None, races=[])
+    assert "aggregator" not in state_json(official)["source"]
