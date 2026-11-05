@@ -204,6 +204,11 @@ nothing.
   the map takes taps with one `Pressable` and matches them to counties and
   states with `shapeContains` (in `resultsMap.ts`) instead of `onPress` on
   each path.
+- **Screen readers and the map (step 7).** The map's one touch target is
+  hidden from VoiceOver and TalkBack, which would tap its center; they get
+  the marker buttons (with web's labels) and the lists, which reach every
+  state and county. Opening or closing a state is announced (a live region
+  on Android, `announceForAccessibility` on iOS).
 - **Testing taps:** `adb shell input tap x y` and `adb shell input keyevent 4`
   (Back) drive the Android emulator; the iOS simulators have no tap tool
   here, so iOS taps and the back swipe need a person.

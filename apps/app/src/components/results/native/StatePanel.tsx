@@ -213,6 +213,7 @@ function BackButton({ onPress }: { onPress: () => void }) {
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityLabel="All states"
       hitSlop={6}
       className="min-h-[34px] justify-center self-start rounded-full border border-[#26324d] bg-slate-900/85 px-3"
     >
