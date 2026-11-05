@@ -13,6 +13,7 @@ export type MapFeature = Feature<Geometry, { name: string }> & { id: string }
 
 export interface StateShape {
   postal: string
+  fips: string
   name: string
   d: string
   centroid: MapPoint
@@ -34,6 +35,7 @@ export function stateShapes() {
     .filter((f) => STATE_FIPS[f.id])
     .map((f) => ({
       postal: STATE_FIPS[f.id],
+      fips: f.id,
       name: f.properties.name,
       d: path(f) ?? '',
       centroid: path.centroid(f) as MapPoint,
@@ -46,4 +48,38 @@ export function stateShapes() {
     nation: path(mesh(topo, topo.objects.nation)) ?? '',
   }
   return cached
+}
+
+// ---- Counties ----
+// The counties file is 795 KB, so it's fetched the first time someone opens
+// a state rather than bundled. Results need the network anyway.
+
+export const COUNTIES_URL = 'https://politmus.com/geo/counties-albers-10m.json'
+
+export interface CountyShape {
+  fips: string
+  name: string
+  d: string
+  feature: MapFeature
+}
+
+const countyFeatures = new WeakMap<object, MapFeature[]>()
+const countyPaths = new Map<string, CountyShape[]>()
+
+// One state's counties as path strings, computed once per state.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function countyShapes(topo: any, stateFips: string): CountyShape[] {
+  const key = stateFips
+  const hit = countyPaths.get(key)
+  if (hit) return hit
+  let all = countyFeatures.get(topo)
+  if (!all) {
+    all = (feature(topo, topo.objects.counties) as unknown as { features: MapFeature[] }).features
+    countyFeatures.set(topo, all)
+  }
+  const shapes = all
+    .filter((f) => f.id.startsWith(stateFips))
+    .map((f) => ({ fips: f.id, name: f.properties.name, d: path(f) ?? '', feature: f }))
+  countyPaths.set(key, shapes)
+  return shapes
 }
