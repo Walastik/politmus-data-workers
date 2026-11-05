@@ -85,6 +85,9 @@ def test_same_person_tolerates_fec_name_forms():
     assert same_person("Robert J. Wittman", 'Robert J. "Rob" Wittman')
     assert same_person("Richard N. Ojeda II", "Richard N. Ojeda II")
     assert not same_person("Mike Collins", "Jon Ossoff")
+    assert same_person("Abdul El-Sayed", "Abdul El-Sayed")
+    assert same_person("EL-SAYED, ABDUL", "Abdul El-Sayed")
+    assert not same_person("Mike Rogers", "Abdul El-Sayed")
 
 
 def test_nc_timestamp_is_eastern():

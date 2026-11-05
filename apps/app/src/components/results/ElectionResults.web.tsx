@@ -29,6 +29,7 @@ import {
   raceKey,
   raceStanding,
   reportingLabel,
+  reportingShare,
   resultHighlights,
   senateRace,
   senateTally,
@@ -616,36 +617,57 @@ function Bubbles({
     y: number
     cx: number
     cy: number
-    delay: string
     results: StateResults
     tally: ReturnType<typeof houseTally> | null
     race: RaceResult | null
+    // Senate column height in pixels (0 for House pills).
+    lift: number
   }
-  const items = Object.values(snapshot.states).flatMap((results, index): BubbleItem[] => {
+  // A Senate column rises with the share of the count that's in, from a stub
+  // at none to full height when every county or precinct has reported. The
+  // ocean callouts get shorter columns so their stack still fits.
+  const stub = 6
+  const columnWidth = Math.round(size * 0.34)
+  const depth = Math.round(columnWidth * 0.45)
+  const pxToMap = W / Math.max(width, 1)
+  const columnHeight = (race: RaceResult, state: string) => {
+    const counted = Math.min(Math.max(reportingShare(race) ?? 0, 0), 1)
+    const ceiling = size * (state in CALLOUTS ? 0.45 : 1.1)
+    return Math.round(stub + (ceiling - stub) * counted)
+  }
+  const items = Object.values(snapshot.states).flatMap((results): BubbleItem[] => {
     const f = states.get(results.state)
     if (!f) return []
     const [cx, cy] = path.centroid(f)
     const [x, y] = CALLOUTS[results.state] ?? [cx, cy]
-    const delay = `${(index * 0.37) % 5}s`
     if (office === 'H') {
       const tally = houseTally(results)
       if (!tally.length) return []
-      return [{ key: results.state, x, y, cx, cy, delay, results, tally, race: null }]
+      return [{ key: results.state, x, y, cx, cy, results, tally, race: null, lift: 0 }]
     }
     const race = senateRace(results)
     if (!race || !raceStanding(race).leader) return []
-    return [{ key: results.state, x, y, cx, cy, delay, results, tally: null, race }]
+    return [{ key: results.state, x, y, cx, cy, results, tally: null, race, lift: columnHeight(race, results.state) }]
   })
 
-  const gap = (size / Math.max(width, 1)) * W * 1.08
+  const gap = size * pxToMap * 1.08
   // The small Northeastern states sit in a column out in the Atlantic, in
-  // north-to-south order, each at least one bubble below the last.
+  // north-to-south order, each face at least one bubble below the last.
   let below = -Infinity
   for (const item of items.filter((i) => i.key in CALLOUTS).sort((a, b) => CALLOUTS[a.key][1] - CALLOUTS[b.key][1])) {
-    item.y = Math.max(CALLOUTS[item.key][1], below + gap * 1.15)
+    item.y = Math.max(CALLOUTS[item.key][1], below + gap * 1.15 + item.lift * pxToMap)
     below = item.y
   }
+  // Keep every face on the map: a column near the top edge stops short.
+  const fitLift = (item: BubbleItem) =>
+    item.lift ? Math.round(Math.max(stub, Math.min(item.lift, item.y / pxToMap - size - depth - 6))) : 0
+  for (const item of items) item.lift = fitLift(item)
+  // Spread by where the faces sit (atop their columns), then stand the
+  // columns back under them.
+  for (const item of items) item.y -= item.lift * pxToMap
   spreadBubbles(items, gap)
+  for (const item of items) item.y += item.lift * pxToMap
+  for (const item of items) item.lift = fitLift(item)
 
   return (
     <div className={`er-bubbles${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden}>
@@ -672,7 +694,7 @@ function Bubbles({
               key={item.key}
               type="button"
               className={`er-bubble er-bubble-house${isAggregated(item.results) ? ' er-bubble-agg' : ''}`}
-              style={{ left, top, animationDelay: item.delay }}
+              style={{ left, top }}
               onClick={() => onSelect(item.key)}
               aria-label={`${item.results.name} House results${isAggregated(item.results) ? ', via civicAPI' : ''}`}
             >
@@ -688,19 +710,29 @@ function Bubbles({
         const leaderShare = share(leader.votes, standing.totalVotes)
         const radius = 47
         const circumference = 2 * Math.PI * radius
+        const counted = Math.round((reportingShare(item.race!) ?? 0) * 100)
         return [
           callout,
           <button
             key={item.key}
             type="button"
-            className={`er-bubble${isAggregated(item.results) ? ' er-bubble-agg' : ''}`}
-            style={{ left, top, animationDelay: item.delay }}
+            className={`er-bubble er-tower${isAggregated(item.results) ? ' er-bubble-agg' : ''}`}
+            style={{
+              left,
+              top,
+              zIndex: Math.round(item.y),
+              ['--size' as string]: `${size}px`,
+              ['--col-w' as string]: `${columnWidth}px`,
+              ['--col-d' as string]: `${depth}px`,
+              ['--col-h' as string]: `${item.lift}px`,
+              ['--party' as string]: color,
+            }}
             onClick={() => onSelect(item.key)}
             onMouseMove={(e) => onHover(e, <RaceTip results={item.results} race={item.race!} />)}
             onMouseLeave={onLeave}
-            aria-label={`${item.results.name}: ${leader.name} leads by ${standing.margin.toFixed(1)} points`}
+            aria-label={`${item.results.name}: ${leader.name} leads by ${standing.margin.toFixed(1)} points, ${counted}% counted`}
           >
-            <span className="er-face" style={{ ['--size' as string]: `${size}px` }}>
+            <span className="er-face">
               <svg viewBox="0 0 100 100" aria-hidden="true">
                 <circle cx="50" cy="50" r={radius} fill="#0f172a" stroke="#334155" strokeWidth="6" />
                 <circle
@@ -719,6 +751,10 @@ function Bubbles({
               <span className="er-pill" style={{ background: color }}>
                 {formatMargin(standing.margin)}
               </span>
+            </span>
+            <span className="er-col" aria-hidden="true">
+              <span className="er-col-top" />
+              <span className="er-col-side" />
             </span>
           </button>,
         ]
