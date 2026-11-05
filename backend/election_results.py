@@ -1200,8 +1200,12 @@ def name_tokens(name: str) -> set[str]:
 
 def same_person(fec_name: str, ballot_name: str) -> bool:
     """FEC names add middle and married names ('Ashley Hinson Arenholz'), so
-    the ballot surname only has to appear somewhere in the FEC name."""
-    return surname(ballot_name) in name_tokens(fec_name) or surname(fec_name) in name_tokens(ballot_name)
+    the ballot surname only has to appear somewhere in the FEC name. A
+    hyphenated surname ('El-Sayed') counts as its parts, the way name_tokens
+    splits it."""
+    fec_tokens, ballot_tokens = name_tokens(fec_name), name_tokens(ballot_name)
+    ballot_last, fec_last = name_tokens(surname(ballot_name)), name_tokens(surname(fec_name))
+    return bool(ballot_last) and ballot_last <= fec_tokens or bool(fec_last) and fec_last <= ballot_tokens
 
 
 def politmus_races(state: str) -> list[dict]:
