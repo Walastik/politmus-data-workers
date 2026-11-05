@@ -42,6 +42,19 @@ import {
   type SenateRaceInfo,
   type StateResults,
 } from '@politmus/core/electionResults'
+import {
+  HATCH_PATTERN_ID,
+  MAP_HEIGHT as H,
+  MAP_WIDTH as W,
+  NO_RACE_FILL,
+  countyFill,
+  layoutMarkers,
+  stateFill,
+  turnoutColor,
+  zoomToBounds,
+  type CountyView,
+  type MapOffice as Office,
+} from '@politmus/core/resultsMap'
 import { getVoterResources } from '@politmus/core/types'
 import { useQuery } from '@tanstack/react-query'
 import type { Feature, Geometry } from 'geojson'
@@ -50,21 +63,12 @@ import { router } from 'expo-router'
 import { feature, mesh } from 'topojson-client'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-// us-atlas shapes are projected (Albers USA) into a 975 × 610 frame.
-const W = 975
-const H = 610
+// us-atlas shapes are projected (Albers USA) into the W × H frame.
 const path = geoPath()
 
-type Office = 'S' | 'H'
-type CountyView = 'lead' | 'turnout'
 type MapFeature = Feature<Geometry, { name: string }> & { id: string }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Topo = any
-
-// Small Northeastern states get their bubble out in the Atlantic, with a line.
-const CALLOUTS: Record<string, [number, number]> = {
-  NH: [905, 120], MA: [915, 165], RI: [920, 205], CT: [905, 240], NJ: [890, 285], DE: [885, 325], MD: [870, 360], VT: [860, 70],
-}
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: 'no-cache' })
@@ -381,31 +385,6 @@ interface Tip {
   content: ReactNode
 }
 
-function stateFill(snapshot: ResultsSnapshot, postal: string, office: Office, senateInfo: Map<string, SenateRaceInfo>) {
-  const results = snapshot.states[postal]
-  if (office === 'S') {
-    const race = senateRace(results)
-    const standing = race ? raceStanding(race) : null
-    if (standing?.leader) return partyTint(standing.leader.party, standing.margin)
-    return senateInfo.has(postal) ? 'url(#er-hatch)' : '#1b2436'
-  }
-  const tally = houseTally(results)
-  if (!tally.length) return '#1b2436'
-  const seats = tally.reduce((sum, t) => sum + t.leading, 0)
-  const lead = tally[0]
-  const runner = tally[1]?.leading ?? 0
-  return partyTint(lead.party, 8 + (share(lead.leading - runner, seats) * 22) / 100)
-}
-
-function turnoutColor(turnout: number | null) {
-  if (turnout === null) return '#162036'
-  const t = Math.max(0, Math.min(1, (turnout - 30) / 50))
-  const from = [15, 52, 70]
-  const to = [94, 234, 212]
-  const c = from.map((f, i) => Math.round(f + (to[i] - f) * t))
-  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`
-}
-
 function USMap(props: MapProps) {
   const { snapshot, topo, countiesTopo, office, selected, race, results, senateInfo, countyView, flagged, onSelect } = props
   const [ref, width] = useElementWidth<HTMLDivElement>()
@@ -419,12 +398,7 @@ function USMap(props: MapProps) {
   const byPostal = useMemo(() => new Map(states.map((f) => [STATE_FIPS[f.id], f])), [states])
 
   const selectedFeature = selected ? byPostal.get(selected) : undefined
-  const zoom = useMemo(() => {
-    if (!selectedFeature) return { k: 1, x: 0, y: 0 }
-    const [[x0, y0], [x1, y1]] = path.bounds(selectedFeature)
-    const k = Math.min(9, 0.86 / Math.max((x1 - x0) / W, (y1 - y0) / H))
-    return { k, x: W / 2 - (k * (x0 + x1)) / 2, y: H / 2 - (k * (y0 + y1)) / 2 }
-  }, [selectedFeature])
+  const zoom = useMemo(() => zoomToBounds(selectedFeature ? path.bounds(selectedFeature) : null), [selectedFeature])
 
   const counties = useMemo(() => {
     if (!countiesTopo || !selectedFeature) return []
@@ -455,7 +429,7 @@ function USMap(props: MapProps) {
       <div className="er-map" ref={ref} onMouseLeave={() => setTip(null)}>
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={office === 'S' ? 'Senate results map' : 'House results map'}>
           <defs>
-            <pattern id="er-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <pattern id={HATCH_PATTERN_ID} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
               <rect width="6" height="6" fill="#1e293b" />
               <line x1="0" y1="0" x2="0" y2="6" stroke="#475569" strokeWidth="2" />
             </pattern>
@@ -484,12 +458,7 @@ function USMap(props: MapProps) {
               const name = countyKeys.get(countyMatchKey(countyNameForFeature(f.id, f.properties.name)))
               const standing = race && name ? countyStanding(race, name) : null
               const turnout = results && name ? countyTurnout(results, name) : null
-              const fill =
-                countyView === 'turnout'
-                  ? turnoutColor(turnout)
-                  : standing?.leader
-                    ? partyTint(standing.leader.party, standing.margin)
-                    : '#162036'
+              const fill = countyFill(countyView, standing, turnout)
               return (
                 <path
                   key={f.id}
@@ -557,39 +526,6 @@ function USMap(props: MapProps) {
   )
 }
 
-// Push overlapping bubbles apart (neighbors like VA and NC), a few passes of
-// simple repulsion in map units. Callout bubbles stay where they're put.
-function spreadBubbles(items: { key: string; x: number; y: number }[], gap: number) {
-  for (let pass = 0; pass < 30; pass++) {
-    let moved = false
-    for (let i = 0; i < items.length; i++) {
-      for (let j = i + 1; j < items.length; j++) {
-        const a = items[i]
-        const b = items[j]
-        const dx = b.x - a.x
-        const dy = b.y - a.y
-        const distance = Math.hypot(dx, dy) || 0.01
-        if (distance >= gap) continue
-        const push = (gap - distance) / 2
-        const ux = dx / distance
-        const uy = dy / distance
-        const fixedA = a.key in CALLOUTS
-        const fixedB = b.key in CALLOUTS
-        if (!fixedA) {
-          a.x -= ux * push * (fixedB ? 2 : 1)
-          a.y -= uy * push * (fixedB ? 2 : 1)
-        }
-        if (!fixedB) {
-          b.x += ux * push * (fixedA ? 2 : 1)
-          b.y += uy * push * (fixedA ? 2 : 1)
-        }
-        moved = true
-      }
-    }
-    if (!moved) break
-  }
-}
-
 function Bubbles({
   snapshot,
   states,
@@ -611,63 +547,16 @@ function Bubbles({
   onHover: (event: React.MouseEvent, content: ReactNode) => void
   onLeave: () => void
 }) {
-  interface BubbleItem {
-    key: string
-    x: number
-    y: number
-    cx: number
-    cy: number
-    results: StateResults
-    tally: ReturnType<typeof houseTally> | null
-    race: RaceResult | null
-    // Senate column height in pixels (0 for House pills).
-    lift: number
-  }
-  // A Senate column rises with the share of the count that's in, from a stub
-  // at none to full height when every county or precinct has reported. The
-  // ocean callouts get shorter columns so their stack still fits.
-  const stub = 6
-  const columnWidth = Math.round(size * 0.34)
-  const depth = Math.round(columnWidth * 0.45)
-  const pxToMap = W / Math.max(width, 1)
-  const columnHeight = (race: RaceResult, state: string) => {
-    const counted = Math.min(Math.max(reportingShare(race) ?? 0, 0), 1)
-    const ceiling = size * (state in CALLOUTS ? 0.45 : 1.1)
-    return Math.round(stub + (ceiling - stub) * counted)
-  }
-  const items = Object.values(snapshot.states).flatMap((results): BubbleItem[] => {
-    const f = states.get(results.state)
-    if (!f) return []
-    const [cx, cy] = path.centroid(f)
-    const [x, y] = CALLOUTS[results.state] ?? [cx, cy]
-    if (office === 'H') {
-      const tally = houseTally(results)
-      if (!tally.length) return []
-      return [{ key: results.state, x, y, cx, cy, results, tally, race: null, lift: 0 }]
-    }
-    const race = senateRace(results)
-    if (!race || !raceStanding(race).leader) return []
-    return [{ key: results.state, x, y, cx, cy, results, tally: null, race, lift: columnHeight(race, results.state) }]
+  const { markers: items, columnWidth, depth } = layoutMarkers({
+    snapshot,
+    office,
+    centroid: (postal) => {
+      const f = states.get(postal)
+      return f ? (path.centroid(f) as [number, number]) : null
+    },
+    size,
+    width,
   })
-
-  const gap = size * pxToMap * 1.08
-  // The small Northeastern states sit in a column out in the Atlantic, in
-  // north-to-south order, each face at least one bubble below the last.
-  let below = -Infinity
-  for (const item of items.filter((i) => i.key in CALLOUTS).sort((a, b) => CALLOUTS[a.key][1] - CALLOUTS[b.key][1])) {
-    item.y = Math.max(CALLOUTS[item.key][1], below + gap * 1.15 + item.lift * pxToMap)
-    below = item.y
-  }
-  // Keep every face on the map: a column near the top edge stops short.
-  const fitLift = (item: BubbleItem) =>
-    item.lift ? Math.round(Math.max(stub, Math.min(item.lift, item.y / pxToMap - size - depth - 6))) : 0
-  for (const item of items) item.lift = fitLift(item)
-  // Spread by where the faces sit (atop their columns), then stand the
-  // columns back under them.
-  for (const item of items) item.y -= item.lift * pxToMap
-  spreadBubbles(items, gap)
-  for (const item of items) item.y += item.lift * pxToMap
-  for (const item of items) item.lift = fitLift(item)
 
   return (
     <div className={`er-bubbles${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden}>
@@ -814,7 +703,7 @@ function Legend({
             </div>
           ) : null}
           <div className="er-legend-row">
-            <span className="er-swatch" style={{ background: '#1b2436' }} />
+            <span className="er-swatch" style={{ background: NO_RACE_FILL }} />
             {office === 'S' ? 'No Senate race' : 'Not loaded yet'}
           </div>
         </>
