@@ -5,9 +5,7 @@ import {
   PARTY_LABEL,
   PARTY_SHORT,
   AGGREGATOR,
-  RESULTS_SNAPSHOT_URL,
   isAggregated,
-  snapshotRequestUrl,
   STATE_FIPS,
   countingComplete,
   countyLabel,
@@ -63,31 +61,14 @@ import { router } from 'expo-router'
 import { feature, mesh } from 'topojson-client'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { getJson, useSnapshot } from './snapshot'
+
 // us-atlas shapes are projected (Albers USA) into the W × H frame.
 const path = geoPath()
 
 type MapFeature = Feature<Geometry, { name: string }> & { id: string }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Topo = any
-
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { cache: 'no-cache' })
-  if (!response.ok) throw new Error(`${url}: ${response.status}`)
-  return (await response.json()) as T
-}
-
-// EXPO_PUBLIC_RESULTS_URL=/dev-results.json in .env.local reads a
-// snapshot written locally by backend/election_results.py instead.
-const SNAPSHOT_URL = process.env.EXPO_PUBLIC_RESULTS_URL || RESULTS_SNAPSHOT_URL
-
-function useSnapshot() {
-  return useQuery({
-    queryKey: ['election-results', SNAPSHOT_URL],
-    queryFn: () => getJson<ResultsSnapshot>(snapshotRequestUrl(SNAPSHOT_URL)),
-    // State sites post new counts every few minutes while counting goes on.
-    refetchInterval: 60_000,
-  })
-}
 
 function useTopology(url: string, enabled = true) {
   return useQuery({ queryKey: ['topology', url], queryFn: () => getJson<Topo>(url), enabled, staleTime: Infinity })

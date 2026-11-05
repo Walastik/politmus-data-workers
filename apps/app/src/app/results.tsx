@@ -15,7 +15,7 @@ export default function ResultsScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: true, title: 'Election results', headerBackTitle: 'Back' }} />
-      <ScrollView className="flex-1 bg-slate-900">
+      <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic">
         <ElectionResults />
       </ScrollView>
     </>
