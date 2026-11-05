@@ -132,7 +132,9 @@ loads it from
 - Locally: `cd backend && python election_results.py --out ../apps/app/public/dev-results.json`,
   then set `EXPO_PUBLIC_RESULTS_URL=/dev-results.json` in
   `apps/app/.env.local` to read that file instead (it's git- and
-  Docker-ignored, so it never ships).
+  Docker-ignored, so it never ships). The iOS and Android apps need a full
+  URL on the dev server, such as `http://<your Mac's LAN IP>:8081/dev-results.json`
+  (`localhost` works from the iOS simulator but not the Android emulator).
 - **Stopping it:** once states certify, disable the workflow (Actions tab, or
   `gh workflow disable election-results.yml`), then cancel the run in
   progress. A loop left running keeps refreshing until its 5½ hours are up;

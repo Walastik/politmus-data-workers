@@ -155,6 +155,16 @@ describe('spreadMarkers', () => {
     expect(items[0].x + items[1].x).toBeCloseTo(204)
   })
 
+  it('keeps markers inside the sides, still clear of a callout', () => {
+    const items = [
+      { key: 'NH', x: 950, y: 100 },
+      { key: 'ME', x: 960, y: 100 },
+    ]
+    spreadMarkers(items, 30, { edge: 20, top: 0 })
+    expect(items[1].x).toBeLessThanOrEqual(MAP_WIDTH - 20)
+    expect(Math.hypot(items[1].x - 950, items[1].y - 100)).toBeGreaterThanOrEqual(30 - 1e-6)
+  })
+
   it('never moves a callout', () => {
     const items = [
       { key: 'NJ', x: 890, y: 285 },
@@ -171,7 +181,7 @@ describe('layoutMarkers', () => {
   const centers: Record<string, MapPoint> = {
     GA: [700, 450],
     SC: [740, 410],
-    MT: [300, 40],
+    MT: [300, 70],
     NH: [880, 130],
     MA: [880, 150],
     TX: [450, 480],
@@ -202,9 +212,9 @@ describe('layoutMarkers', () => {
   it('shortens a column near the top edge so its face stays on the map', () => {
     const snap = snapshot([state('MT', [senate(550, 450, 10)])])
     const [marker] = layoutMarkers({ snapshot: snap, office: 'S', centroid, size, width }).markers
-    // 40 down, less the face, the column depth and 6px of room.
-    expect(marker.lift).toBe(Math.max(COLUMN_STUB, 40 - size - columnSize(size).depth - 6))
-    expect(marker.y).toBe(40)
+    // 70 down, less the face, the column depth and 6px of room: 18.
+    expect(marker.lift).toBe(70 - size - columnSize(size).depth - 6)
+    expect(marker.y).toBe(70)
   })
 
   it('stacks the Atlantic callouts north to south, a face and column apart', () => {
@@ -218,6 +228,45 @@ describe('layoutMarkers', () => {
     expect(ma.x).toBe(CALLOUTS.MA[0])
     // 1.15 gaps plus MA's column below NH, which beats MA's own spot at 165.
     expect(ma.y).toBeCloseTo(CALLOUTS.NH[1] + size * 1.08 * 1.15 + 18)
+  })
+
+  it('moves a marker down when even a stub column would put its face off the map', () => {
+    const snap = snapshot([state('MT', [senate(550, 450, 10)])])
+    const { markers, depth } = layoutMarkers({ snapshot: snap, office: 'S', centroid: () => [300, 10], size, width })
+    const [marker] = markers
+    expect(marker.lift).toBe(COLUMN_STUB)
+    expect(marker.y - marker.lift - size - depth / 2).toBeGreaterThanOrEqual(0)
+  })
+
+  it('moves the top callout down when its face would leave the map', () => {
+    const snap = snapshot([state('VT', [senate(550, 450, 10)])])
+    // A phone-sized map: 360px wide, so 70 map units is only 26px down.
+    const small = layoutMarkers({ snapshot: snap, office: 'S', centroid: () => [850, 90], size: 28, width: 360 })
+    const [vt] = small.markers
+    const pxToMap = MAP_WIDTH / 360
+    const faceTop = vt.y / pxToMap - vt.lift - 28 - small.depth / 2
+    expect(faceTop).toBeGreaterThanOrEqual(0)
+    expect(vt.lift).toBe(COLUMN_STUB)
+  })
+
+  it('squeezes the callout stack onto a small map and keeps faces inside the frame', () => {
+    const callouts = Object.keys(CALLOUTS)
+    const snap = snapshot([...callouts, 'ME'].map((code) => state(code, [senate(550, 450, 10)])))
+    const at = (postal: string): MapPoint => (postal === 'ME' ? [960, 60] : [CALLOUTS[postal][0] - 40, CALLOUTS[postal][1]])
+    const { markers } = layoutMarkers({ snapshot: snap, office: 'S', centroid: at, size: 28, width: 360 })
+    const pxToMap = MAP_WIDTH / 360
+    for (const m of markers) {
+      expect(m.y).toBeLessThanOrEqual(MAP_HEIGHT - 8 * pxToMap + 1e-6)
+      expect(m.x).toBeLessThanOrEqual(MAP_WIDTH - 16 * pxToMap + 1e-6)
+    }
+    const stack = markers.filter((m) => m.key in CALLOUTS).sort((a, b) => a.y - b.y)
+    expect(stack.map((m) => m.key)).toEqual(['VT', 'NH', 'MA', 'RI', 'CT', 'NJ', 'DE', 'MD'])
+  })
+
+  it('leaves the callout stack alone when it fits', () => {
+    const snap = snapshot(Object.keys(CALLOUTS).map((code) => state(code, [senate(550, 450, 0)])))
+    const { markers } = layoutMarkers({ snapshot: snap, office: 'S', centroid: (p) => CALLOUTS[p], size: 40, width: 1200 })
+    for (const m of markers) expect(m.x).toBe(CALLOUTS[m.key][0])
   })
 
   it('spreads neighbors by where their faces sit', () => {

@@ -1,10 +1,13 @@
+import { isAggregated, senateRace } from '@politmus/core/electionResults'
 import type { MapOffice } from '@politmus/core/resultsMap'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ActivityIndicator, Text, View } from 'react-native'
 
 import { Hero, Toolbar } from './native/Hero'
+import { Legend } from './native/Legend'
 import { Overview } from './native/Overview'
+import { USMap } from './native/USMap'
 import { useSnapshot } from './snapshot'
 
 // The results explorer on iOS and Android (the web page is
@@ -21,6 +24,7 @@ export default function ElectionResults() {
     router.setParams({ office: next === 'H' ? 'H' : undefined })
   }
   const snapshot = snapshotQuery.data ?? null
+  const senateStates = useMemo(() => new Set((snapshot?.senate ?? []).map((info) => info.state)), [snapshot])
 
   if (!snapshot) {
     return (
@@ -41,6 +45,17 @@ export default function ElectionResults() {
     <View className="gap-4 bg-slate-900 px-4 pb-12 pt-5">
       <Hero snapshot={snapshot} />
       <Toolbar office={office} onOffice={setOffice} generatedAt={snapshot.generatedAt} />
+      <View className="overflow-hidden rounded-[20px] border border-[#26324d] bg-slate-900">
+        <USMap snapshot={snapshot} office={office} senateStates={senateStates} />
+        <View className="border-t border-[#26324d] bg-slate-900/60 px-3.5 py-2.5">
+          <Legend
+            office={office}
+            countyView={null}
+            pending={(snapshot.senate ?? []).some((info) => !senateRace(snapshot.states[info.state]))}
+            aggregated={Object.values(snapshot.states).some(isAggregated)}
+          />
+        </View>
+      </View>
       <Overview snapshot={snapshot} office={office} />
     </View>
   )
