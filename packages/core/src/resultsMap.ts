@@ -124,8 +124,24 @@ export function columnHeight(race: RaceResult, state: string, size: number): num
 }
 
 // Push overlapping markers apart (neighbors like VA and NC), a few passes of
-// simple repulsion in map units. Callout markers stay where they're put.
-export function spreadMarkers(items: { key: string; x: number; y: number }[], gap: number): void {
+// simple repulsion in map units. Callout markers stay where they're put,
+// and with `bounds` the others stay that far inside the sides and top.
+export function spreadMarkers(
+  items: { key: string; x: number; y: number }[],
+  gap: number,
+  bounds?: { edge: number; top: number },
+): void {
+  // Pinned at a side, a marker takes the rest of its push up or down
+  // instead (down when the push was sideways, since the top is an edge too).
+  const clamp = (item: { key: string; x: number; y: number }, uy = 0, away = 1) => {
+    if (!bounds || item.key in CALLOUTS) return
+    const x = Math.min(MAP_WIDTH - bounds.edge, Math.max(bounds.edge, item.x))
+    const lost = Math.abs(item.x - x)
+    item.x = x
+    if (lost) item.y += lost * (Math.abs(uy) > 0.1 ? Math.sign(uy) * away : 1)
+    item.y = Math.max(bounds.top, item.y)
+  }
+  for (const item of items) clamp(item)
   for (let pass = 0; pass < 30; pass++) {
     let moved = false
     for (let i = 0; i < items.length; i++) {
@@ -149,6 +165,8 @@ export function spreadMarkers(items: { key: string; x: number; y: number }[], ga
           b.x += ux * push * (fixedA ? 2 : 1)
           b.y += uy * push * (fixedA ? 2 : 1)
         }
+        clamp(a, uy, -1)
+        clamp(b, uy, 1)
         moved = true
       }
     }
@@ -215,10 +233,34 @@ export function layoutMarkers({
   const gap = size * pxToMap * 1.08
   // The small Northeastern states sit in a column out in the Atlantic, in
   // north-to-south order, each face at least one marker below the last.
+  // Nothing stands so high that even a stub column would put its face off
+  // the top of the map (Maine, or Vermont on a phone).
+  // (House pills have no face or column, so they keep their places.)
+  const top = office === 'S' ? (COLUMN_STUB + size + depth + 6) * pxToMap : -Infinity
+  const keepOnMap = (item: MapMarker) => {
+    if (item.lift) item.y = Math.max(item.y, top)
+  }
+  for (const item of markers) keepOnMap(item)
+  const stack = markers.filter((i) => i.key in CALLOUTS).sort((a, b) => CALLOUTS[a.key][1] - CALLOUTS[b.key][1])
   let below = -Infinity
-  for (const item of markers.filter((i) => i.key in CALLOUTS).sort((a, b) => CALLOUTS[a.key][1] - CALLOUTS[b.key][1])) {
-    item.y = Math.max(CALLOUTS[item.key][1], below + gap * 1.15 + item.lift * pxToMap)
+  for (const item of stack) {
+    item.y = Math.max(CALLOUTS[item.key][1], top, below + gap * 1.15 + item.lift * pxToMap)
     below = item.y
+  }
+  // On a small map (a phone) the stack runs off the bottom. Squeeze it to
+  // fit and zigzag the faces left and right so neighbors still read.
+  // Faces stay inside the sides of the map (Maine gets pushed east).
+  const edge = (size / 2 + 2) * pxToMap
+  const bottom = MAP_HEIGHT - 8 * pxToMap
+  const first = stack[0]
+  const last = stack.at(-1)
+  if (first && last && last !== first && last.y > bottom) {
+    const squeeze = (bottom - first.y) / (last.y - first.y)
+    const start = first.y
+    stack.forEach((item, i) => {
+      item.y = start + (item.y - start) * squeeze
+      item.x = Math.min(MAP_WIDTH - edge, item.x + (i % 2 ? 0.45 : -0.45) * size * pxToMap)
+    })
   }
   // Keep every face on the map: a column near the top edge stops short.
   const fitLift = (item: MapMarker) =>
@@ -227,8 +269,10 @@ export function layoutMarkers({
   // Spread by where the faces sit (atop their columns), then stand the
   // columns back under them.
   for (const item of markers) item.y -= item.lift * pxToMap
-  spreadMarkers(markers, gap)
+  // In face positions, the top a face can sit at with a stub column.
+  spreadMarkers(markers, gap, { edge, top: top - COLUMN_STUB * pxToMap })
   for (const item of markers) item.y += item.lift * pxToMap
+  for (const item of markers) keepOnMap(item)
   for (const item of markers) item.lift = fitLift(item)
 
   return { markers, columnWidth, depth }

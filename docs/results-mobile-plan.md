@@ -145,6 +145,14 @@ on the tapped state. Decide from simulator screenshots on the smallest phone
 (iPhone 17e) and a large one. Pinch-to-zoom on the national map is a
 possible later step; leave it out of the first version.
 
+**Decided in step 3 (iPhone 17e, 18 Pro Max, Android screenshots):** 28pt
+faces under 520pt of map width, with the margin pills kept, drawn in their
+own layer above every face so a neighbor never hides one. House pills drop
+the spaces ("D8 · R2") and stay inside the map by their own width. On a
+phone the Atlantic callout stack can't fit in one column, so the shared
+layout squeezes it and zigzags the faces. Every face stays inside the map:
+Maine and Montana sit a little lower, on web too.
+
 ### Touch instead of hover
 Web shows `StateTip`, `RaceTip` and `CountyTip` on hover. A phone has no
 hover:
