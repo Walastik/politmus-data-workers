@@ -63,8 +63,10 @@
 .er-nation { fill: none; stroke: #334155; stroke-width: .6; vector-effect: non-scaling-stroke; pointer-events: none; }
 
 /* Candidate bubbles float over the map in an HTML layer. */
-.er-bubbles { position: absolute; inset: 0; z-index: 1; pointer-events: none; transition: opacity .35s; }
-.er-bubbles.is-hidden { opacity: 0; }
+.er-bubbles { position: absolute; inset: 0; z-index: 1; pointer-events: none; transition: opacity .35s, visibility 0s; }
+/* Faded out while a state is zoomed in. Hidden markers would still catch the
+   pointer and Tab over the counties, so visibility goes too, once the fade ends. */
+.er-bubbles.is-hidden { opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; }
 .er-bubble { display: block; position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; border: 0; background: none; padding: 0; }
 .er-bubble:hover .er-face, .er-bubble:focus-visible .er-face { transform: scale(1.18); }
 .er-bubble:focus-visible { outline: none; }
