@@ -2,24 +2,22 @@ import {
   houseRaces,
   isAggregated,
   raceKey,
-  reportingLabel,
   senateRace,
   type RaceResult,
-  type ResultsSnapshot,
   type StateResults,
 } from '@politmus/core/electionResults'
 import type { CountyView, MapOffice } from '@politmus/core/resultsMap'
-import { getVoterResources } from '@politmus/core/types'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, Text, View } from 'react-native'
 
 import { CountyCard } from './native/CountyCard'
-import { Hero, Segmented, Toolbar } from './native/Hero'
+import { Hero, Toolbar } from './native/Hero'
 import { Legend } from './native/Legend'
 import { COUNTIES_URL } from './native/mapShapes'
-import { Overview, Panel, Source } from './native/Overview'
+import { Overview } from './native/Overview'
+import { StatePanel } from './native/StatePanel'
 import { USMap, type CountyTap } from './native/USMap'
 import { getJson, useSnapshot } from './snapshot'
 
@@ -133,63 +131,26 @@ export default function ElectionResults() {
         <CountyCard fips={tapped.fips} featureName={tapped.name} results={results} race={race} onClose={() => setTapped(null)} />
       ) : null}
       {selected ? (
-        <StateHeader
-          snapshot={snapshot}
+        <StatePanel
+          key={selected}
           state={selected}
           results={results}
+          info={snapshot.senate?.find((info) => info.state === selected)}
           race={race}
+          office={office}
           countyView={countyView}
           onCountyView={setCountyView}
+          onRace={(key) => {
+            setRaceId(key)
+            setTapped(null)
+          }}
+          onFlag={setFlagged}
+          flagged={flagged}
+          onBack={() => selectState(null)}
         />
       ) : (
         <Overview snapshot={snapshot} office={office} onSelect={selectState} />
       )}
     </View>
-  )
-}
-
-// The panel with a state open. Step 5 of the plan fills in the rest of the
-// web StatePanel (race chips, candidates, the tug bar, county lists).
-function StateHeader({
-  snapshot,
-  state,
-  results,
-  race,
-  countyView,
-  onCountyView,
-}: {
-  snapshot: ResultsSnapshot
-  state: string
-  results: StateResults | undefined
-  race: RaceResult | null
-  countyView: CountyView
-  onCountyView: (view: CountyView) => void
-}) {
-  const info = (snapshot.senate ?? []).find((s) => s.state === state)
-  const name = results?.name ?? info?.stateName ?? getVoterResources(state).name
-  return (
-    <Panel>
-      <Text accessibilityRole="header" className="text-xl font-extrabold text-slate-100">
-        {name}
-      </Text>
-      {race ? (
-        <Source>
-          {race.office === 'S' ? 'U.S. Senate' : `${state}-${race.district} · U.S. House`} · {reportingLabel(race)}
-        </Source>
-      ) : (
-        <Source>We don’t read {name}’s official counts yet, so they’re on the state’s own site.</Source>
-      )}
-      {race && Object.keys(race.counties).length ? (
-        <Segmented
-          label="County map"
-          value={countyView}
-          options={[
-            { value: 'lead', label: 'Who’s ahead' },
-            { value: 'turnout', label: 'Turnout' },
-          ]}
-          onChange={onCountyView}
-        />
-      ) : null}
-    </Panel>
   )
 }
