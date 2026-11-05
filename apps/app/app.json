@@ -9,7 +9,11 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0f172a",
     "ios": {
-      "icon": "./assets/images/icon.png",
+      "icon": {
+        "light": "./assets/images/icon.png",
+        "dark": "./assets/images/ios-icon-dark.png",
+        "tinted": "./assets/images/ios-icon-tinted.png"
+      },
       "bundleIdentifier": "com.politmus.app"
     },
     "android": {
