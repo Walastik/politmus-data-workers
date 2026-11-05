@@ -6,8 +6,14 @@ name: Election Results
 # single commit that each run replaces, so the repo doesn't grow a commit
 # every few minutes. The page reads it from raw.githubusercontent.com.
 #
-# GitHub runs the schedule on a best-effort basis: runs can start late or be
-# skipped when Actions is busy. Turn the schedule off once states certify.
+# GitHub's scheduler runs this repo's schedules hours late (on Election
+# Night 2026 a */5 schedule never fired), so a run doesn't wait on it: it
+# refreshes every REFRESH_SECONDS for about LOOP_MINUTES, then starts the next
+# run itself (GITHUB_TOKEN may dispatch workflow_dispatch runs). The schedule
+# only restarts the chain if it breaks. To stop: disable the workflow; the
+# running loop finishes its pass and the next dispatch is refused.
+#
+# A manual run with `states` refreshes those states once and doesn't loop.
 
 on:
   schedule:
@@ -15,26 +21,32 @@ on:
   workflow_dispatch:
     inputs:
       states:
-        description: 'Comma-separated postal codes to refresh (blank for every state)'
+        description: 'Comma-separated postal codes to refresh once (blank to start the refresh loop)'
         required: false
         default: ''
 
-# One run at a time; a run that starts while another is going waits for it.
+# One run at a time. A run that starts while another is going waits for it,
+# and only the newest waiting run is kept, so a backup schedule run or an
+# extra dispatch queues behind the loop rather than doubling it.
 concurrency:
   group: election-results
   cancel-in-progress: false
 
 permissions:
   contents: write
+  actions: write
 
 env:
   DATA_BRANCH: election-results-data
   SNAPSHOT: 2026-11-03.json
+  REFRESH_SECONDS: 300
+  # GitHub stops a job at 6 hours; leave room for the last pass and the hand-off.
+  LOOP_MINUTES: 330
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 355
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,7 +60,7 @@ jobs:
         run: pip install requests==2.34.2
 
       # Start from the last published snapshot, so a state whose site is down
-      # this run keeps its previous counts.
+      # keeps its previous counts. Later passes build on this run's own file.
       - name: Fetch the last snapshot
         run: |
           mkdir -p snapshot
@@ -56,25 +68,60 @@ jobs:
             git show "FETCH_HEAD:$SNAPSHOT" > "snapshot/$SNAPSHOT" || rm -f "snapshot/$SNAPSHOT"
           fi
 
-      - name: Read state results sites
-        working-directory: backend
+      - name: Refresh and publish
+        id: refresh
         env:
           STATES: ${{ inputs.states }}
+          PUSH_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
         run: |
-          python election_results.py --out "../snapshot/$SNAPSHOT" ${STATES:+--states "$STATES"}
-
-      - name: Publish the snapshot
-        working-directory: snapshot
-        run: |
-          git init -q -b "$DATA_BRANCH"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          cat > README.md <<'EOF'
+          publish() {
+            dir=$(mktemp -d)
+            cp "snapshot/$SNAPSHOT" "$dir/"
+            cat > "$dir/README.md" <<'EOF'
           Election night results snapshot written by the Election Results
           workflow (.github/workflows/election-results.yml) on main. Each run
           replaces this branch's only commit. Counts are unofficial until each
           state certifies them.
           EOF
-          git add "$SNAPSHOT" README.md
-          git commit -q -m "Election results snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "HEAD:$DATA_BRANCH"
+            (
+              cd "$dir"
+              git init -q -b "$DATA_BRANCH"
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add "$SNAPSHOT" README.md
+              git commit -q -m "Election results snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+              git push -q --force "$PUSH_URL" "HEAD:$DATA_BRANCH"
+            )
+            rm -rf "$dir"
+          }
+          refresh() {
+            (cd backend && python election_results.py --out "../snapshot/$SNAPSHOT" ${STATES:+--states "$STATES"})
+          }
+
+          if [ -n "$STATES" ]; then
+            refresh && publish
+            exit
+          fi
+
+          # A failed pass (a site down, a push race) is logged and the loop
+          # goes on; the last good snapshot stays published.
+          stop=$(( $(date +%s) + LOOP_MINUTES * 60 ))
+          while :; do
+            began=$(date +%s)
+            echo "::group::Pass at $(date -u +%H:%MZ)"
+            if refresh && publish; then echo "Published"; else echo "::warning::Pass at $(date -u +%H:%MZ) failed"; fi
+            echo "::endgroup::"
+            next=$(( began + REFRESH_SECONDS ))
+            [ "$next" -ge "$stop" ] && break
+            sleep $(( next > $(date +%s) ? next - $(date +%s) : 0 ))
+          done
+
+      # Hand off to a fresh run before this one hits GitHub's 6-hour limit.
+      # Only after the loop itself ran, so a run that breaks during setup
+      # can't hand off to another broken run right away; the schedule retries.
+      # Skipped for one-off state refreshes and when the run is cancelled.
+      - name: Start the next run
+        if: ${{ !cancelled() && inputs.states == '' && steps.refresh.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run election-results.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
