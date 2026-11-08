@@ -5,6 +5,23 @@ import {
   PARTY_LABEL,
   PARTY_SHORT,
   AGGREGATOR,
+  BLOCS,
+  BLOC_COLOR,
+  BLOC_LABEL,
+  BLOC_SHORT,
+  CLOTURE,
+  MAJORITY,
+  STATUS_EXPLAINER,
+  STATUS_LABEL,
+  TWO_THIRDS,
+  chamberNotes,
+  chamberOutlook,
+  congressNotes,
+  controlHeadline,
+  raceStatus,
+  raceWinner,
+  statusLine,
+  type ChamberOutlook,
   isAggregated,
   STATE_FIPS,
   countingComplete,
@@ -221,6 +238,7 @@ export default function ElectionResults() {
     <div className="er">
       <div className="er-wrap">
         <Hero snapshot={snapshot} />
+        <NextCongress snapshot={snapshot} />
         <div className="er-toolbar">
           <div className="er-seg" role="group" aria-label="Chamber">
             <button type="button" aria-pressed={office === 'S'} onClick={() => setOffice('S')}>
@@ -309,8 +327,9 @@ function Hero({ snapshot }: { snapshot: ResultsSnapshot }) {
         <h1 className="er-title">How the midterms are counting</h1>
         <p className="er-sub">
           Most numbers here come straight from a state election office and update as they post new counts. States we can’t
-          read directly come from civicAPI, an independent aggregator, and are marked with a dashed ring. Nobody calls
-          races here: a candidate leads until the state certifies its results.
+          read directly come from civicAPI, an independent aggregator, and are marked with a dashed ring. A race marked{' '}
+          <StatusBadge status="called" /> has a winner projected by civicAPI while counting goes on, and a call can be
+          wrong. <StatusBadge status="certified" /> means the state has made its count final.
         </p>
       </div>
       <div className="er-score">
@@ -345,6 +364,189 @@ function Hero({ snapshot }: { snapshot: ResultsSnapshot }) {
       </div>
     </header>
   )
+}
+
+// ---- Calls and certification ----
+
+// Called is an outline, certified is solid: a call can still change, a
+// certified count can't.
+function StatusBadge({ status }: { status: 'called' | 'certified' }) {
+  return (
+    <span className={`er-status er-status-${status}`} title={STATUS_EXPLAINER[status]}>
+      <span aria-hidden="true">✓</span> {STATUS_LABEL[status]}
+    </span>
+  )
+}
+
+function RaceStatusBadge({ race }: { race: RaceResult }) {
+  const status = raceStatus(race)
+  return status === 'counting' ? null : <StatusBadge status={status} />
+}
+
+// ---- The next Congress ----
+
+function NextCongress({ snapshot }: { snapshot: ResultsSnapshot }) {
+  const senate = chamberOutlook(snapshot, 'S')
+  const house = chamberOutlook(snapshot, 'H')
+  const together = congressNotes(senate, house)
+  return (
+    <section className="er-congress" aria-labelledby="er-congress-title">
+      <div className="er-congress-head">
+        <div>
+          <h2 id="er-congress-title">The next Congress, if today’s results hold</h2>
+          <p className="er-sub">
+            Who holds each chamber now, and who would if every race ends the way it stands. It’s a projection from the same
+            counts; the leads above don’t change.
+          </p>
+        </div>
+        <SeatKey />
+      </div>
+      <div className="er-congress-grid">
+        <ChamberCard outlook={senate} />
+        <ChamberCard outlook={house} />
+      </div>
+      {together.length ? (
+        <div className="er-congress-together">
+          <h3>What it adds up to</h3>
+          <ul className="er-notes">
+            {together.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function SeatKey() {
+  return (
+    <dl className="er-key">
+      <div>
+        <dt>
+          <span className="er-swatch is-certified" /> <StatusBadge status="certified" />
+        </dt>
+        <dd>{STATUS_EXPLAINER.certified}</dd>
+      </div>
+      <div>
+        <dt>
+          <span className="er-swatch is-called" /> <StatusBadge status="called" />
+        </dt>
+        <dd>{STATUS_EXPLAINER.called}</dd>
+      </div>
+      <div>
+        <dt>
+          <span className="er-swatch is-leading" /> <span className="er-tag er-tag-lead">LEADS</span>
+        </dt>
+        <dd>Nobody has called it. The candidate is ahead in the count so far.</dd>
+      </div>
+    </dl>
+  )
+}
+
+const CHAMBER_TITLE = { S: 'Senate', H: 'House' } as const
+
+function ChamberCard({ outlook }: { outlook: ChamberOutlook }) {
+  const { office, seats, controlAfter } = outlook
+  const shown = BLOCS.filter((bloc) => seats[bloc].before || seats[bloc].after)
+  return (
+    <div className="er-chamber">
+      <div className="er-chamber-top">
+        <h3>{CHAMBER_TITLE[office]}</h3>
+        <span className="er-control" style={{ ['--party' as string]: controlAfter ? BLOC_COLOR[controlAfter] : '#64748b' }}>
+          {controlHeadline(outlook)}
+        </span>
+      </div>
+      <div className="er-chamber-nums">
+        {shown.map((bloc) => {
+          const row = seats[bloc]
+          const diff = row.after - row.before
+          return (
+            <div key={bloc} className="er-chamber-num" aria-label={`${BLOC_LABEL[bloc]}: ${row.before} now, ${row.after} after`}>
+              <span style={{ color: BLOC_COLOR[bloc] }}>{BLOC_SHORT[bloc]}</span>
+              <span className="er-chamber-before">{row.before}</span>
+              <span aria-hidden="true">→</span>
+              <b>{row.after}</b>
+              {diff ? <small className={diff > 0 ? 'is-up' : 'is-down'}>{diff > 0 ? `+${diff}` : diff}</small> : null}
+            </div>
+          )
+        })}
+      </div>
+      <SeatBar outlook={outlook} />
+      <ul className="er-notes">
+        {chamberNotes(outlook).map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// Democrats fill from the left, Republicans from the right, seats with no
+// count yet in the middle. Lines mark the majority and supermajorities,
+// counted from the majority's side.
+function SeatBar({ outlook }: { outlook: ChamberOutlook }) {
+  const { office, size, seats, uncounted, controlAfter } = outlook
+  const parts = (bloc: 'DEM' | 'REP' | 'OTH') => {
+    const row = seats[bloc]
+    const list = [
+      { kind: 'holdover', n: row.holdover },
+      { kind: 'certified', n: row.certified },
+      { kind: 'called', n: row.called },
+      { kind: 'leading', n: row.leading },
+    ]
+    return (bloc === 'REP' ? list.reverse() : list).map((part) => ({ ...part, bloc }))
+  }
+  const segments = [...parts('DEM'), ...parts('OTH'), { kind: 'uncounted', n: uncounted, bloc: null }, ...parts('REP')].filter(
+    (part) => part.n > 0,
+  )
+  const fromRight = controlAfter === 'REP'
+  const marks = [
+    { n: MAJORITY[office], label: 'majority', center: true },
+    ...(office === 'S' ? [{ n: CLOTURE, label: 'ends a filibuster', center: false }] : []),
+    { n: TWO_THIRDS[office], label: 'two-thirds', center: false },
+  ]
+  return (
+    <div className="er-seatbar-wrap">
+      <div className="er-seatbar" role="img" aria-label={`${CHAMBER_TITLE[office]} seats after the election: ${BLOCS.map((b) => `${BLOC_LABEL[b]} ${seats[b].after}`).join(', ')}`}>
+        {segments.map((part, i) => (
+          <span
+            key={i}
+            className={`er-seg-${part.kind}`}
+            style={{ width: `${(part.n / size) * 100}%`, ['--party' as string]: part.bloc ? BLOC_COLOR[part.bloc] : undefined }}
+            title={`${part.bloc ? `${BLOC_LABEL[part.bloc]}: ` : ''}${part.n} ${SEGMENT_LABEL[part.kind]}`}
+          />
+        ))}
+        {marks.map((mark) => {
+          // The majority line sits at the middle for either side.
+          const at = mark.center ? 50 : ((fromRight ? size - mark.n : mark.n) / size) * 100
+          return <span key={mark.n} className="er-mark" style={{ left: `${at}%` }} />
+        })}
+      </div>
+      <div className="er-marks">
+        {marks.map((mark) => {
+          const at = mark.center ? 50 : ((fromRight ? size - mark.n : mark.n) / size) * 100
+          return (
+            <span key={mark.n} style={{ left: `${at}%` }} title={`${mark.n}: ${mark.label}`}>
+              {mark.n}
+            </span>
+          )
+        })}
+      </div>
+      <div className="er-marks-key">
+        {marks.map((mark) => `${mark.n} ${mark.label}`).join(' · ')}
+        {office === 'S' ? ' · Faded: not up this year' : ''}
+      </div>
+    </div>
+  )
+}
+
+const SEGMENT_LABEL: Record<string, string> = {
+  holdover: 'not up this year',
+  certified: 'certified',
+  called: 'called',
+  leading: 'leading, not called',
+  uncounted: 'with no votes counted yet',
 }
 
 // ---- The map ----
@@ -938,6 +1140,7 @@ function RaceTip({ results, race }: { results: StateResults; race: RaceResult })
         </div>
       ))}
       <div className="er-tt-note">
+        {statusLine(race) ? `${statusLine(race)} · ` : ''}
         {reportingLabel(race)}
         {isAggregated(results) ? ' · via civicAPI' : ''}
       </div>
@@ -1009,8 +1212,9 @@ function Overview({
       <>
         <h2>House races we’re counting</h2>
         <p className="er-source">
-          Every House seat, by state. A yellow dot marks a seat where the sitting member is behind. States tagged civicAPI
-          come from an independent aggregator, not the state.
+          Every House seat, by state. A yellow dot marks a seat where the sitting member is behind. A check marks a called
+          seat, and a filled check a certified one. States tagged civicAPI come from an independent aggregator, not the
+          state.
         </p>
         {states.map((s) => (
           <div key={s.state}>
@@ -1047,7 +1251,7 @@ function Overview({
         <h3>Senate, closest first</h3>
       </div>
       <div className="er-list">
-        {counted.map(({ s, standing }) => (
+        {counted.map(({ s, race, standing }) => (
           <button key={s.state} type="button" className="er-row" onClick={() => onSelect(s.state)}>
             <span className="er-row-main">
               <span className="er-dot" style={{ background: PARTY_COLOR[partyKey(standing.leader?.party)] }} />
@@ -1056,8 +1260,9 @@ function Overview({
                 {isAggregated(s) ? <span className="er-agg-tag">civicAPI</span> : null}
               </span>
             </span>
-            <span className="er-row-side" style={{ color: PARTY_COLOR[partyKey(standing.leader?.party)] }}>
-              {formatMargin(standing.margin)}
+            <span className="er-row-side">
+              <RaceStatusBadge race={race} />
+              <span style={{ color: PARTY_COLOR[partyKey(standing.leader?.party)] }}>{formatMargin(standing.margin)}</span>
             </span>
           </button>
         ))}
@@ -1096,13 +1301,15 @@ function SeatGrid({ state, selected, onSelect }: { state: StateResults; selected
         const key = raceKey(state.state, race)
         const incumbent = race.candidates.find((c) => c.incumbent)
         const flip = Boolean(incumbent && standing.leader && incumbent !== standing.leader)
+        const status = raceStatus(race)
+        const who = raceWinner(race) ?? standing.leader
         return (
           <button
             key={key}
             type="button"
-            className={`er-seat${flip ? ' is-flip' : ''}`}
+            className={`er-seat${flip ? ' is-flip' : ''}${status === 'counting' ? '' : ` is-${status}`}`}
             aria-pressed={selected === key}
-            title={`${state.state}-${race.district}: ${standing.leader?.name ?? 'No votes yet'}${flip ? ' (sitting member behind)' : ''}`}
+            title={`${state.state}-${race.district}: ${who?.name ?? 'No votes yet'}${statusLine(race) ? ` (${statusLine(race)})` : ''}${flip ? ' (sitting member behind)' : ''}`}
             style={{ background: standing.leader ? partyTint(standing.leader.party, standing.margin) : '#1e293b' }}
             onClick={() => onSelect(key)}
           >
@@ -1284,6 +1491,8 @@ function formatCompact(n: number) {
 
 function RaceCard({ state, race }: { state: StateResults; race: RaceResult }) {
   const standing = raceStanding(race)
+  const status = raceStatus(race)
+  const winner = raceWinner(race)
   const [shown, setShown] = useState(false)
   useEffect(() => {
     const frame = requestAnimationFrame(() => setShown(true))
@@ -1303,6 +1512,24 @@ function RaceCard({ state, race }: { state: StateResults; race: RaceResult }) {
         <div className="er-source" style={{ marginTop: 4 }}>
           {reportingLabel(race)} · {formatVotes(totalVotes)} votes counted
         </div>
+        {winner ? (
+          <div className={`er-call-note is-${status}`}>
+            <StatusBadge status={status as 'called' | 'certified'} />
+            <span>
+              {status === 'certified' ? (
+                <>
+                  {state.name} certified <b>{winner.name}</b> the winner. This count is final.
+                </>
+              ) : (
+                <>
+                  {race.call?.source} called this for <b>{winner.name}</b>
+                  {race.call?.at ? ` on ${formatSourceTime(race.call.at)}` : ''}. Votes are still being counted, and only {state.name}’s
+                  certification makes it final.
+                </>
+              )}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {leader && runnerUp ? (
@@ -1351,7 +1578,11 @@ function RaceCard({ state, race }: { state: StateResults; race: RaceResult }) {
                   <span style={{ color }}>{PARTY_LABEL[partyKey(c.party)]}</span>
                   <span>{formatVotes(c.votes)} votes</span>
                   {c.incumbent ? <span className="er-tag er-tag-inc">INCUMBENT</span> : null}
-                  {isLeader ? <span className="er-tag er-tag-lead">LEADS</span> : null}
+                  {c === winner ? (
+                    <StatusBadge status={status as 'called' | 'certified'} />
+                  ) : isLeader ? (
+                    <span className="er-tag er-tag-lead">LEADS</span>
+                  ) : null}
                 </div>
                 <div className="er-bar">
                   <span style={{ width: shown ? `${(c.votes / top) * 100}%` : 0, background: color }} />
@@ -1525,7 +1756,12 @@ function Sources({ snapshot }: { snapshot: ResultsSnapshot }) {
     <footer className="er-footer">
       <b>Where these numbers come from.</b> Each state’s election office publishes its own unofficial counts; where we
       can, we read them directly and change nothing. Totals keep moving as mail, provisional and overseas ballots are
-      counted, and are final only once each state certifies. Money raised is from FEC filings.
+      counted, and are final only once each state certifies. Race calls come from{' '}
+      <a href={AGGREGATOR.url} target="_blank" rel="noreferrer">
+        civicAPI
+      </a>
+      , for every state: they’re its projections, not the state’s, and are shown apart from the counts. Money raised is
+      from FEC filings.
       <ul>
         {Object.values(snapshot.states).filter((s) => !isAggregated(s)).map((s) => (
           <li key={s.state}>

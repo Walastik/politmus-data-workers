@@ -18,6 +18,8 @@ import {
   partyTint,
   raceKey,
   raceStanding,
+  raceStatus,
+  raceWinner,
   reportingLabel,
   senateRace,
   share,
@@ -37,6 +39,7 @@ import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, w
 import { ExternalText } from '@/components/ui'
 import { openProfile } from '@/lib/links'
 
+import { StatusBadge } from './Congress'
 import { Face } from './Face'
 import { Segmented } from './Hero'
 import { Dot, Heading, Panel, Row, SeatGrid, Source } from './Overview'
@@ -276,6 +279,8 @@ function useGrow() {
 
 function RaceCard({ state, race }: { state: StateResults; race: RaceResult }) {
   const standing = raceStanding(race)
+  const status = raceStatus(race)
+  const winner = raceWinner(race)
   const grow = useGrow()
   const { leader, runnerUp, totalVotes } = standing
   const top = Math.max(...standing.ranked.map((c) => c.votes), 1)
@@ -290,13 +295,46 @@ function RaceCard({ state, race }: { state: StateResults; race: RaceResult }) {
         <Source>
           {reportingLabel(race)} · {formatVotes(totalVotes)} votes counted
         </Source>
+        {winner && status !== 'counting' ? (
+          <View
+            className={`mt-1 flex-row items-start gap-2 rounded-[10px] border px-2.5 py-2 ${
+              status === 'certified' ? 'border-slate-200/40 bg-slate-200/5' : 'border-dashed border-[#26324d]'
+            }`}
+          >
+            <View className="pt-px">
+              <StatusBadge status={status} />
+            </View>
+            <Text className="flex-1 text-xs leading-[18px] text-slate-400">
+              {status === 'certified' ? (
+                <>
+                  {state.name} certified <Text className="font-bold text-slate-200">{winner.name}</Text> the winner. This count
+                  is final.
+                </>
+              ) : (
+                <>
+                  {race.call?.source} called this for <Text className="font-bold text-slate-200">{winner.name}</Text>
+                  {race.call?.at ? ` on ${formatSourceTime(race.call.at)}` : ''}. Votes are still being counted, and only{' '}
+                  {state.name}’s certification makes it final.
+                </>
+              )}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {leader && runnerUp ? <TugOfWar leader={leader} runnerUp={runnerUp} totalVotes={totalVotes} marginVotes={standing.marginVotes} margin={standing.margin} grow={grow} /> : null}
 
       <View className="gap-2">
         {standing.ranked.map((c) => (
-          <CandidateCard key={c.name} candidate={c} isLeader={c === leader} totalVotes={totalVotes} top={top} grow={grow} />
+          <CandidateCard
+            key={c.name}
+            candidate={c}
+            isLeader={c === leader}
+            won={c === winner && status !== 'counting' ? status : null}
+            totalVotes={totalVotes}
+            top={top}
+            grow={grow}
+          />
         ))}
       </View>
     </View>
@@ -362,12 +400,14 @@ function TugOfWar({
 function CandidateCard({
   candidate: c,
   isLeader,
+  won,
   totalVotes,
   top,
   grow,
 }: {
   candidate: ResultCandidate
   isLeader: boolean
+  won: 'called' | 'certified' | null
   totalVotes: number
   top: number
   grow: SharedValue<number>
@@ -397,7 +437,7 @@ function CandidateCard({
           </Text>
           <Text className="text-[11px] text-slate-400">{formatVotes(c.votes)} votes</Text>
           {c.incumbent ? <Tag tone="incumbent">INCUMBENT</Tag> : null}
-          {isLeader ? <Tag tone="leads">LEADS</Tag> : null}
+          {won ? <StatusBadge status={won} /> : isLeader ? <Tag tone="leads">LEADS</Tag> : null}
         </View>
         <View className="mt-1.5 h-[7px] overflow-hidden rounded bg-slate-900">
           <Animated.View style={[{ height: '100%', backgroundColor: color, borderRadius: 4 }, bar]} />

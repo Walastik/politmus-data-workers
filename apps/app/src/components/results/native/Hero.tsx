@@ -34,8 +34,9 @@ export function Hero({ snapshot }: { snapshot: ResultsSnapshot }) {
       </Text>
       <Text className="text-sm leading-5 text-slate-400">
         Most numbers here come straight from a state election office and update as they post new counts. States we can’t
-        read directly come from civicAPI, an independent aggregator, and are marked with a dashed ring. Nobody calls races
-        here: a candidate leads until the state certifies its results.
+        read directly come from civicAPI, an independent aggregator, and are marked with a dashed ring. A race marked Called
+        has a winner projected by civicAPI while counting goes on, and a call can be wrong. Certified means the state has
+        made its count final.
       </Text>
       <View className="flex-row gap-2.5">
         <ScoreCard

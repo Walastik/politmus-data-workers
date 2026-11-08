@@ -23,8 +23,15 @@ the snapshot to the election-results-data branch (see docs/deploy.md).
 States without a reader fall back to civicAPI (https://civicapi.org), an
 independent aggregator; those entries are marked "aggregator" in the snapshot.
 
-Counts are unofficial until each state certifies them. Candidates are matched
-to Politmus races (FEC data) for photos, money raised and incumbency.
+Counts are unofficial until each state certifies them. Two kinds of result
+sit on top of the counts, and the page keeps them apart:
+- a call: civicAPI, an independent aggregator, projects a winner. Counting
+  goes on and a call can be wrong. Read for every race, whoever we read the
+  counts from.
+- certification: the state makes its count final. Kept by hand in CERTIFIED.
+
+Candidates are matched to Politmus races (FEC data) for photos, money raised
+and incumbency.
 """
 
 from __future__ import annotations
@@ -90,6 +97,9 @@ class Race:
     special: bool = False
     # County name -> votes per candidate, in `candidates` order.
     counties: dict[str, list[int]] = field(default_factory=dict)
+    # A projected winner from civicAPI: {"winner", "party", "source", "at"}.
+    # Counting goes on after a call; only certification makes a result final.
+    call: dict | None = None
 
     @property
     def total_votes(self) -> int:
@@ -1306,8 +1316,13 @@ def senate_races() -> list[dict]:
 # For races we can't read from the state (blocked sites, no statewide feed), the
 # page falls back to civicAPI (https://civicapi.org), an independent aggregator.
 # It doesn't name its sources and can trail the states by hours, so these states
-# are marked as aggregator data everywhere the page shows them. Its race calls
-# ("winner") are ignored. civicAPI asks for a credit and link, which the page shows.
+# are marked as aggregator data everywhere the page shows them. civicAPI asks
+# for a credit and link, which the page shows.
+#
+# civicAPI also calls races (a "winner" flag on a candidate). Those calls are
+# read for every state, including ones whose counts come from the state, and
+# shown as calls, apart from the counts: they're civicAPI's projections, not
+# the state's.
 
 CIVIC_API = "https://civicapi.org/api/v2"
 CIVIC_HOUSE_RACE = "87524"  # "United States House of Representatives", 2026: every district
@@ -1357,9 +1372,55 @@ def civic_counties(detail: dict, candidates: list[Candidate]) -> dict[str, list[
     return counties
 
 
-def fetch_civicapi(skip: set[str]) -> dict[str, StateResults]:
-    """Senate races and House seats in every state not in `skip`, one entry per state."""
+CallKey = tuple[str, str, int]  # (state, 'S' | 'H', district); a special Senate race is district 1
+
+
+def civic_call(rows, called_at: str | None = None) -> dict | None:
+    """civicAPI's projected winner, from the candidate it flags."""
+    winner = next((c for c in rows or [] if c.get("winner")), None)
+    if not winner:
+        return None
+    return {
+        "winner": " ".join((winner.get("name") or "").split()),
+        "party": party_code(winner.get("party")),
+        "source": "civicAPI",
+        "at": called_at,
+    }
+
+
+def call_key(state: str, race: Race) -> CallKey:
+    return (state, race.office, (1 if race.special else 0) if race.office == "S" else race.district)
+
+
+def attach_calls(results: StateResults, calls: dict[CallKey, dict]) -> None:
+    """Put civicAPI's calls on our races, naming the winner as our ballot line
+    does. A call we can't place on one of our candidates is left off."""
+    senate_calls = [call for (state, office, _), call in calls.items() if state == results.state and office == "S"]
+    senate_races = [r for r in results.races if r.office == "S"]
+    for race in results.races:
+        race.call = None
+        call = calls.get(call_key(results.state, race))
+        # The state and civicAPI can disagree about which Senate race is the special.
+        if not call and race.office == "S" and len(senate_calls) == 1 and len(senate_races) == 1:
+            call = senate_calls[0]
+        if not call:
+            continue
+        ballot = [c for c in race.candidates if not c.write_in]
+        named = [c for c in ballot if same_person(c.name, call["winner"])]
+        # Two people sharing a surname: the party settles it. No name match: the
+        # party does, if only one candidate runs for it.
+        if len(named) != 1:
+            named = [c for c in named or ballot if call["party"] and c.party == call["party"]]
+        if len(named) != 1:
+            continue
+        race.call = {**call, "winner": named[0].name, "party": named[0].party}
+
+
+def fetch_civicapi(skip: set[str]) -> tuple[dict[str, StateResults], dict[CallKey, dict]]:
+    """Senate races and House seats in every state not in `skip`, one entry per
+    state, and civicAPI's race calls in every state."""
     by_state: dict[str, StateResults] = {}
+    calls: dict[CallKey, dict] = {}
 
     def entry(state: str, updated: str | None) -> StateResults:
         """A state's time is its Senate race's own; the national House record
@@ -1384,19 +1445,25 @@ def fetch_civicapi(skip: set[str]) -> dict[str, StateResults]:
     found = civic_get("/race/search", startDate=ELECTION_DATE, endDate=ELECTION_DATE, country="US", query="Senate", limit=500)
     for race in found.get("races") or []:
         state = race.get("province")
-        if race.get("type") != "US Senate" or state not in STATE_NAMES_ALL or state in skip:
+        if race.get("type") != "US Senate" or state not in STATE_NAMES_ALL:
             continue
         detail = civic_get(f"/race/{race['id']}")
         if detail.get("test_data"):
             continue
-        candidates = civic_candidates(detail.get("candidates"))
         name = detail.get("election_name") or ""
+        special = "special" in name.lower()
+        call = civic_call(detail.get("candidates"), detail.get("called_at"))
+        if call:
+            calls[(state, "S", 1 if special else 0)] = call
+        if state in skip:
+            continue
+        candidates = civic_candidates(detail.get("candidates"))
         entry(state, detail.get("last_updated")).races.append(
             Race(
                 office="S",
                 district=0,
                 label="U.S. Senate",
-                special="special" in name.lower(),
+                special=special,
                 candidates=candidates,
                 reporting=civic_reporting(detail.get("percent_reporting")),
                 counties=civic_counties(detail, candidates),
@@ -1409,9 +1476,14 @@ def fetch_civicapi(skip: set[str]) -> dict[str, StateResults]:
         if not match:
             continue
         state = match.group(1).upper()
-        if state not in STATE_NAMES_ALL or state in skip:
+        if state not in STATE_NAMES_ALL:
             continue
         district = 0 if match.group(2) == "al" else int(match.group(2))
+        call = civic_call(region.get("candidates"))
+        if call:
+            calls[(state, "H", district)] = call
+        if state in skip:
+            continue
         entry(state, house.get("last_updated")).races.append(
             Race(
                 office="H",
@@ -1423,13 +1495,23 @@ def fetch_civicapi(skip: set[str]) -> dict[str, StateResults]:
         )
     for results in by_state.values():
         results.races.sort(key=lambda r: (r.office != "S", r.district))
-    return by_state
+    return by_state, calls
+
+
+# ---- Certification ---------------------------------------------------------------
+#
+# A state's results are final once its canvassing board (or secretary of
+# state) certifies them, usually two to five weeks after Election Day. No feed
+# we read says so reliably, so this is kept by hand: add the state and the date
+# it certified its federal races, from its own announcement, and every race in
+# that state shows as certified. Nobody has certified the 2026 results yet.
+CERTIFIED: dict[str, str] = {}
 
 
 # ---- Snapshot ----------------------------------------------------------------
 
 
-def race_json(race: Race) -> dict:
+def race_json(race: Race, certified: str | None = None) -> dict:
     return {
         "office": race.office,
         "district": race.district,
@@ -1449,6 +1531,8 @@ def race_json(race: Race) -> dict:
             for c in race.candidates
         ],
         "counties": race.counties,
+        **({"call": race.call} if race.call else {}),
+        **({"certified": certified} if certified else {}),
     }
 
 
@@ -1461,14 +1545,43 @@ def state_json(results: StateResults) -> dict:
             "url": results.source_url,
             "lastUpdated": results.last_updated,
             "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "official": False,
+            "official": results.state in CERTIFIED,
             **({"aggregator": True, "stateUrl": results.state_url} if results.aggregator else {}),
         },
         "registered": results.registered,
         "ballots": results.ballots,
         "counties": results.counties,
-        "races": [race_json(r) for r in results.races],
+        "races": [race_json(r, CERTIFIED.get(results.state)) for r in results.races],
     }
+
+
+def attach_calls_json(entry: dict, calls: dict[CallKey, dict]) -> None:
+    """attach_calls for a state already in the snapshot, whose counts we read from the state."""
+    races = [
+        Race(
+            office=r["office"],
+            district=r["district"],
+            label=r["label"],
+            special=r.get("special", False),
+            candidates=[Candidate(name=c["name"], party=c["party"], votes=c["votes"], write_in=c.get("writeIn", False)) for c in r["candidates"]],
+            reporting=r["reporting"],
+        )
+        for r in entry["races"]
+    ]
+    attach_calls(StateResults(state=entry["state"], name=entry["name"], source_name="", source_url="", last_updated=None, races=races), calls)
+    for race, row in zip(races, entry["races"]):
+        row.pop("call", None)
+        if race.call:
+            row["call"] = race.call
+
+
+def certify_json(entry: dict) -> None:
+    certified = CERTIFIED.get(entry["state"])
+    entry["source"]["official"] = bool(certified)
+    for race in entry["races"]:
+        race.pop("certified", None)
+        if certified:
+            race["certified"] = certified
 
 
 def main() -> int:
@@ -1492,16 +1605,22 @@ def main() -> int:
             print(f"  failed: {error!r}", file=sys.stderr)
 
     if not args.no_civicapi:
-        print("civicAPI (states we don't read)…", file=sys.stderr)
+        print("civicAPI (states we don't read, and race calls)…", file=sys.stderr)
         official = {code for code, s in states.items() if not s["source"].get("aggregator")}
         try:
-            fallback = fetch_civicapi(skip=official)
+            fallback, calls = fetch_civicapi(skip=official)
             for code, results in fallback.items():
                 attach_profiles(results)
+                attach_calls(results, calls)
                 states[code] = state_json(results)
-            print(f"  {len(fallback)} states, {sum(len(r.races) for r in fallback.values())} races", file=sys.stderr)
-        except Exception as error:  # keep the previous civicAPI entries
+            for code in official:
+                attach_calls_json(states[code], calls)
+            called = sum(1 for s in states.values() for r in s["races"] if r.get("call"))
+            print(f"  {len(fallback)} states, {sum(len(r.races) for r in fallback.values())} races, {called} called", file=sys.stderr)
+        except Exception as error:  # keep the previous civicAPI entries and calls
             print(f"  failed: {error!r}", file=sys.stderr)
+    for entry in states.values():  # certification can be added by hand between runs
+        certify_json(entry)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     snapshot = {

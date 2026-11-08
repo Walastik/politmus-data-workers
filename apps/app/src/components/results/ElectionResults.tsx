@@ -16,6 +16,7 @@ import { useReducedMotion } from 'react-native-reanimated'
 
 import { CountyCard } from './native/CountyCard'
 import { Hero, Toolbar } from './native/Hero'
+import { NextCongress } from './native/Congress'
 import { Highlights, Sources } from './native/Highlights'
 import { Legend } from './native/Legend'
 import { COUNTIES_URL } from './native/mapShapes'
@@ -135,6 +136,7 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number, a
   return (
     <View className="gap-4 bg-slate-900 px-4 pb-12 pt-5">
       <Hero snapshot={snapshot} />
+      <NextCongress snapshot={snapshot} />
       <Toolbar office={office} onOffice={setOffice} generatedAt={snapshot.generatedAt} />
       {/* On a phone everything stacks; from the md breakpoint (tablets) the
           panel sits beside the map, as on the web page. */}

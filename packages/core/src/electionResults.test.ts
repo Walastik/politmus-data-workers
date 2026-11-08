@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  chamberControl,
+  chamberNotes,
+  chamberOutlook,
+  congressNotes,
+  controlHeadline,
+  raceStatus,
+  raceWinner,
+  statusLine,
   isAggregated,
   resultsLinkPhase,
   snapshotRequestUrl,
@@ -244,5 +252,82 @@ describe('aggregator states', () => {
     expect(reportingLabel({ reporting: { done: 100, total: 100, unit: 'percent' } } as never)).toBe('All reporting')
     expect(isAggregated({ source: { aggregator: true } } as never)).toBe(true)
     expect(isAggregated({ source: {} } as never)).toBe(false)
+  })
+})
+
+describe('calls and certification', () => {
+  const counted = () =>
+    race({ candidates: [candidate('Ann Lead', 'DEM', 60), candidate('Bo Trail', 'REP', 40)] })
+
+  it('keeps leading, called and certified apart', () => {
+    expect(raceStatus(counted())).toBe('counting')
+    expect(raceWinner(counted())).toBeNull()
+    const called = { ...counted(), call: { winner: 'Ann Lead', party: 'DEM', source: 'civicAPI', at: '2026-11-04T03:00:00Z' } }
+    expect(raceStatus(called)).toBe('called')
+    expect(raceWinner(called)?.name).toBe('Ann Lead')
+    expect(statusLine(called)).toMatch(/^Called by civicAPI Nov [34]$/)
+    const certified = { ...called, certified: '2026-11-21' }
+    expect(raceStatus(certified)).toBe('certified')
+    expect(statusLine(certified)).toBe('Certified Nov 21')
+  })
+
+  it('ignores a call naming nobody on the ballot', () => {
+    const odd = { ...counted(), call: { winner: 'Someone Else', party: 'DEM', source: 'civicAPI', at: null } }
+    expect(raceStatus(odd)).toBe('counting')
+  })
+})
+
+describe('the next Congress', () => {
+  const seat = (office: 'S' | 'H', district: number, winner: string, extra: Partial<RaceResult> = {}) =>
+    race({
+      office,
+      district,
+      candidates: [candidate('W', winner, 60), candidate('L', winner === 'DEM' ? 'REP' : 'DEM', 40)],
+      ...extra,
+    })
+  const call = { winner: 'W', party: 'DEM', source: 'civicAPI', at: null }
+
+  it('adds Senate races to the seats not up', () => {
+    const snapshot: ResultsSnapshot = {
+      election: { date: '', name: '' },
+      generatedAt: '',
+      states: {
+        AA: state('AA', [seat('S', 0, 'DEM', { call })]),
+        BB: state('BB', [seat('S', 0, 'DEM', { certified: '2026-11-20' })]),
+        CC: state('CC', [seat('S', 0, 'REP')]),
+      },
+    }
+    const senate = chamberOutlook(snapshot, 'S')
+    expect(senate.seats.DEM).toMatchObject({ before: 47, after: 36, holdover: 34, called: 1, certified: 1, leading: 0 })
+    expect(senate.seats.REP).toMatchObject({ before: 53, after: 32, leading: 1 })
+    expect(senate.uncounted).toBe(32)
+    expect(senate.controlBefore).toBe('REP')
+    expect(senate.controlAfter).toBeNull()
+  })
+
+  it('counts a 50-50 Senate for the vice president’s party', () => {
+    expect(chamberControl('S', { DEM: 50, REP: 50, OTH: 0 })).toBe('REP')
+    expect(chamberControl('S', { DEM: 51, REP: 49, OTH: 0 })).toBe('DEM')
+    expect(chamberControl('S', { DEM: 49, REP: 49, OTH: 2 })).toBeNull()
+    expect(chamberControl('H', { DEM: 217, REP: 217, OTH: 1 })).toBeNull()
+  })
+
+  it('explains a flipped House and what it means with the Senate', () => {
+    const races = Array.from({ length: 435 }, (_, i) => seat('H', i + 1, i < 240 ? 'DEM' : 'REP', i < 200 ? { call } : {}))
+    const snapshot: ResultsSnapshot = { election: { date: '', name: '' }, generatedAt: '', states: { AA: state('AA', races) } }
+    const house = chamberOutlook(snapshot, 'H')
+    expect(house.seats.DEM.after).toBe(240)
+    expect(controlHeadline(house)).toBe('Flips to Democrats')
+    // 200 called is short of 218: the majority rests on leads.
+    expect(house.controlSettled).toBeNull()
+    const notes = chamberNotes(house)
+    expect(notes[0]).toBe('Democrats would take the House, 240 to 195, up from 215.')
+    expect(notes[1]).toBe('Democrats could lose 22 of their own on a simple-majority vote and still win it.')
+    expect(notes.some((n) => n.startsWith('Not settled: Democrats have 200 seats called or certified'))).toBe(true)
+
+    const senate = chamberOutlook({ ...snapshot, states: {} }, 'S')
+    // Only the 65 seats not up: no majority, so nothing to say about both chambers yet.
+    expect(senate.controlAfter).toBeNull()
+    expect(congressNotes(senate, house).some((n) => n.startsWith('The new House majority'))).toBe(true)
   })
 })
