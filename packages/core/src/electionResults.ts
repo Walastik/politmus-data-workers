@@ -1,6 +1,8 @@
 // Election night results from state election offices: the snapshot shape
 // written by backend/election_results.py, and what the results page says
-// about it. No race calls: a candidate "leads" until the state certifies.
+// about it. On top of the counts a race can be called (civicAPI projects a
+// winner; counting goes on and a call can be wrong) or certified (the state
+// has made its count final). The page keeps the two visibly apart.
 
 export interface ResultsSnapshot {
   election: { date: string; name: string }
@@ -41,6 +43,18 @@ export interface RaceResult {
   candidates: ResultCandidate[]
   // County name -> votes per candidate, in `candidates` order.
   counties: Record<string, number[]>
+  // civicAPI's projected winner, named as on our ballot line.
+  call?: RaceCall
+  // The date (YYYY-MM-DD) the state certified this race's count.
+  certified?: string
+}
+
+export interface RaceCall {
+  winner: string
+  party: string
+  source: string
+  // When the call was made, if civicAPI says.
+  at: string | null
 }
 
 export interface ResultCandidate {
@@ -583,4 +597,276 @@ export function countyMatchKey(name: string): string {
     .toLowerCase()
     .replace(/\bsaint\b/g, 'st')
     .replace(/[^a-z0-9]/g, '')
+}
+
+// ---- Calls and certification ----
+
+// certified: the state has made its count final. called: civicAPI projects a
+// winner, but counting goes on and the call can still be wrong. counting:
+// nobody has called it; a candidate only leads.
+export type RaceStatus = 'certified' | 'called' | 'counting'
+
+export function raceStatus(race: RaceResult): RaceStatus {
+  if (race.certified) return 'certified'
+  return race.call && raceWinner(race) ? 'called' : 'counting'
+}
+
+// Who won: the leader of a certified count, or the candidate civicAPI called.
+export function raceWinner(race: RaceResult): ResultCandidate | null {
+  if (race.certified) return raceStanding(race).leader
+  return race.call ? (race.candidates.find((c) => c.name === race.call?.winner) ?? null) : null
+}
+
+export const STATUS_LABEL: Record<RaceStatus, string> = { certified: 'Certified', called: 'Called', counting: 'Counting' }
+
+export const STATUS_EXPLAINER: Record<Exclude<RaceStatus, 'counting'>, string> = {
+  called: 'civicAPI, an independent aggregator, projects a winner. Votes are still being counted and a call can be wrong.',
+  certified: 'The state has certified its count. The result is final.',
+}
+
+// "Called by civicAPI Nov 4", "Certified Nov 21"
+export function statusLine(race: RaceResult): string | null {
+  const status = raceStatus(race)
+  if (status === 'certified') return `Certified ${formatDay(race.certified!)}`
+  if (status === 'called') {
+    const day = race.call?.at ? formatDay(race.call.at) : ''
+    return `Called by ${race.call?.source}${day ? ` ${day}` : ''}`
+  }
+  return null
+}
+
+function formatDay(raw: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T12:00:00`) : new Date(raw)
+  return Number.isNaN(date.getTime()) ? raw : `${MONTHS[date.getMonth()]} ${date.getDate()}`
+}
+
+// ---- The next Congress ----
+//
+// A quick before and after: who holds each chamber now, and who would if
+// every race ends the way it stands. It reads the same counts as the page but
+// is its own projection; the scoreboard's leads don't change.
+
+// Democrats, Republicans, and everyone else (independents who don't caucus
+// with either party, third parties).
+export type Bloc = 'DEM' | 'REP' | 'OTH'
+export const BLOCS: Bloc[] = ['DEM', 'REP', 'OTH']
+
+export function blocOf(party: string | null | undefined): Bloc {
+  const key = partyKey(party)
+  return key === 'DEM' || key === 'REP' ? key : 'OTH'
+}
+
+export const BLOC_LABEL: Record<Bloc, string> = { DEM: 'Democrats', REP: 'Republicans', OTH: 'Independents and others' }
+export const BLOC_SHORT: Record<Bloc, string> = { DEM: 'D', REP: 'R', OTH: 'Other' }
+export const BLOC_COLOR: Record<Bloc, string> = { DEM: PARTY_COLOR.DEM, REP: PARTY_COLOR.REP, OTH: PARTY_COLOR.OTH }
+
+// The 119th Congress as elected in 2024. Senate Democrats include Angus King
+// (ME) and Bernie Sanders (VT), independents who caucus with them.
+export const CONGRESS_BEFORE: Record<'S' | 'H', Record<Bloc, number>> = {
+  S: { DEM: 47, REP: 53, OTH: 0 },
+  H: { DEM: 215, REP: 220, OTH: 0 },
+}
+// Senators whose seats weren't on the 2026 ballot: 65 of 100. The 35 up were
+// the 33 regular Class 2 seats (20 R, 13 D) and specials in Ohio and Florida
+// (both R appointees). King and Sanders count with the Democrats.
+export const SENATE_HOLDOVERS: Record<Bloc, number> = { DEM: 34, REP: 31, OTH: 0 }
+export const SENATE_SEATS_UP = 35
+// The president serves through January 2029; the vice president breaks Senate ties.
+export const PRESIDENT_PARTY: Bloc = 'REP'
+
+export const CHAMBER_SIZE = { S: 100, H: 435 } as const
+// Seats one party needs. Senate: 51, or 50 for the vice president's party.
+export const MAJORITY = { S: 51, H: 218 } as const
+// Ending a filibuster (cloture) takes three-fifths of the Senate.
+export const CLOTURE = 60
+// Two-thirds of a full chamber: veto overrides, constitutional amendments;
+// in the Senate also treaties and convicting an impeached official; in the
+// House, passing a bill under suspension of the rules.
+export const TWO_THIRDS = { S: 67, H: 290 } as const
+
+export interface BlocSeats {
+  bloc: Bloc
+  before: number
+  after: number
+  // Senate seats not on this ballot.
+  holdover: number
+  certified: number
+  called: number
+  leading: number
+}
+
+export interface ChamberOutlook {
+  office: 'S' | 'H'
+  size: number
+  seats: Record<Bloc, BlocSeats>
+  // Seats on the ballot with no votes counted yet (or not in our data).
+  uncounted: number
+  controlBefore: Bloc | null
+  controlAfter: Bloc | null
+  // Who controls on seats that are certified, called or not up alone, if anyone.
+  controlSettled: Bloc | null
+}
+
+// Whose chamber it is with these seats, or null when no bloc has a majority
+// (independents decide). The vice president's party controls a 50-50 Senate.
+export function chamberControl(office: 'S' | 'H', seats: Record<Bloc, number>): Bloc | null {
+  if (office === 'S' && seats[PRESIDENT_PARTY] >= 50) return PRESIDENT_PARTY
+  return (BLOCS.find((bloc) => seats[bloc] >= MAJORITY[office]) ?? null)
+}
+
+export function chamberOutlook(snapshot: ResultsSnapshot, office: 'S' | 'H'): ChamberOutlook {
+  const before = CONGRESS_BEFORE[office]
+  const holdover = office === 'S' ? SENATE_HOLDOVERS : { DEM: 0, REP: 0, OTH: 0 }
+  const seats = Object.fromEntries(
+    BLOCS.map((bloc) => [bloc, { bloc, before: before[bloc], after: holdover[bloc], holdover: holdover[bloc], certified: 0, called: 0, leading: 0 }]),
+  ) as Record<Bloc, BlocSeats>
+  let counted = 0
+  for (const state of Object.values(snapshot.states)) {
+    for (const race of state.races) {
+      if (race.office !== office) continue
+      const status = raceStatus(race)
+      const party = status === 'counting' ? raceStanding(race).leader?.party : raceWinner(race)?.party
+      if (!party) continue
+      const row = seats[blocOf(party)]
+      counted += 1
+      row.after += 1
+      if (status === 'certified') row.certified += 1
+      else if (status === 'called') row.called += 1
+      else row.leading += 1
+    }
+  }
+  const onBallot = office === 'S' ? Math.max(SENATE_SEATS_UP, snapshot.senate?.length ?? 0) : CHAMBER_SIZE.H
+  const settled = (bloc: Bloc) => seats[bloc].holdover + seats[bloc].certified + seats[bloc].called
+  return {
+    office,
+    size: CHAMBER_SIZE[office],
+    seats,
+    uncounted: Math.max(0, onBallot - counted),
+    controlBefore: chamberControl(office, before),
+    controlAfter: chamberControl(office, { DEM: seats.DEM.after, REP: seats.REP.after, OTH: seats.OTH.after }),
+    controlSettled: chamberControl(office, { DEM: settled('DEM'), REP: settled('REP'), OTH: settled('OTH') }),
+  }
+}
+
+const CHAMBER_NAME = { S: 'Senate', H: 'House' } as const
+
+// "Flips to Democrats", "Republicans keep it", "No majority"
+export function controlHeadline(outlook: ChamberOutlook): string {
+  const { controlBefore: before, controlAfter: after } = outlook
+  if (!after) return 'No majority yet'
+  if (after !== before) return `Flips to ${BLOC_LABEL[after]}`
+  return `${BLOC_LABEL[after]} keep it`
+}
+
+function seatWord(n: number) {
+  return `${n} ${n === 1 ? 'seat' : 'seats'}`
+}
+
+/**
+ * What the projected seats would mean: who controls the chamber, how much
+ * room the majority has, and which supermajority rules it clears or misses.
+ */
+export function chamberNotes(outlook: ChamberOutlook): string[] {
+  const { office, seats, controlAfter: after, controlBefore: before } = outlook
+  const chamber = CHAMBER_NAME[office]
+  const notes: string[] = []
+  const change = (bloc: Bloc) => {
+    const diff = seats[bloc].after - seats[bloc].before
+    return diff === 0 ? 'no change' : `${diff > 0 ? '+' : ''}${diff}`
+  }
+
+  if (!after) {
+    const top = BLOCS.reduce((a, b) => (seats[b].after > seats[a].after ? b : a))
+    notes.push(
+      `No party reaches ${MAJORITY[office]}. ${BLOC_LABEL[top]} would have ${seats[top].after}, so control would turn on ${seatWord(seats.OTH.after)} held by independents and others.`,
+    )
+  } else {
+    const n = seats[after].after
+    const other = after === 'DEM' ? 'REP' : 'DEM'
+    notes.push(
+      after === before
+        ? `${BLOC_LABEL[after]} would keep the ${chamber}, ${n} to ${seats[other].after} (${change(after)} from ${seats[after].before}).`
+        : `${BLOC_LABEL[after]} would take the ${chamber}, ${n} to ${seats[other].after}, up from ${seats[after].before}.`,
+    )
+    // On a party-line vote, how many of its own members the majority can lose.
+    // The vice president's party can lose one more in the Senate and still tie.
+    const needed = office === 'S' && after === PRESIDENT_PARTY ? 50 : MAJORITY[office]
+    const cushion = n - needed
+    const majorityBefore = before === after ? seats[after].before - needed : null
+    notes.push(
+      cushion === 0
+        ? `No room to spare: one defection would sink a simple-majority vote.`
+        : `${BLOC_LABEL[after]} could lose ${cushion} of their own on a simple-majority vote and still win it${
+            majorityBefore !== null && majorityBefore !== cushion
+              ? `, ${cushion > majorityBefore ? 'up' : 'down'} from ${majorityBefore} now`
+              : ''
+          }.`,
+    )
+    if (office === 'S') {
+      notes.push(
+        n >= CLOTURE
+          ? `${n} seats clears the 60 needed to end a filibuster, so ${BLOC_LABEL[after]} could pass most bills without the other party.`
+          : `${n} seats is ${CLOTURE - n} short of the 60 needed to end a filibuster, so most bills would still need votes from the other side. Budget reconciliation and confirmations need only a simple majority.`,
+      )
+    }
+    const twoThirds = TWO_THIRDS[office]
+    if (n >= twoThirds) {
+      notes.push(
+        office === 'S'
+          ? `${n} seats is two-thirds of the Senate: enough alone to override a veto, ratify a treaty or convict an impeached official.`
+          : `${n} seats is two-thirds of the House: enough alone to override a veto or pass bills under suspension of the rules.`,
+      )
+    } else if (twoThirds - n <= 10) {
+      notes.push(`${n} seats is ${twoThirds - n} short of the ${twoThirds} (two-thirds) that overrides a veto.`)
+    }
+  }
+
+  if (outlook.controlSettled && outlook.controlSettled === after) {
+    notes.push(`Settled: ${BLOC_LABEL[after!]} have a majority from called and certified races alone.`)
+  } else if (after) {
+    const firm = seats[after].holdover + seats[after].certified + seats[after].called
+    notes.push(
+      `Not settled: ${BLOC_LABEL[after]} have ${firm} seats ${office === 'S' ? 'not up, ' : ''}called or certified, and ${MAJORITY[office]} is a majority. The rest are leads.`,
+    )
+  }
+  if (outlook.uncounted) notes.push(`${seatWord(outlook.uncounted)} on the ballot ${outlook.uncounted === 1 ? 'has' : 'have'} no votes counted here yet.`)
+  return notes
+}
+
+/** What both chambers together would mean, with the president's party. */
+export function congressNotes(senate: ChamberOutlook, house: ChamberOutlook): string[] {
+  const president = BLOC_LABEL[PRESIDENT_PARTY]
+  const s = senate.controlAfter
+  const h = house.controlAfter
+  const notes: string[] = []
+  const trifectaBefore = senate.controlBefore === PRESIDENT_PARTY && house.controlBefore === PRESIDENT_PARTY
+  if (s === PRESIDENT_PARTY && h === PRESIDENT_PARTY) {
+    notes.push(`${president} would keep the White House, Senate and House${trifectaBefore ? '' : ', a new trifecta'}.`)
+  } else if (s && h && s === h) {
+    notes.push(
+      `${BLOC_LABEL[s]} would control both chambers against a ${PARTY_LABEL[PRESIDENT_PARTY as PartyKey]} president${
+        trifectaBefore ? `, ending the ${PARTY_LABEL[PRESIDENT_PARTY as PartyKey]} trifecta` : ''
+      }. The president's agenda would need ${BLOC_LABEL[s]}' votes, and the veto becomes the president's main tool.`,
+    )
+  } else if (s && h) {
+    notes.push(
+      `A split Congress: ${BLOC_LABEL[h]} would run the House and ${BLOC_LABEL[s]} the Senate${trifectaBefore ? `, ending the ${PARTY_LABEL[PRESIDENT_PARTY as PartyKey]} trifecta` : ''}. Most bills would need both parties to pass.`,
+    )
+  }
+  if (s && s !== PRESIDENT_PARTY) {
+    notes.push(`A Senate run by ${BLOC_LABEL[s]} decides which of the president's judges and cabinet picks are confirmed.`)
+  }
+  if (h && h !== PRESIDENT_PARTY && house.controlBefore === PRESIDENT_PARTY) {
+    notes.push(`The new House majority would pick the Speaker and chair every committee, with the power to subpoena and investigate.`)
+  }
+  const overrideS = s ? senate.seats[s].after >= TWO_THIRDS.S : false
+  const overrideH = h ? house.seats[h].after >= TWO_THIRDS.H : false
+  if (s && h && s === h && s !== PRESIDENT_PARTY) {
+    notes.push(
+      overrideS && overrideH
+        ? `${BLOC_LABEL[s]} would have two-thirds of both chambers, enough to override a veto on their own.`
+        : `Overriding a veto takes two-thirds of both chambers (${TWO_THIRDS.H} House, ${TWO_THIRDS.S} Senate); ${BLOC_LABEL[s]} would not have that alone.`,
+    )
+  }
+  return notes
 }

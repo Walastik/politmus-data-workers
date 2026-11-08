@@ -81,8 +81,9 @@ export function Sources({ snapshot }: { snapshot: ResultsSnapshot }) {
       <Text className="text-xs leading-[19px] text-slate-500">
         <Text className="font-bold text-slate-400">Where these numbers come from.</Text> Each state’s election office publishes
         its own unofficial counts; where we can, we read them directly and change nothing. Totals keep moving as mail,
-        provisional and overseas ballots are counted, and are final only once each state certifies. Money raised is from FEC
-        filings.
+        provisional and overseas ballots are counted, and are final only once each state certifies. Race calls come from{' '}
+        <ExternalText url={AGGREGATOR.url} label="civicAPI" className="text-blue-300" />, for every state: they’re its
+        projections, not the state’s, and are shown apart from the counts. Money raised is from FEC filings.
       </Text>
       <View className="gap-1 pl-2">
         {states

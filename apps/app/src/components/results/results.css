@@ -222,3 +222,56 @@
 .er-agg-note { margin-top: 6px; padding: 10px 12px; border-radius: 12px; border: 1px dashed rgba(252, 211, 77, .55); background: rgba(120, 83, 9, .18); color: #e2e8f0; font-size: 12.5px; line-height: 1.5; }
 .er-agg-note b { color: #fcd34d; }
 .er-agg-note a { color: #93c5fd; }
+
+/* ---- Calls and certification ---- */
+/* Called is an outline (it can still change); certified is solid (final). */
+.er-status { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; line-height: 16px; white-space: nowrap; vertical-align: 1px; }
+.er-status-called { color: #e2e8f0; border: 1px solid rgba(226, 232, 240, .65); background: transparent; }
+.er-status-certified { color: #0f172a; background: #e2e8f0; border: 1px solid #e2e8f0; }
+.er-row-side { display: inline-flex; align-items: center; gap: 8px; }
+.er-call-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.5; color: var(--er-muted); border: 1px solid var(--er-line); }
+.er-call-note.is-called { border-style: dashed; }
+.er-call-note.is-certified { background: rgba(226, 232, 240, .06); border-color: rgba(226, 232, 240, .4); }
+.er-call-note b { color: var(--er-text); }
+.er-call-note .er-status { margin-top: 1px; }
+.er-seat.is-called::before, .er-seat.is-certified::before { content: "✓"; position: absolute; right: 2px; bottom: 2px; width: 11px; height: 11px; display: grid; place-items: center; border-radius: 50%; font-size: 8px; line-height: 1; }
+.er-seat.is-called::before { color: #fff; border: 1px solid rgba(255, 255, 255, .8); }
+.er-seat.is-certified::before { color: #0f172a; background: #e2e8f0; }
+
+/* ---- The next Congress ---- */
+.er-congress { margin-bottom: 18px; padding: 16px; border-radius: 20px; background: var(--er-panel); border: 1px solid var(--er-line); display: flex; flex-direction: column; gap: 14px; }
+.er-congress h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
+.er-congress h3 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--er-faint); }
+.er-congress-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
+.er-congress-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 900px) { .er-congress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.er-key { margin: 0; display: flex; flex-direction: column; gap: 6px; max-width: 460px; font-size: 12px; }
+.er-key > div { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.er-key dt { display: flex; align-items: center; gap: 6px; }
+.er-key dd { margin: 0; color: var(--er-muted); line-height: 1.45; }
+.er-swatch { --party: var(--er-dem); width: 18px; height: 10px; border-radius: 3px; flex: none; }
+.er-swatch.is-certified, .er-seatbar .er-seg-certified { background: var(--party); }
+.er-swatch.is-called, .er-seatbar .er-seg-called { background: color-mix(in srgb, var(--party) 72%, #0f172a); }
+.er-swatch.is-leading, .er-seatbar .er-seg-leading { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--party) 70%, transparent) 0 3px, transparent 3px 6px); }
+.er-seatbar .er-seg-holdover { background: color-mix(in srgb, var(--party) 24%, #0f172a); }
+.er-seatbar .er-seg-uncounted { background: #1e293b; }
+.er-chamber { padding: 14px; border-radius: 16px; background: var(--er-panel-2); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.er-chamber-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.er-control { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: color-mix(in srgb, var(--party) 30%, transparent); border: 1px solid var(--party); white-space: nowrap; }
+.er-chamber-nums { display: flex; flex-wrap: wrap; gap: 6px 22px; font-variant-numeric: tabular-nums; }
+.er-chamber-num { display: flex; align-items: baseline; gap: 6px; font-size: 15px; color: var(--er-muted); }
+.er-chamber-num > span:first-child { font-weight: 800; }
+.er-chamber-num b { font-size: 26px; font-weight: 800; color: var(--er-text); }
+.er-chamber-before { font-weight: 600; }
+.er-chamber-num small { font-size: 12px; font-weight: 700; }
+.er-chamber-num small.is-up { color: #6ee7b7; }
+.er-chamber-num small.is-down { color: #fca5a5; }
+.er-seatbar-wrap { position: relative; }
+.er-seatbar { position: relative; display: flex; height: 18px; border-radius: 6px; overflow: hidden; background: #1e293b; }
+.er-seatbar > span:not(.er-mark) { height: 100%; flex: none; }
+.er-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; translate: -1px 0; background: #f8fafc; box-shadow: 0 0 0 1px rgba(15, 23, 42, .7); }
+.er-marks { position: relative; height: 16px; font-size: 10px; font-weight: 700; color: var(--er-muted); font-variant-numeric: tabular-nums; }
+.er-marks span { position: absolute; top: 2px; translate: -50% 0; }
+.er-marks-key { font-size: 11px; color: var(--er-faint); }
+.er-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; color: var(--er-muted); }
+.er-congress-together { display: flex; flex-direction: column; gap: 6px; }

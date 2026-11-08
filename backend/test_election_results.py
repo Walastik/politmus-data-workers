@@ -1,4 +1,10 @@
 from election_results import (
+    Candidate,
+    Race,
+    attach_calls,
+    certify_json,
+    civic_call,
+    race_json,
     clarity_name,
     civic_candidates,
     civic_counties,
@@ -257,3 +263,49 @@ def test_aggregator_states_are_marked_in_the_snapshot():
     assert source["aggregator"] is True and source["stateUrl"] == "https://example.org"
     official = StateResults(state="GA", name="Georgia", source_name="x", source_url="y", last_updated=None, races=[])
     assert "aggregator" not in state_json(official)["source"]
+
+
+def test_civicapi_call_names_the_flagged_winner():
+    rows = [
+        {"name": "James  Talarico", "party": "Democratic", "votes": 5408693, "winner": True},
+        {"name": "Ken Paxton", "party": "Republican", "votes": 4417403, "winner": False},
+    ]
+    assert civic_call(rows, "2026-11-04T03:42:08Z") == {
+        "winner": "James Talarico", "party": "DEM", "source": "civicAPI", "at": "2026-11-04T03:42:08Z",
+    }
+    assert civic_call([{"name": "A", "party": "DEM", "winner": False}]) is None
+
+
+def _race(office, district, *candidates, special=False):
+    return Race(office=office, district=district, label="", special=special, reporting={},
+                candidates=[Candidate(name=n, party=p, votes=v) for n, p, v in candidates])
+
+
+def test_calls_attach_to_our_ballot_names():
+    senate = _race("S", 0, ("Jon OSSOFF", "DEM", 10), ("Mike Collins", "REP", 9))
+    house = _race("H", 2, ("Sanford D. Bishop Jr.", "DEM", 5), ("Wayne Johnson", "REP", 4))
+    unmatched = _race("H", 3, ("Brian Jack", "REP", 5), ("Maura Keller", "DEM", 4), ("Other Jack", "REP", 1))
+    results = StateResults(state="GA", name="Georgia", source_name="", source_url="", last_updated=None,
+                           races=[senate, house, unmatched])
+    call = lambda name, party: {"winner": name, "party": party, "source": "civicAPI", "at": None}
+    attach_calls(results, {
+        # civicAPI files Georgia's only Senate race as a special; there's one, so it still fits.
+        ("GA", "S", 1): call("Jon Ossoff", "DEM"),
+        ("GA", "H", 2): call("Sanford Bishop", "DEM"),
+        ("GA", "H", 3): call("B. J.", "REP"),
+    })
+    assert senate.call["winner"] == "Jon OSSOFF" and senate.call["party"] == "DEM"
+    assert house.call["winner"] == "Sanford D. Bishop Jr."
+    # Two Republicans and no name match: we can't tell which one civicAPI means.
+    assert unmatched.call is None
+    assert "call" in race_json(senate) and "call" not in race_json(unmatched)
+
+
+def test_certified_states_mark_every_race(monkeypatch):
+    import election_results
+    entry = {"state": "GA", "source": {"official": False}, "races": [{"office": "S"}, {"office": "H", "certified": "x"}]}
+    certify_json(entry)
+    assert entry["source"]["official"] is False and all("certified" not in r for r in entry["races"])
+    monkeypatch.setitem(election_results.CERTIFIED, "GA", "2026-11-21")
+    certify_json(entry)
+    assert entry["source"]["official"] is True and all(r["certified"] == "2026-11-21" for r in entry["races"])

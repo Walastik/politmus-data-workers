@@ -9,7 +9,10 @@ import {
   partyTint,
   raceKey,
   raceStanding,
+  raceStatus,
+  raceWinner,
   senateRace,
+  statusLine,
   type RaceResult,
   type ResultsSnapshot,
   type StateResults,
@@ -18,6 +21,7 @@ import type { MapOffice } from '@politmus/core/resultsMap'
 import type { ReactNode } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
+import { RaceStatusBadge } from './Congress'
 import { Face } from './Face'
 
 type OnSelect = (state: string, race?: string) => void
@@ -33,7 +37,8 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
           House races we’re counting
         </Text>
         <Source>
-          Every House seat, by state. A yellow dot marks a seat where the sitting member is behind. States tagged civicAPI
+          Every House seat, by state. A yellow dot marks a seat where the sitting member is behind, and a check a called
+          (outline) or certified (solid) seat. States tagged civicAPI
           come from an independent aggregator, not the state.
         </Source>
         {states.map((s) => (
@@ -69,13 +74,13 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
     <Panel>
       <Heading>Senate, closest first</Heading>
       <View className="gap-1">
-        {counted.map(({ s, standing }) => {
+        {counted.map(({ s, race, standing }) => {
           const color = PARTY_COLOR[partyKey(standing.leader?.party)]
           return (
             <Row
               key={s.state}
               onPress={onSelect && (() => onSelect(s.state))}
-              label={`${s.name}: ${standing.leader?.name ?? 'no votes yet'} leads by ${formatMargin(standing.margin)}`}
+              label={`${s.name}: ${standing.leader?.name ?? 'no votes yet'} leads by ${formatMargin(standing.margin)}${statusLine(race) ? `. ${statusLine(race)}` : ''}`}
             >
               <View className="min-w-0 flex-1 flex-row items-center gap-2">
                 <Dot color={color} />
@@ -84,9 +89,12 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
                 </Text>
                 {isAggregated(s) ? <AggTag /> : null}
               </View>
-              <Text style={{ color, fontVariant: ['tabular-nums'] }} className="text-sm font-bold">
-                {formatMargin(standing.margin)}
-              </Text>
+              <View className="flex-row items-center gap-2">
+                <RaceStatusBadge race={race} />
+                <Text style={{ color, fontVariant: ['tabular-nums'] }} className="text-sm font-bold">
+                  {formatMargin(standing.margin)}
+                </Text>
+              </View>
             </Row>
           )
         })}
@@ -126,7 +134,8 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
 }
 
 // Every House seat in a state as a tile, tinted by the leader; a yellow dot
-// marks a seat where the sitting member is behind.
+// marks a seat where the sitting member is behind, and a check a called
+// (outline) or certified (solid) seat.
 export function SeatGrid({
   state,
   selected,
@@ -143,6 +152,8 @@ export function SeatGrid({
         const key = raceKey(state.state, race)
         const incumbent = race.candidates.find((c) => c.incumbent)
         const flip = Boolean(incumbent && standing.leader && incumbent !== standing.leader)
+        const status = raceStatus(race)
+        const who = raceWinner(race) ?? standing.leader
         return (
           <Pressable
             key={key}
@@ -150,7 +161,7 @@ export function SeatGrid({
             onPress={() => onSelect?.(key)}
             accessibilityRole={onSelect ? 'button' : undefined}
             accessibilityState={{ selected: selected === key }}
-            accessibilityLabel={`${state.state}-${race.district}: ${standing.leader?.name ?? 'No votes yet'}${flip ? ', sitting member behind' : ''}`}
+            accessibilityLabel={`${state.state}-${race.district}: ${who?.name ?? 'No votes yet'}${statusLine(race) ? `, ${statusLine(race)}` : ''}${flip ? ', sitting member behind' : ''}`}
             style={{ backgroundColor: standing.leader ? partyTint(standing.leader.party, standing.margin) : '#1e293b' }}
             className={`h-11 w-11 items-center justify-center rounded-[9px] border ${selected === key ? 'border-slate-200' : 'border-transparent'}`}
           >
@@ -158,6 +169,13 @@ export function SeatGrid({
             {flip ? (
               <View className="absolute -right-[3px] -top-[3px] h-2.5 w-2.5 rounded-full border-2 border-[#131d33] bg-amber-200" />
             ) : null}
+            {status === 'counting' ? null : (
+              <View
+                className={`absolute bottom-0.5 right-0.5 h-[11px] w-[11px] items-center justify-center rounded-full ${status === 'certified' ? 'bg-slate-200' : 'border border-white/80'}`}
+              >
+                <Text className={`text-[7px] font-extrabold ${status === 'certified' ? 'text-slate-900' : 'text-white'}`}>✓</Text>
+              </View>
+            )}
           </Pressable>
         )
       })}
