@@ -20,7 +20,9 @@ from api.routes.officials import get_official_finance
 from database import get_db
 from fec_client import (
     crosswalk_ids,
+    election_period_start,
     fec_ids_for_office,
+    merge_expenditures,
     committees_for_period,
     outside_spending_due,
     outside_spending_summary,
@@ -74,6 +76,38 @@ OUTSIDE = [
     {"committee_id": "C001", "committee_name": "Friends PAC", "support_oppose_indicator": "S", "total": 100.0},
     {"committee_id": "C002", "committee_name": "Union Fund", "support_oppose_indicator": "S", "total": 200.0},
     {"committee_id": "C003", "committee_name": "Against PAC", "support_oppose_indicator": "O", "total": 50.0},
+]
+
+
+def expenditure(transaction_id, amount, day, side="S", committee_id="C001", name="Friends PAC",
+                file_number=1, notice=False, **extra):
+    """An itemized Schedule E row as both feeds return it."""
+    return {
+        "committee_id": committee_id,
+        "committee": {"name": name},
+        "support_oppose_indicator": side,
+        "expenditure_amount": amount,
+        "dissemination_date": day,
+        "file_number": file_number,
+        "transaction_id": transaction_id,
+        "is_notice": notice,
+        "most_recent": True,
+        "memo_code": None,
+        **extra,
+    }
+
+
+def efile_filing(file_number, chain=None, coverage_end=None):
+    chain = chain or [file_number]
+    return {"amendment_chain": chain, "most_recent_filing": chain[-1], "coverage_end_date": coverage_end}
+
+
+# The in-progress race's itemized rows: same totals as OUTSIDE once merged.
+ITEMIZED = [
+    expenditure("A1", 400.0, "2029-05-01"),
+    expenditure("A2", 100.0, "2029-06-01"),
+    expenditure("B1", 200.0, "2029-06-01", committee_id="C002", name="Union Fund"),
+    expenditure("C1", 50.0, "2029-06-01", side="O", committee_id="C003", name="Against PAC"),
 ]
 STATES = [
     {"state": "CA", "total": 500.0, "count": 10},
@@ -136,8 +170,12 @@ def fake_fec_get(path, params=None):
         return {"results": STATES}
     if path == "/schedules/schedule_a/":
         return {"results": PAC_ROWS.get(params["two_year_transaction_period"], []), "pagination": {}}
-    if "schedule_e" in path:
+    if path == "/schedules/schedule_e/by_candidate/":
         return {"results": OUTSIDE, "pagination": {"pages": 1}}
+    if path == "/schedules/schedule_e/":
+        return {"results": ITEMIZED, "pagination": {"last_indexes": None}}
+    if path == "/schedules/schedule_e/efile/":
+        return {"results": [], "pagination": {"pages": 1}}
     raise AssertionError(path)
 
 
@@ -285,6 +323,75 @@ class OutsideSpendingTests(unittest.TestCase):
         fresh.election_year = 2026
         self.assertTrue(outside_spending_due(fresh, today))
 
+    def test_election_period_start(self):
+        self.assertEqual(election_period_start("H6TX01001", 2026), date(2025, 1, 1))
+        self.assertEqual(election_period_start("S6TX00388", 2026), date(2021, 1, 1))
+        self.assertEqual(election_period_start("P80001571", 2028), date(2025, 1, 1))
+
+    def _merged_totals(self, processed, efiled, start=date(2025, 1, 1)):
+        totals = {}
+        for row in merge_expenditures(processed, efiled, start):
+            key = (row["committee_id"], row["support_oppose_indicator"])
+            totals[key] = totals.get(key, 0) + row["total"]
+        return totals
+
+    def test_merge_counts_a_transaction_in_both_feeds_once(self):
+        row = expenditure("T1", 1000, "2026-09-01", file_number=10)
+        efiled = {**row, "filing": efile_filing(10)}
+        self.assertEqual(self._merged_totals([row], [efiled]), {("C001", "S"): 1000})
+
+    def test_merge_drops_notices_a_regular_report_repeats(self):
+        # The quarterly report (through 9/30) repeats the August notice under
+        # a new transaction ID; the October notice comes after it.
+        august = expenditure("N1", 500, "2026-08-10", file_number=20, notice=True)
+        october = expenditure("N2", 700, "2026-10-20", file_number=21, notice=True)
+        quarterly = expenditure("Q1", 500, "2026-08-10", file_number=22,
+                                filing=efile_filing(22, coverage_end="2026-09-30"))
+        self.assertEqual(
+            self._merged_totals([august, october], [quarterly]), {("C001", "S"): 1200}
+        )
+
+    def test_merge_uses_regular_report_coverage_not_just_its_dates(self):
+        # A notice dated after the report's last item but inside its period is
+        # still repeated by it.
+        notice = expenditure("N1", 300, "2026-09-20", file_number=30, notice=True)
+        quarterly = expenditure("Q1", 300, "2026-09-01", file_number=31,
+                                filing=efile_filing(31, coverage_end="2026-09-30"))
+        self.assertEqual(self._merged_totals([notice], [quarterly]), {("C001", "S"): 300})
+
+    def test_merge_keeps_only_the_latest_amendment(self):
+        original = expenditure("T1", 900, "2026-10-01", file_number=40, notice=True)
+        amended = expenditure("T1", 950, "2026-10-01", file_number=41, notice=True,
+                              filing=efile_filing(41, chain=[40, 41]))
+        # The processed feed has only the original, still marked current.
+        self.assertEqual(self._merged_totals([original], [amended]), {("C001", "S"): 950})
+
+    def test_merge_skips_memo_lines_superseded_rows_and_older_periods(self):
+        rows = [
+            expenditure("M1", 100, "2026-09-01", memo_code="X"),
+            expenditure("S1", 200, "2026-09-01", most_recent=False),
+            expenditure("P1", 300, "2024-10-01"),
+            expenditure("K1", 400, "2026-09-01"),
+            expenditure("X1", 500, "2026-09-01", side=None),
+        ]
+        self.assertEqual(self._merged_totals(rows, []), {("C001", "S"): 400})
+
+    def test_in_progress_race_sums_itemized_rows(self):
+        with patch.object(fec_client, "fec_get", side_effect=fake_fec_get) as mock_get:
+            summary = fec_client.fetch_outside_spending("S4VT00033", 2030, today=date(2026, 10, 19))
+        self.assertEqual(summary["support_total"], 700.0)
+        self.assertEqual(summary["top_support"][0], {"committee_id": "C001", "name": "Friends PAC", "total": 500.0})
+        calls = [call.args[0] for call in mock_get.call_args_list]
+        self.assertEqual(calls, ["/schedules/schedule_e/", "/schedules/schedule_e/efile/"])
+        # A Senate race's spending spans its three two-year periods.
+        self.assertEqual(mock_get.call_args_list[0].kwargs["params"]["cycle"], [2026, 2028, 2030])
+
+    def test_finished_race_uses_fec_totals(self):
+        with patch.object(fec_client, "fec_get", side_effect=fake_fec_get) as mock_get:
+            summary = fec_client.fetch_outside_spending("S4VT00033", 2024, today=date(2026, 10, 19))
+        self.assertEqual(summary["support_total"], 700.0)
+        self.assertEqual(mock_get.call_count, 1)
+
 
 class RouteOrderingTests(unittest.TestCase):
     def test_pac_routes_are_not_caught_by_official_path(self):
@@ -406,13 +513,13 @@ class FinanceSyncTests(unittest.TestCase):
         stats, first = self._sync()
         self.assertEqual(stats, {"elections": 2, "breakdowns": 2, "outside_spending": 2})
         # One totals call (Senate ID only), then outside spending, size and
-        # state for each election.
-        self.assertEqual(first.call_count, 7)
+        # state for each election; the race under way reads two feeds.
+        self.assertEqual(first.call_count, 8)
 
         # The finished 2024 race keeps its outside spending; 2030 refreshes.
         stats, second = self._sync()
         self.assertEqual(stats, {"elections": 2, "breakdowns": 0, "outside_spending": 1})
-        self.assertEqual(second.call_count, 2)
+        self.assertEqual(second.call_count, 3)
 
         from models import OfficialFinanceTotal
 
