@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: scripts/install_mac_mini_jobs.sh fills in __HOME__, __LOGS__ and
+     __PORT__ (the port in .env's DATABASE_URL). Keeps `flyctl proxy` to the Fly
+     database open on localhost, and launchd starts it again if it exits. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.politmus.fly-db-proxy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>exec flyctl proxy __PORT__:5432 -a politmus-db</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.fly/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__LOGS__/fly-proxy.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGS__/fly-proxy.log</string>
+</dict>
+</plist>

@@ -371,7 +371,7 @@ The Mac Mini runs the local-LLM workers on its own every 6 hours (01:30, 07:30, 
 3. `bill_classifier.py --limit 60`, `debate_worker.py --limit 30`, `official_positions.py --limit 25`, `official_positions.py --level candidate --limit 25`.
 4. `match_targets.py` and `score_officials.py`, catching anything the workers' own matching and rescoring missed.
 
-Only due items are picked up, so a pass with nothing new is quick. A failed step is logged and the pass goes on; failed bills and officials retry on their own with backoff. Batch sizes come from `CYCLE_BILL_LIMIT`, `CYCLE_DEBATE_LIMIT`, `CYCLE_OFFICIAL_LIMIT` and `CYCLE_CANDIDATE_LIMIT` in `.env`. A pass still running when the next is due makes the new one skip (one lock for the whole pass, plus each worker's own lock, so a manual or `lab.sh` run makes that step skip too).
+Only due items are picked up, so a pass with nothing new is quick. A failed step is logged and the pass goes on; failed bills and officials retry on their own with backoff. Batch sizes come from `CYCLE_BILL_LIMIT`, `CYCLE_DEBATE_LIMIT`, `CYCLE_OFFICIAL_LIMIT` and `CYCLE_CANDIDATE_LIMIT` in `.env`, and parallel model calls from `CYCLE_CONCURRENCY`. A pass still running when the next is due makes the new one skip (one lock for the whole pass, plus each worker's own lock, so a manual or `lab.sh` run makes that step skip too).
 
 **Daily report.** At 07:00, `scripts/mac_mini_report.sh write --push` turns the last 24 hours of passes into Markdown and commits it to the `mac-mini-reports` branch (`latest.md`, plus `reports/<date>.md`); that branch is never merged. It has a status line (healthy, degraded, or nothing ran), what each step processed, how many bills, officials and candidates are still due compared with the last report, errors grouped by cause with the command that fixes them (for example a `--timeout 3600` retry loop with the ids filled in, or `ollama pull <tag>`), and the machine's disk, Ollama, commit and prompt hashes. **No report for a day means the Mini or its schedule is down.** A report that fails to push stays in `~/Library/Logs/politmus/reports/` and goes out with the next one. Logs older than 7 days are deleted.
 
@@ -384,18 +384,20 @@ ls ~/Library/Logs/politmus/steps/           # each step's full output
 
 **Setup on the Mac Mini** (once):
 
-1. Repo on `main` with `backend/venv` (`pip install -r backend/requirements.txt -r backend/requirements-worker.txt`), the prompt files in `backend/scripts/`, and `.env` with `DATABASE_URL` reaching the Fly database without anything started by hand.
-2. Ollama running at login with `OLLAMA_NUM_PARALLEL=2`, and the models pulled (`./scripts/mac_mini_report.sh preflight` lists any that are missing).
-3. System sleep off: `sudo pmset -a sleep 0` (the display can still sleep). launchd doesn't run jobs while the Mac sleeps; a missed time runs once at wake.
-4. Git can push without a prompt: `gh auth login` then `gh auth setup-git`, or a fine-grained token limited to this repo's contents in the keychain.
-5. Catch up the backlog by hand first (see [docs/scoring-tuning.md](docs/scoring-tuning.md), "Rolling a change out"), then install the jobs:
+1. Repo on `main` with its own Python environment at `backend/venv` (the pass looks for it there): `python3.12 -m venv backend/venv`, `source backend/venv/bin/activate`, then `pip install -r backend/requirements.txt -r backend/requirements-worker.txt`. Copy the prompt files into `backend/scripts/`, and add `.env` with `DATABASE_URL`.
+2. Database access. If `DATABASE_URL` goes through `localhost` (a `flyctl proxy`), install `flyctl` and run `flyctl auth login`. The installer then adds a job that keeps `flyctl proxy <port>:5432 -a politmus-db` open and restarts it if it exits, so stop any proxy you started by hand first. The pass also restarts it when its checks can't reach the database.
+3. Ollama running at login with `OLLAMA_NUM_PARALLEL` set, and the models pulled (`./scripts/mac_mini_report.sh preflight` lists any that are missing). Set `CYCLE_CONCURRENCY` in `.env` to the same number (default 2).
+4. System sleep off: `sudo pmset -a sleep 0` (the display can still sleep). launchd doesn't run jobs while the Mac sleeps; a missed time runs once at wake.
+5. Git can push without a prompt: `gh auth login` then `gh auth setup-git`, or a fine-grained token limited to this repo's contents in the keychain.
+6. Catch up the backlog by hand first (see [docs/scoring-tuning.md](docs/scoring-tuning.md), "Rolling a change out"), then install the jobs:
 
 ```bash
 ./scripts/install_mac_mini_jobs.sh                                      # install, or reinstall after changing scripts/launchd/
 launchctl kickstart gui/$(id -u)/com.politmus.mac-mini-cycle            # run a pass now
 launchctl kickstart gui/$(id -u)/com.politmus.mac-mini-report           # write and push a report now
 launchctl bootout gui/$(id -u)/com.politmus.mac-mini-cycle              # pause the passes (install again to resume)
-./scripts/install_mac_mini_jobs.sh --uninstall                          # remove both jobs
+./scripts/install_mac_mini_jobs.sh --uninstall                          # remove all the jobs
+tail ~/Library/Logs/politmus/fly-proxy.log                              # the Fly proxy's output
 ```
 
 ### `openstates_client.py`
