@@ -25,6 +25,11 @@ the README under `score_officials.py`, target matching, and `lab.py`.
    which result.
 3. **Stop full worker runs first.** The lab runs the same workers against the
    same database, and `lab.sh positions` takes the positions worker's lock.
+   The Mac Mini's scheduled pass (README, "Mac Mini schedule") runs these
+   workers every 6 hours too: pause it for a long tuning session with
+   `launchctl bootout gui/$(id -u)/com.politmus.mac-mini-cycle` and run
+   `./scripts/install_mac_mini_jobs.sh` to resume. A pass that runs into a
+   lab run skips the busy worker's step rather than doubling it.
 
 ## The fixture
 

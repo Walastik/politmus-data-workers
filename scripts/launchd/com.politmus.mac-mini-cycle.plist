@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: scripts/install_mac_mini_jobs.sh fills in __REPO__ and __LOGS__.
+     Runs one LLM worker pass at 01:30, 07:30, 13:30 and 19:30 local time, after
+     the 00:00 and 12:00 UTC Congress ingest. A time missed while the Mac was
+     asleep runs once when it wakes. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.politmus.mac-mini-cycle</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO__/scripts/mac_mini_cycle.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>1</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__LOGS__/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGS__/launchd.log</string>
+</dict>
+</plist>

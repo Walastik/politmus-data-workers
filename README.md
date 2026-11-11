@@ -362,6 +362,42 @@ A fast loop for tuning the bill prompt, the positions prompt, and scoring on a s
 
 Each report is saved under `~/politmus-lab/runs/<time>/` (`report.md`, `snapshot.json`, `diff.txt`, set `LAB_DIR` to move it) with the git commit and a hash of each local prompt file, and prints what changed since the previous run: effects and positions added, removed, or relabelled, and score and match changes. `positions` takes the same lock as a full positions run, so stop a full run first.
 
+### Mac Mini schedule (`scripts/mac_mini_cycle.sh`)
+
+The Mac Mini runs the local-LLM workers on its own every 6 hours (01:30, 07:30, 13:30 and 19:30 local time, after the 00:00 and 12:00 UTC Congress ingest) and writes a health report each morning. One pass, in order so Ollama has one model loaded at a time:
+
+1. `git pull --ff-only` when the checkout is on `main` with no uncommitted changes (skipped otherwise).
+2. Preflight: Ollama answers, every worker's model is pulled, the database answers. The pass stops here if not.
+3. `bill_classifier.py --limit 60`, `debate_worker.py --limit 30`, `official_positions.py --limit 25`, `official_positions.py --level candidate --limit 25`.
+4. `match_targets.py` and `score_officials.py`, catching anything the workers' own matching and rescoring missed.
+
+Only due items are picked up, so a pass with nothing new is quick. A failed step is logged and the pass goes on; failed bills and officials retry on their own with backoff. Batch sizes come from `CYCLE_BILL_LIMIT`, `CYCLE_DEBATE_LIMIT`, `CYCLE_OFFICIAL_LIMIT` and `CYCLE_CANDIDATE_LIMIT` in `.env`. A pass still running when the next is due makes the new one skip (one lock for the whole pass, plus each worker's own lock, so a manual or `lab.sh` run makes that step skip too).
+
+**Daily report.** At 07:00, `scripts/mac_mini_report.sh write --push` turns the last 24 hours of passes into Markdown and commits it to the `mac-mini-reports` branch (`latest.md`, plus `reports/<date>.md`); that branch is never merged. It has a status line (healthy, degraded, or nothing ran), what each step processed, how many bills, officials and candidates are still due compared with the last report, errors grouped by cause with the command that fixes them (for example a `--timeout 3600` retry loop with the ids filled in, or `ollama pull <tag>`), and the machine's disk, Ollama, commit and prompt hashes. **No report for a day means the Mini or its schedule is down.** A report that fails to push stays in `~/Library/Logs/politmus/reports/` and goes out with the next one. Logs older than 7 days are deleted.
+
+```bash
+./scripts/mac_mini_report.sh show        # the last 24 hours, printed (writes nothing)
+./scripts/mac_mini_report.sh preflight   # just the checks
+tail -f ~/Library/Logs/politmus/cycle.log   # steps as they start and finish
+ls ~/Library/Logs/politmus/steps/           # each step's full output
+```
+
+**Setup on the Mac Mini** (once):
+
+1. Repo on `main` with `backend/venv` (`pip install -r backend/requirements.txt -r backend/requirements-worker.txt`), the prompt files in `backend/scripts/`, and `.env` with `DATABASE_URL` reaching the Fly database without anything started by hand.
+2. Ollama running at login with `OLLAMA_NUM_PARALLEL=2`, and the models pulled (`./scripts/mac_mini_report.sh preflight` lists any that are missing).
+3. System sleep off: `sudo pmset -a sleep 0` (the display can still sleep). launchd doesn't run jobs while the Mac sleeps; a missed time runs once at wake.
+4. Git can push without a prompt: `gh auth login` then `gh auth setup-git`, or a fine-grained token limited to this repo's contents in the keychain.
+5. Catch up the backlog by hand first (see [docs/scoring-tuning.md](docs/scoring-tuning.md), "Rolling a change out"), then install the jobs:
+
+```bash
+./scripts/install_mac_mini_jobs.sh                                      # install, or reinstall after changing scripts/launchd/
+launchctl kickstart gui/$(id -u)/com.politmus.mac-mini-cycle            # run a pass now
+launchctl kickstart gui/$(id -u)/com.politmus.mac-mini-report           # write and push a report now
+launchctl bootout gui/$(id -u)/com.politmus.mac-mini-cycle              # pause the passes (install again to resume)
+./scripts/install_mac_mini_jobs.sh --uninstall                          # remove both jobs
+```
+
 ### `openstates_client.py`
 
 Talks to the [OpenStates API](https://docs.openstates.org/api-v3/) and upserts active state legislators and the current governor into `officials` with `level='state'` and an `openstates_id`. Governors are stored with `office='Governor'` and no district. Re-running is idempotent.
@@ -429,7 +465,7 @@ python fec_client.py pacs --candidates --max-requests 200
 python wikidata_client.py --level candidate --max-names 100
 ```
 
-Pre-general filings can't tell primary winners from losers (a sitting member who lost the primary keeps filing them), so races listed in `services/ballot_nominees.py` show only their November nominees, plus any third-party campaign that filed a pre-general report. Texas is maintained by hand there. Every other state comes from `ballot_wikipedia.py`, which reads each state's Wikipedia House and Senate election articles and matches each nominee to an FEC candidate ID by race and name, taking campaign websites from the articles' link lists. A race without a general-election results box is read from its infobox plus the article's independent and third-party candidate sections. Only hand-verified ballots count as complete (`ballot_complete` on `/api/candidates/races`): Wikipedia's results boxes can miss minor candidates, so "On your ballot" shows a "May be incomplete" note on every generated race and every race decided by FEC filings alone. **Ballot Nominees** runs it daily at 09:00 UTC until Election Day with `--save-db`, saving `ballot_snapshots` rows that the API uses over the committed `services/ballots_<cycle>.json`; a state whose new read lost a race keeps its last one. A run makes about 100 Wikipedia and 100 OpenFEC requests and prints the races to check by hand.
+Pre-general filings can't tell primary winners from losers (a sitting member who lost the primary keeps filing them), so races listed in `services/ballot_nominees.py` show only their November nominees, plus any third-party campaign that filed a pre-general report. Texas is maintained by hand there. Every other state comes from `ballot_wikipedia.py`, which reads each state's Wikipedia House and Senate election articles and matches each nominee to an FEC candidate ID by race and name, taking campaign websites from the articles' link lists. A race without a general-election results box is read from its infobox plus the article's independent and third-party candidate sections. Only hand-verified ballots count as complete (`ballot_complete` on `/api/candidates/races`): Wikipedia's results boxes can miss minor candidates, so "On your ballot" shows a "May be incomplete" note on every generated race and every race decided by FEC filings alone. With `--save-db` it saves `ballot_snapshots` rows that the API uses over the committed `services/ballots_<cycle>.json`; a state whose new read lost a race keeps its last one. The **Ballot Nominees** workflow ran that daily at 09:00 UTC until Election Day 2026 and was removed afterwards; for the next cycle, restore `.github/workflows/ballot-nominees.yml` from git history. A run makes about 100 Wikipedia and 100 OpenFEC requests and prints the races to check by hand.
 
 ```bash
 python ballot_wikipedia.py                    # rewrite the committed JSON
