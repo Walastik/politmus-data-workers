@@ -532,9 +532,10 @@ class CandidateSyncTests(unittest.TestCase):
         from models import Candidacy
 
         self._load_race()
-        # Three candidacies: totals, outside spending and both breakdowns,
-        # plus committees once for the two who are only candidates.
-        self.assertEqual(self._run_totals(), 14)
+        # Three candidacies: totals, outside spending (processed and filed
+        # feeds for a race under way) and both breakdowns, plus committees
+        # once for the two who are only candidates.
+        self.assertEqual(self._run_totals(), 17)
         self.assertEqual(self._run_totals(), 0)
 
         session = self.SessionLocal()
@@ -545,7 +546,7 @@ class CandidateSyncTests(unittest.TestCase):
         session.close()
         # Paxton filed again: committees are cached, and the breakdowns are
         # current with the totals row FEC returns.
-        self.assertEqual(self._run_totals(), 2)
+        self.assertEqual(self._run_totals(), 3)
 
     def test_pacs_wait_for_totals(self):
         def pac_due():
@@ -564,7 +565,7 @@ class CandidateSyncTests(unittest.TestCase):
     def test_totals_stop_at_request_budget(self):
         self._load_race()
         # The reserve leaves room for one candidacy, not two.
-        self.assertEqual(self._run_totals(max_requests=fec_client.TARGET_REQUEST_RESERVE + 2), 5)
+        self.assertEqual(self._run_totals(max_requests=fec_client.TARGET_REQUEST_RESERVE + 2), 6)
         fec_client.set_request_budget(None)
 
     def test_candidates_stay_off_the_roster(self):

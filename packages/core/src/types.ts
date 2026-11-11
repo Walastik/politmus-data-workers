@@ -22,6 +22,9 @@ export interface Official {
   photo_attribution?: string | null
   level?: string | null
   openstates_id?: string | null
+  // A top post in Congress ("Speaker of the House", "Senate Minority Leader");
+  // null for everyone else.
+  leadership_role?: string | null
   positions_status?: PositionsStatus | null
   positions_count?: number | null
   // Accountability score; null/absent when the official is not scored.

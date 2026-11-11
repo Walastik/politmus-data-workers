@@ -86,6 +86,9 @@ export default function MemberScreen() {
                     <Text className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{rosterStatusLabel(detail)}</Text>
                   ) : null}
                 </View>
+                {detail.leadership_role ? (
+                  <Text className="mt-1 text-sm font-semibold text-slate-200">{detail.leadership_role}</Text>
+                ) : null}
                 {detail.party ? (
                   <Text className="mt-1 text-sm text-slate-400">
                     {[stateNameFromAbbr(detail.state), officeLine(detail)].filter(Boolean).join(' · ')}

@@ -85,6 +85,32 @@ export function chamberMakeup(members: Official[]) {
   }
 }
 
+// Each chamber's top posts, in order, with the title the chamber card shows.
+const LEADERSHIP_POSTS = {
+  Senate: [
+    { title: 'Senate Majority Leader', label: 'Majority Leader' },
+    { title: 'Senate Minority Leader', label: 'Minority Leader' },
+  ],
+  House: [
+    { title: 'Speaker of the House', label: 'Speaker' },
+    { title: 'House Majority Leader', label: 'Majority Leader' },
+    { title: 'House Minority Leader', label: 'Minority Leader' },
+  ],
+}
+
+export type LeadershipPost = { title: string; label: string; holder: Official | null }
+
+// A chamber's top posts and who holds each (null: vacant). Null when the
+// roster has no leadership at all, so a roster loaded before the API sent
+// leadership_role never shows every post as vacant.
+export function chamberLeaders(members: Official[], chamber: keyof typeof LEADERSHIP_POSTS): LeadershipPost[] | null {
+  if (!members.some((m) => m.leadership_role)) return null
+  return LEADERSHIP_POSTS[chamber].map((post) => ({
+    ...post,
+    holder: members.find((m) => m.leadership_role === post.title) ?? null,
+  }))
+}
+
 export function byState(members: Official[]): [string, Official[]][] {
   const groups = new Map<string, Official[]>()
   for (const member of members) {

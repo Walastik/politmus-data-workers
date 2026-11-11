@@ -1,6 +1,7 @@
 """Campaign finance for federal officials from the OpenFEC API.
 
-crosswalk: load bioguide -> FEC candidate IDs (and OpenSecrets IDs) from
+crosswalk: load bioguide -> FEC candidate IDs (and OpenSecrets IDs) and the
+    top leadership posts (services/leadership.py) from
     unitedstates/congress-legislators onto officials.
 totals: fetch per-election totals for each current member, plus donation-size
     and donor-state breakdowns for their most recent elections.
@@ -40,7 +41,7 @@ from models import Candidacy, Official, OfficialFinanceTotal, PacContribution, P
 from services.candidate_races import (
     CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle, general_election_date,
 )
-from services import ballot_nominees
+from services import ballot_nominees, leadership
 from services.finance_insights import election_periods, is_completed, pac_category
 
 BASE_URL = "https://api.open.fec.gov/v1"
@@ -82,6 +83,11 @@ CAMPAIGN_COMMITTEE_DESIGNATIONS = {"P", "A"}
 # by_candidate aggregates one row per spender and side; a big race can need
 # a few pages.
 OUTSIDE_SPENDING_MAX_PAGES = 5
+# Itemized Schedule E is one row per expenditure; the costliest Senate races
+# run to a few thousand.
+OUTSIDE_ITEMIZED_MAX_PAGES = 40
+# FEC ID prefix -> years in the election period spending is reported against.
+ELECTION_PERIOD_YEARS = {"H": 2, "P": 4, "S": 6}
 
 CANDIDATE_OFFICES = {"S": "Senate candidate", "H": "House candidate"}
 # FEC party code -> the full name Congress.gov uses on officials.
@@ -211,8 +217,13 @@ def crosswalk_ids(legislators):
     return ids_by_bioguide
 
 
-def apply_crosswalk(session, legislators):
+def apply_crosswalk(session, legislators, today=None, log=print):
+    """Load FEC and OpenSecrets IDs and the top leadership posts onto officials."""
     ids_by_bioguide = crosswalk_ids(legislators)
+    posts = {
+        (legislator.get("id") or {}).get("bioguide"): leadership.legislators_post(legislator, today)
+        for legislator in legislators
+    }
     stats = {"legislators": len(ids_by_bioguide), "updated": 0, "not_in_officials": 0}
     for bioguide, (fec_ids, opensecrets_id) in ids_by_bioguide.items():
         official = session.get(Official, bioguide)
@@ -221,7 +232,13 @@ def apply_crosswalk(session, legislators):
             continue
         official.fec_candidate_ids = fec_ids or None
         official.opensecrets_id = opensecrets_id
+        official.legislators_leadership = posts.get(bioguide)
         stats["updated"] += 1
+    # Someone who left Congress drops out of legislators-current.
+    for official in session.query(Official).filter(Official.legislators_leadership.isnot(None)):
+        if official.id not in ids_by_bioguide:
+            official.legislators_leadership = None
+    leadership.refresh(session, log=log)
     return stats
 
 
@@ -373,7 +390,137 @@ def outside_spending_summary(results):
     return summary
 
 
-def fetch_outside_spending(fec_id, election_year):
+def fetch_outside_spending(fec_id, election_year, today=None):
+    """Support/oppose summary for one candidate's election.
+
+    A finished election uses FEC's by_candidate totals, which are complete
+    by then. A race still under way can't: those totals only count reports
+    FEC has finished processing, months behind, so they miss most of the
+    spending in a race's final stretch. It adds up the itemized expenditures
+    instead, from processed data and from filings not yet processed.
+    """
+    if is_completed(election_year, today):
+        return outside_spending_summary(fetch_outside_spending_totals(fec_id, election_year))
+    start = election_period_start(fec_id, election_year)
+    processed = fetch_processed_expenditures(fec_id, election_year, start)
+    efiled = fetch_efiled_expenditures(fec_id)
+    return outside_spending_summary(merge_expenditures(processed, efiled, start))
+
+
+def election_period_start(fec_id, election_year):
+    """First day of the period an election's spending is reported against:
+    two years for the House, four for president and six for the Senate."""
+    years = ELECTION_PERIOD_YEARS.get(fec_id[:1], 2)
+    return date(election_year - years + 1, 1, 1)
+
+
+def fetch_processed_expenditures(fec_id, election_year, start):
+    """Itemized Schedule E rows FEC has processed, for every two-year period
+    of the election. Biggest first, so a capped race only loses the smallest."""
+    params = {
+        "candidate_id": fec_id,
+        "cycle": list(range(start.year + start.year % 2, election_year + 1, 2)),
+        "per_page": 100,
+        "sort": "-expenditure_amount",
+    }
+    results = []
+    for _ in range(OUTSIDE_ITEMIZED_MAX_PAGES):
+        payload = fec_get("/schedules/schedule_e/", params=params)
+        rows = payload.get("results") or []
+        results.extend(rows)
+        last_indexes = (payload.get("pagination") or {}).get("last_indexes")
+        if not rows or not last_indexes:
+            break
+        params = {**params, **last_indexes}
+    return results
+
+
+def fetch_efiled_expenditures(fec_id):
+    """Schedule E rows from filings as they arrive, before FEC processes them.
+    FEC keeps only the last few months of these."""
+    results = []
+    for page in range(1, OUTSIDE_ITEMIZED_MAX_PAGES + 1):
+        payload = fec_get(
+            "/schedules/schedule_e/efile/",
+            params={
+                "candidate_id": fec_id,
+                "per_page": 100,
+                "page": page,
+                "sort": "-expenditure_amount",
+            },
+        )
+        results.extend(payload.get("results") or [])
+        pages = (payload.get("pagination") or {}).get("pages") or 1
+        if page >= pages:
+            break
+    return results
+
+
+def _row_date(row):
+    value = row.get("dissemination_date") or row.get("expenditure_date")
+    return value[:10] if value else None
+
+
+def merge_expenditures(processed, efiled, start):
+    """One row per expenditure, in the by_candidate shape the summary reads.
+
+    The same spending can be reported up to four times: in a 24- or 48-hour
+    notice, again in the group's next regular report, in either feed, and in
+    amendments to any of those. Kept: the latest version of each filing,
+    each transaction once, and a notice only when it falls after the latest
+    regular report that would repeat it. Memo lines repeat other entries.
+    """
+    superseded = set()
+    coverage_end = {}
+    for row in efiled:
+        filing = row.get("filing") or {}
+        latest = filing.get("most_recent_filing")
+        for number in filing.get("amendment_chain") or []:
+            if latest and number != latest:
+                superseded.add(number)
+        if filing.get("coverage_end_date"):
+            coverage_end[row.get("file_number")] = filing["coverage_end_date"][:10]
+
+    start = start.isoformat()
+    items = {}
+    for row in [*processed, *efiled]:
+        if row.get("most_recent") is False or row.get("memo_code") == "X":
+            continue
+        if row.get("file_number") in superseded:
+            continue
+        if row.get("support_oppose_indicator") not in ("S", "O"):
+            continue
+        day = _row_date(row)
+        if day and day < start:
+            continue
+        key = (row.get("committee_id"), row.get("file_number"), row.get("transaction_id"))
+        items.setdefault(key, row)
+
+    # Latest date each group's regular reports reach; a notice up to then is
+    # already counted in one of them.
+    reported_through = {}
+    for (committee_id, file_number, _), row in items.items():
+        if row.get("is_notice"):
+            continue
+        through = coverage_end.get(file_number) or _row_date(row)
+        if through and through > reported_through.get(committee_id, ""):
+            reported_through[committee_id] = through
+
+    merged = []
+    for (committee_id, _, _), row in items.items():
+        day = _row_date(row)
+        if row.get("is_notice") and day and day <= reported_through.get(committee_id, ""):
+            continue
+        merged.append({
+            "committee_id": committee_id,
+            "committee_name": (row.get("committee") or {}).get("name") or row.get("committee_name"),
+            "support_oppose_indicator": row["support_oppose_indicator"],
+            "total": row.get("expenditure_amount") or 0,
+        })
+    return merged
+
+
+def fetch_outside_spending_totals(fec_id, election_year):
     results = []
     for page in range(1, OUTSIDE_SPENDING_MAX_PAGES + 1):
         payload = fec_get(
@@ -390,7 +537,7 @@ def fetch_outside_spending(fec_id, election_year):
         pages = (payload.get("pagination") or {}).get("pages") or 1
         if page >= pages:
             break
-    return outside_spending_summary(results)
+    return results
 
 
 def outside_spending_due(row, today=None):
@@ -434,7 +581,7 @@ def sync_official_finance(session, official, today=None, fec_ids=None):
         if not row.receipts:
             continue
         if outside_spending_due(row, today):
-            row.outside_spending = fetch_outside_spending(row.fec_candidate_id, row.election_year)
+            row.outside_spending = fetch_outside_spending(row.fec_candidate_id, row.election_year, today)
             row.outside_spending_fetched_at = now
             stats["outside_spending"] += 1
         if row.size_breakdown is not None and row.breakdown_coverage_end_date == row.coverage_end_date:
@@ -1113,7 +1260,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
         "crosswalk",
-        help="Load FEC and OpenSecrets IDs onto officials from congress-legislators.",
+        help="Load FEC and OpenSecrets IDs and leadership posts onto officials from congress-legislators.",
     )
     totals = subparsers.add_parser(
         "totals",

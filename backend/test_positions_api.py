@@ -110,7 +110,8 @@ class PositionsApiTests(unittest.TestCase):
                 level="federal",
             ))
 
-        official(self.DONE, "Zzpos Alpha", first_name="Alpha", middle_name="Q.", last_name="Zzpos")
+        official(self.DONE, "Zzpos Alpha", first_name="Alpha", middle_name="Q.", last_name="Zzpos",
+                 leadership_role="House Minority Leader")
         official(self.FAILED, "Zzpos Bravo")
         official(self.NEVER, "Zzpos Charlie")
         official(self.FORMER, "Zzpos Delta", current=False)
@@ -210,11 +211,13 @@ class PositionsApiTests(unittest.TestCase):
             ("Alpha", "Q.", "Zzpos"),
         )
         self.assertEqual(detail["display_name"], "Alpha Q. Zzpos")
+        self.assertEqual(detail["leadership_role"], "House Minority Leader")
 
         for query in ("Alpha Zzpos", "Alpha Q. Zzpos"):
             rows = self.client.get("/api/officials", params={"q": query}).json()
             self.assertEqual([row["id"] for row in rows], [self.DONE])
         self.assertEqual(rows[0]["display_name"], "Alpha Q. Zzpos")
+        self.assertEqual(rows[0]["leadership_role"], "House Minority Leader")
 
         never = self.client.get(f"/api/officials/{self.NEVER}").json()
         self.assertEqual(never["display_name"], "Zzpos Charlie")

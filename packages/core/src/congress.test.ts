@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { byState, chamberMakeup, delegationSummary, houseSeatLabel, memberMatches, rosterPath, sortRoster } from './congress'
+import { byState, chamberLeaders, chamberMakeup, delegationSummary, houseSeatLabel, memberMatches, rosterPath, sortRoster } from './congress'
 import type { Official } from './types'
 
 const member = (partial: Partial<Official>) =>
@@ -42,5 +42,19 @@ describe('congress roster helpers', () => {
       member({ name: 'high', score_matches: 6, score_pct: 90 }),
     ]
     expect(sortRoster(rows, { sort: 'score', hasPositionsOnly: false }).map((m) => m.name)).toEqual(['high', 'low', 'none'])
+  })
+
+  it('lists each chamber\'s top posts, with vacancies', () => {
+    const members = [
+      member({ name: 'Johnson', office: 'Representative', party: 'Republican', leadership_role: 'Speaker of the House' }),
+      member({ name: 'Thune', office: 'Senator', party: 'Republican', leadership_role: 'Senate Majority Leader' }),
+      member({ name: 'Durbin', office: 'Senator' }),
+    ]
+    expect(chamberLeaders(members, 'Senate')?.map((p) => [p.label, p.holder?.name ?? null])).toEqual([
+      ['Majority Leader', 'Thune'],
+      ['Minority Leader', null],
+    ])
+    expect(chamberLeaders(members, 'House')?.map((p) => p.holder?.name ?? null)).toEqual(['Johnson', null, null])
+    expect(chamberLeaders([member({ name: 'x' })], 'House')).toBeNull()
   })
 })

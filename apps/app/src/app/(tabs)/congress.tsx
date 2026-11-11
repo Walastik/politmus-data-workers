@@ -1,6 +1,7 @@
 import {
   CONGRESS_VIEWS,
   byState,
+  chamberLeaders,
   chamberMakeup,
   delegationSummary,
   houseSeatLabel,
@@ -9,6 +10,7 @@ import {
   sortRoster,
   splitChambers,
   type CongressView,
+  type LeadershipPost,
   type RosterSort,
 } from '@politmus/core/congress'
 import {
@@ -16,6 +18,8 @@ import {
   ROSTER_STATUS_FILTERS,
   STATE_OPTIONS,
   officeLine,
+  officialName,
+  partyShort,
   rosterStatusLabel,
   type Official,
   type RosterStatusFilter,
@@ -29,6 +33,7 @@ import MemberRow from '@/components/MemberRow'
 import OptionSheet from '@/components/OptionSheet'
 import { Chip, SearchField } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
+import { openProfile } from '@/lib/links'
 import { pageMetadata } from '@/lib/metadata'
 import { useCurrentMembers, useRoster } from '@/lib/queries'
 
@@ -62,8 +67,13 @@ export default function CongressScreen() {
       </Text>
       {members.data ? (
         <View className="gap-3">
-          <ChamberSummary title="Senate" members={chambers.senators} />
-          <ChamberSummary title="House" members={chambers.voting} note={`plus ${chambers.delegates} non-voting delegates`} />
+          <ChamberSummary title="Senate" members={chambers.senators} leaders={chamberLeaders(members.data, 'Senate')} />
+          <ChamberSummary
+            title="House"
+            members={chambers.voting}
+            leaders={chamberLeaders(members.data, 'House')}
+            note={`plus ${chambers.delegates} non-voting delegates`}
+          />
         </View>
       ) : null}
       <View className="flex-row rounded-lg border border-slate-700 bg-slate-800/60 p-1">
@@ -132,7 +142,17 @@ export default function CongressScreen() {
   )
 }
 
-function ChamberSummary({ title, members, note }: { title: string; members: Official[]; note?: string }) {
+function ChamberSummary({
+  title,
+  members,
+  leaders,
+  note,
+}: {
+  title: string
+  members: Official[]
+  leaders: LeadershipPost[] | null
+  note?: string
+}) {
   const { segments, scored } = chamberMakeup(members)
   return (
     <View accessibilityLabel={`${title} makeup`} className="rounded-xl border border-slate-700 bg-slate-800/40 p-4">
@@ -155,10 +175,45 @@ function ChamberSummary({ title, members, note }: { title: string; members: Offi
           </Text>
         ))}
       </View>
+      {leaders ? (
+        <View accessibilityLabel={`${title} leadership`} className="mt-3 gap-1.5 border-t border-slate-700/70 pt-3">
+          {leaders.map((post) => (
+            <LeaderLine key={post.title} post={post} />
+          ))}
+        </View>
+      ) : null}
       <Text className="mt-2 text-xs text-slate-500">
         {scored} of {members.length} have a Politmus Score so far.
       </Text>
     </View>
+  )
+}
+
+// "Speaker   Mike Johnson (R)", opening their profile; "Vacant" when no one holds the post.
+function LeaderLine({ post }: { post: LeadershipPost }) {
+  const { holder } = post
+  const label = <Text className="w-32 text-xs text-slate-500">{post.label}</Text>
+  if (!holder) {
+    return (
+      <View accessible accessibilityLabel={`${post.title}: vacant`} className="flex-row items-baseline gap-2">
+        {label}
+        <Text className="flex-1 text-sm text-slate-400">Vacant</Text>
+      </View>
+    )
+  }
+  const name = officialName(holder)
+  return (
+    <Pressable
+      onPress={() => openProfile(holder)}
+      accessibilityRole="button"
+      accessibilityLabel={`${post.title}: ${name}, ${partyShort(holder.party)}`}
+      className="flex-row items-baseline gap-2 active:opacity-70"
+    >
+      {label}
+      <Text className="flex-1 text-sm text-blue-400" numberOfLines={1}>
+        {name} <Text className="text-slate-400">({partyShort(holder.party)})</Text>
+      </Text>
+    </Pressable>
   )
 }
 
