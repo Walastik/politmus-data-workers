@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -17,6 +18,7 @@ from mac_mini_report import (
     fixes,
     kind_of,
     load_events,
+    ollama_host,
     parse_step_log,
     prune,
     publish,
@@ -246,6 +248,22 @@ class FilesTests(unittest.TestCase):
         latest = subprocess.run(["git", "--git-dir", str(remote), "show", "mac-mini-reports:latest.md"],
                                 capture_output=True, text=True, check=True).stdout
         self.assertEqual(latest, "day two\n")
+
+
+class OllamaHostTests(unittest.TestCase):
+    def test_adds_scheme_and_port_like_ollama(self):
+        cases = {
+            None: "http://localhost:11434",
+            "0.0.0.0:11434": "http://0.0.0.0:11434",
+            "0.0.0.0": "http://0.0.0.0:11434",
+            "http://10.0.0.5:11434/": "http://10.0.0.5:11434",
+        }
+        for value, expected in cases.items():
+            env = {} if value is None else {"OLLAMA_HOST": value}
+            with mock.patch.dict(os.environ, env, clear=False):
+                if value is None:
+                    os.environ.pop("OLLAMA_HOST", None)
+                self.assertEqual(ollama_host(), expected, value)
 
 
 if __name__ == "__main__":
