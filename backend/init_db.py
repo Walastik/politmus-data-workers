@@ -89,6 +89,13 @@ def ensure_schema():
             conn.execute(text(
                 f"ALTER TABLE officials ADD COLUMN IF NOT EXISTS {column_sql}"
             ))
+        # Top posts in Congress (services/leadership.py).
+        for column_sql in (
+            "leadership_role VARCHAR", "legislators_leadership VARCHAR", "congress_gov_leadership JSONB",
+        ):
+            conn.execute(text(
+                f"ALTER TABLE officials ADD COLUMN IF NOT EXISTS {column_sql}"
+            ))
         conn.execute(text(
             "ALTER TABLE pac_contribution_sync ADD COLUMN IF NOT EXISTS latest_receipt_date DATE"
         ))

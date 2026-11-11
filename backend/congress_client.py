@@ -13,6 +13,7 @@ from api.filters import classify_bipartisan_type, normalize_party, normalize_sta
 from database import SessionLocal
 from init_db import ensure_schema
 from models import Bill, Official, RollCall, SenateRollCall, Vote
+from services import leadership
 from services.bill_analytics import refresh_bill_velocity
 from services.feed_events import (
     record_bill_events,
@@ -989,6 +990,8 @@ def upsert_official(session, incoming):
     if incoming.photo_url:
         existing.photo_url = incoming.photo_url
         existing.photo_attribution = incoming.photo_attribution
+    if incoming.congress_gov_leadership is not None:
+        existing.congress_gov_leadership = incoming.congress_gov_leadership
     return existing
 
 
@@ -1024,8 +1027,10 @@ def save_officials(members):
 
             print(f"[{index}/{total}] Fetching member {bioguide_id}...")
             source = member
+            detail = None
             try:
-                source = _combine_member_payloads(member, fetch_member(bioguide_id))
+                detail = fetch_member(bioguide_id)
+                source = _combine_member_payloads(member, detail)
             except requests.HTTPError as exc:
                 status = getattr(exc.response, "status_code", "?")
                 print(f"  HTTP {status} for {bioguide_id}; using list payload.")
@@ -1039,6 +1044,9 @@ def save_officials(members):
             )
             if official is None:
                 continue
+            # Only the detail lists leadership; keep the stored value without it.
+            if detail is not None:
+                official.congress_gov_leadership = leadership.congress_gov_types(detail)
 
             previous = session.get(Official, official.id)
             was_current = previous is not None and previous.current_member
@@ -1075,6 +1083,8 @@ def save_officials(members):
                 "(contact fields may be missing for those officials)."
             )
 
+        session.flush()
+        leadership.refresh(session)
         session.commit()
         return saved
     except Exception:

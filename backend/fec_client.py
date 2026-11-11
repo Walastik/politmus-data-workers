@@ -1,6 +1,7 @@
 """Campaign finance for federal officials from the OpenFEC API.
 
-crosswalk: load bioguide -> FEC candidate IDs (and OpenSecrets IDs) from
+crosswalk: load bioguide -> FEC candidate IDs (and OpenSecrets IDs) and the
+    top leadership posts (services/leadership.py) from
     unitedstates/congress-legislators onto officials.
 totals: fetch per-election totals for each current member, plus donation-size
     and donor-state breakdowns for their most recent elections.
@@ -40,7 +41,7 @@ from models import Candidacy, Official, OfficialFinanceTotal, PacContribution, P
 from services.candidate_races import (
     CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle, general_election_date,
 )
-from services import ballot_nominees
+from services import ballot_nominees, leadership
 from services.finance_insights import election_periods, is_completed, pac_category
 
 BASE_URL = "https://api.open.fec.gov/v1"
@@ -216,8 +217,13 @@ def crosswalk_ids(legislators):
     return ids_by_bioguide
 
 
-def apply_crosswalk(session, legislators):
+def apply_crosswalk(session, legislators, today=None, log=print):
+    """Load FEC and OpenSecrets IDs and the top leadership posts onto officials."""
     ids_by_bioguide = crosswalk_ids(legislators)
+    posts = {
+        (legislator.get("id") or {}).get("bioguide"): leadership.legislators_post(legislator, today)
+        for legislator in legislators
+    }
     stats = {"legislators": len(ids_by_bioguide), "updated": 0, "not_in_officials": 0}
     for bioguide, (fec_ids, opensecrets_id) in ids_by_bioguide.items():
         official = session.get(Official, bioguide)
@@ -226,7 +232,13 @@ def apply_crosswalk(session, legislators):
             continue
         official.fec_candidate_ids = fec_ids or None
         official.opensecrets_id = opensecrets_id
+        official.legislators_leadership = posts.get(bioguide)
         stats["updated"] += 1
+    # Someone who left Congress drops out of legislators-current.
+    for official in session.query(Official).filter(Official.legislators_leadership.isnot(None)):
+        if official.id not in ids_by_bioguide:
+            official.legislators_leadership = None
+    leadership.refresh(session, log=log)
     return stats
 
 
@@ -1248,7 +1260,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
         "crosswalk",
-        help="Load FEC and OpenSecrets IDs onto officials from congress-legislators.",
+        help="Load FEC and OpenSecrets IDs and leadership posts onto officials from congress-legislators.",
     )
     totals = subparsers.add_parser(
         "totals",

@@ -14,7 +14,7 @@ export default function MemberRow({ official, subtitle, status }: { official: Of
     <Pressable
       onPress={() => openProfile(official)}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, ${partyShort(official.party)}${subtitle ? `, ${subtitle}` : ''}`}
+      accessibilityLabel={[name, partyShort(official.party), official.leadership_role, subtitle].filter(Boolean).join(', ')}
       className={`flex-row items-center gap-2.5 rounded-md border-l-2 bg-slate-800/70 px-2.5 py-2 active:bg-slate-700/70 ${partyEdgeClass(official.party)}`}
     >
       <OfficialPhoto url={official.photo_url} name={name} party={official.party} size="sm" />
@@ -24,6 +24,7 @@ export default function MemberRow({ official, subtitle, status }: { official: Of
         </Text>
         <Text className="text-[11px] text-slate-400" numberOfLines={1}>
           {partyShort(official.party)}
+          {official.leadership_role ? <Text className="text-slate-200"> · {official.leadership_role}</Text> : null}
           {subtitle ? ` · ${subtitle}` : ''}
           {status ? ` · ${status}` : ''}
         </Text>
