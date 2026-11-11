@@ -68,7 +68,7 @@ export function Legend({
 }
 
 function Label({ children }: { children: ReactNode }) {
-  return <Text className="text-[11px] text-slate-400">{children}</Text>
+  return <Text className="font-sans text-[11px] text-slate-400">{children}</Text>
 }
 
 function Item({ swatch, children }: { swatch?: ReactNode; children: ReactNode }) {

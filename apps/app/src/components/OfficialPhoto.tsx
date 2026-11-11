@@ -45,7 +45,7 @@ export default function OfficialPhoto({
 
   return (
     <View className={`${frame} items-center justify-center ${partyBadgeClass(party ?? '')}`}>
-      <Text className={`font-semibold ${TEXT_CLASS[size]} ${partyBadgeClass(party ?? '')}`}>{initials(name)}</Text>
+      <Text className={`font-sans-semibold ${TEXT_CLASS[size]} ${partyBadgeClass(party ?? '')}`}>{initials(name)}</Text>
     </View>
   )
 }

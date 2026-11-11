@@ -35,7 +35,7 @@ export default function VoteTally({
   compact?: boolean
 }) {
   if (voteTotal(summary) === 0) {
-    return <Text className="text-xs text-slate-500">No recorded votes</Text>
+    return <Text className="font-sans text-xs text-slate-500">No recorded votes</Text>
   }
   return (
     <View className={compact ? 'gap-2' : 'gap-4'}>
@@ -58,7 +58,7 @@ export default function VoteTally({
         compact={compact}
       />
       {compact ? null : (
-        <Text className="text-[10px] text-slate-600">
+        <Text className="font-sans text-[10px] text-slate-600">
           {rollCalls ? 'Latest vote on passage in each chamber, or the latest vote if none' : 'Latest roll call stored for each chamber'}
         </Text>
       )}
@@ -87,22 +87,22 @@ function ChamberTally({
   if (total === 0) {
     return (
       <View>
-        <Text className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</Text>
-        <Text className="mt-1 text-xs text-slate-500">No recorded votes</Text>
+        <Text className="text-[10px] font-sans-semibold uppercase tracking-wider text-slate-500">{label}</Text>
+        <Text className="font-sans mt-1 text-xs text-slate-500">No recorded votes</Text>
       </View>
     )
   }
   const note = rollCall ? voteKindNote(rollCall) : null
   return (
     <View>
-      <Text className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</Text>
+      <Text className="text-[10px] font-sans-semibold uppercase tracking-wider text-slate-500">{label}</Text>
       {rollCall ? (
         note ? (
-          <Text className="mt-1 rounded border border-sky-700/40 bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200">
-            <Text className="font-semibold">{rollCall.vote_kind === 'amendment' ? 'Amendment vote.' : 'Procedural vote.'}</Text> {note}
+          <Text className="font-sans mt-1 rounded border border-sky-700/40 bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200">
+            <Text className="font-sans-semibold">{rollCall.vote_kind === 'amendment' ? 'Amendment vote.' : 'Procedural vote.'}</Text> {note}
           </Text>
         ) : (
-          <Text className="mt-0.5 text-[11px] text-slate-500">Vote on passage</Text>
+          <Text className="font-sans mt-0.5 text-[11px] text-slate-500">Vote on passage</Text>
         )
       ) : null}
       <View className="mt-1.5 h-2 flex-row overflow-hidden rounded bg-slate-700">
@@ -110,10 +110,10 @@ function ChamberTally({
         <View className="bg-red-500" style={{ width: `${noPct}%` }} />
       </View>
       <View className="mt-1.5 flex-row flex-wrap gap-x-3 gap-y-1">
-        <Text className="text-xs text-emerald-400">{yes} Yes</Text>
-        <Text className="text-xs text-red-400">{no} No</Text>
-        {present > 0 ? <Text className="text-xs text-slate-400">{present} Present</Text> : null}
-        {notVoting > 0 ? <Text className="text-xs text-slate-400">{notVoting} NV</Text> : null}
+        <Text className="font-sans text-xs text-emerald-400">{yes} Yes</Text>
+        <Text className="font-sans text-xs text-red-400">{no} No</Text>
+        {present > 0 ? <Text className="font-sans text-xs text-slate-400">{present} Present</Text> : null}
+        {notVoting > 0 ? <Text className="font-sans text-xs text-slate-400">{notVoting} NV</Text> : null}
       </View>
       {compact ? null : (
         <View className="mt-3 flex-row">
@@ -153,9 +153,9 @@ function PartyPie({
         )}
       </Svg>
       <View className={`rounded px-1.5 ${partyBadgeClass(party)}`}>
-        <Text className={`text-[10px] font-semibold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
+        <Text className={`text-[10px] font-sans-semibold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
       </View>
-      <Text className="text-[10px] text-slate-400">
+      <Text className="font-sans text-[10px] text-slate-400">
         <Text className="text-emerald-400">{yes}Y</Text> · <Text className="text-red-400">{no}N</Text>
       </Text>
     </Pressable>

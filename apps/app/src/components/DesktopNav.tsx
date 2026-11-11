@@ -25,7 +25,7 @@ export default function DesktopNav({ state, navigateToTab, items }: BottomTabBar
       <View className="h-14 w-full max-w-6xl flex-row items-center gap-6 self-center px-6">
         <Pressable onPress={() => go('home')} accessibilityRole="link" className="flex-row items-center gap-2">
           <Monogram size={26} />
-          <Text className="text-lg font-bold tracking-tight text-slate-50">Politmus</Text>
+          <Text className="font-display text-lg tracking-tight text-slate-50">Politmus</Text>
         </Pressable>
         <View accessibilityRole="tablist" accessibilityLabel="Primary" className="flex-1 flex-row items-center gap-1">
           {items.map(({ name, title, Icon }) => {
@@ -39,7 +39,7 @@ export default function DesktopNav({ state, navigateToTab, items }: BottomTabBar
                 className={`flex-row items-center gap-1.5 rounded-md px-3 py-1.5 ${active ? 'bg-slate-800' : 'hover:bg-slate-800/60'}`}
               >
                 <Icon size={16} colorClassName={active ? 'accent-white' : 'accent-slate-400'} />
-                <Text className={`text-sm font-medium ${active ? 'text-white' : 'text-slate-400'}`}>{title}</Text>
+                <Text className={`text-sm font-sans-medium ${active ? 'text-white' : 'text-slate-400'}`}>{title}</Text>
               </Pressable>
             )
           })}

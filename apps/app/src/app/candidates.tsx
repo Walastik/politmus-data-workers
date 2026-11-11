@@ -83,7 +83,7 @@ export default function CandidatesScreen() {
         renderItem={({ item }) => <RaceCard race={item} showAll={filters.showAll} />}
         ListHeaderComponent={
           <View className="gap-3 px-4 pt-4 pb-3">
-            <Text className="text-sm text-slate-400">
+            <Text className="font-sans text-sm text-slate-400">
               Everyone running for Congress this cycle, by race, with where they stand and who funds them.
             </Text>
             <SearchField value={nameQuery} onChangeText={setNameQuery} placeholder="Search candidates by name" label="Search candidates by name" />
@@ -94,7 +94,7 @@ export default function CandidatesScreen() {
                 accessibilityLabel={`Filter by state: ${stateLabel}`}
                 className="flex-row items-center gap-1 rounded-full border border-slate-700 bg-slate-800 px-3 py-1"
               >
-                <Text className="text-xs font-medium text-slate-200">{stateLabel}</Text>
+                <Text className="text-xs font-sans-medium text-slate-200">{stateLabel}</Text>
                 <Icons.ChevronDown size={12} colorClassName="accent-slate-400" />
               </Pressable>
               {OFFICE_FILTERS.map((option) => (
@@ -114,7 +114,7 @@ export default function CandidatesScreen() {
             </View>
             {page && items.length > 0 ? (
               <View className="gap-1">
-                <Text className="text-sm text-slate-400">{racesSummary(page, Boolean(filters.state))}</Text>
+                <Text className="font-sans text-sm text-slate-400">{racesSummary(page, Boolean(filters.state))}</Text>
                 <SourceNote text={racesSourceNote(page)} />
               </View>
             ) : null}
@@ -132,7 +132,7 @@ export default function CandidatesScreen() {
           races.isPending ? (
             <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
           ) : (
-            <Text className={`px-4 ${races.isError ? 'text-red-400' : 'text-slate-400'}`}>
+            <Text className={`font-sans px-4 ${races.isError ? 'text-red-400' : 'text-slate-400'}`}>
               {races.isError ? `${races.error.message}. Check your connection and try again.` : 'No races match this filter.'}
             </Text>
           )
@@ -145,7 +145,7 @@ export default function CandidatesScreen() {
               accessibilityRole="button"
               className={`mx-4 mb-8 items-center rounded border border-slate-700 bg-slate-800 py-2.5 ${races.isFetching ? 'opacity-60' : ''}`}
             >
-              <Text className="text-sm text-slate-300">
+              <Text className="font-sans text-sm text-slate-300">
                 {races.isFetching ? 'Loading…' : `Show more races (${page.total_count - items.length} left)`}
               </Text>
             </Pressable>
@@ -162,10 +162,10 @@ function SourceNote({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   return (
     <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityHint="Shows the full source note">
-      <Text className="text-xs text-slate-500" numberOfLines={open ? undefined : 3}>
+      <Text className="font-sans text-xs text-slate-500" numberOfLines={open ? undefined : 3}>
         {text}
       </Text>
-      {open ? null : <Text className="mt-0.5 text-xs font-medium text-blue-400">More about the sources</Text>}
+      {open ? null : <Text className="mt-0.5 text-xs font-sans-medium text-blue-400">More about the sources</Text>}
     </Pressable>
   )
 }
@@ -176,8 +176,8 @@ function RaceCard({ race, showAll }: { race: Race; showAll: boolean }) {
   const columns = useGridColumns()
   return (
     <View accessibilityLabel={raceTitle(race)} className="mx-4 mb-4 rounded-xl border border-slate-700 bg-slate-800/40 p-4">
-      <Text className="text-base font-semibold text-slate-100">{raceTitle(race)}</Text>
-      <Text className="mt-0.5 text-xs text-slate-400">{raceRaisedLine(race)}</Text>
+      <Text className="text-base font-sans-semibold text-slate-100">{raceTitle(race)}</Text>
+      <Text className="font-sans mt-0.5 text-xs text-slate-400">{raceRaisedLine(race)}</Text>
       <View className={columns > 1 ? '-mx-1.5 mt-1.5 flex-row flex-wrap' : 'mt-3 gap-3'}>
         {race.candidates.map((candidate) => (
           <View key={candidate.fec_candidate_id} style={gridCellStyle(columns)}>
@@ -190,7 +190,7 @@ function RaceCard({ race, showAll }: { race: Race; showAll: boolean }) {
           </View>
         ))}
       </View>
-      {hidden && !showAll ? <Text className="mt-3 text-xs text-slate-500">{hidden}</Text> : null}
+      {hidden && !showAll ? <Text className="font-sans mt-3 text-xs text-slate-500">{hidden}</Text> : null}
     </View>
   )
 }
@@ -212,10 +212,10 @@ function CandidateCard({ candidate, race, share }: { candidate: RaceCandidate; r
           <View className="flex-row items-center gap-2">
             {party ? (
               <View className={`rounded px-1.5 py-0.5 ${partyBadgeClass(party)}`}>
-                <Text className={`text-[10px] font-bold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
+                <Text className={`text-[10px] font-sans-bold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
               </View>
             ) : null}
-            <Text className="flex-1 text-sm font-semibold text-slate-100" numberOfLines={1}>
+            <Text className="flex-1 text-sm font-sans-semibold text-slate-100" numberOfLines={1}>
               {name}
             </Text>
           </View>
@@ -223,7 +223,7 @@ function CandidateCard({ candidate, race, share }: { candidate: RaceCandidate; r
             <View className="mt-1 flex-row flex-wrap gap-1">
               {tags.map((tag) => (
                 <View key={tag.label} className={`rounded border px-1.5 py-0.5 ${CANDIDATE_TAG_TONES[tag.tone]}`}>
-                  <Text className={`text-[10px] font-semibold ${CANDIDATE_TAG_TONES[tag.tone]}`}>{tag.label}</Text>
+                  <Text className={`text-[10px] font-sans-semibold ${CANDIDATE_TAG_TONES[tag.tone]}`}>{tag.label}</Text>
                 </View>
               ))}
             </View>
@@ -232,12 +232,12 @@ function CandidateCard({ candidate, race, share }: { candidate: RaceCandidate; r
       </View>
       <View className="mt-3 flex-row gap-2">
         <View className="flex-1">
-          <Text className="text-xs text-slate-500">Raised</Text>
-          <Text className="text-xs font-semibold text-slate-100">{formatCompactMoney(candidate.receipts)}</Text>
+          <Text className="font-sans text-xs text-slate-500">Raised</Text>
+          <Text className="text-xs font-sans-semibold text-slate-100">{formatCompactMoney(candidate.receipts)}</Text>
         </View>
         <View className="flex-1">
-          <Text className="text-xs text-slate-500">Cash on hand</Text>
-          <Text className="text-xs font-semibold text-slate-100">{formatCompactMoney(candidate.cash_on_hand)}</Text>
+          <Text className="font-sans text-xs text-slate-500">Cash on hand</Text>
+          <Text className="text-xs font-sans-semibold text-slate-100">{formatCompactMoney(candidate.cash_on_hand)}</Text>
         </View>
       </View>
       <View className="mt-2 h-1.5 overflow-hidden rounded bg-slate-900">

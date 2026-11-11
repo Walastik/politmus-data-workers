@@ -53,7 +53,7 @@ export function Face({
   }
   return (
     <View style={frame} className="items-center justify-center" accessible={false}>
-      <Text style={{ fontSize: Math.max(9, size * 0.36) }} className="font-extrabold text-slate-300">
+      <Text style={{ fontSize: Math.max(9, size * 0.36) }} className="font-sans-extrabold text-slate-300">
         {initials(name)}
       </Text>
     </View>

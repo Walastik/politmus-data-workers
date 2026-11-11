@@ -36,7 +36,7 @@ export default function LookupResults({ lookup }: { lookup: CivicLookup }) {
         {federal.length ? (
           <RepresentativeList representatives={federal} fallbackState={fallbackState} />
         ) : (
-          <Text className="text-sm text-slate-500">No members of Congress found for this address.</Text>
+          <Text className="font-sans text-sm text-slate-500">No members of Congress found for this address.</Text>
         )}
       </OfficeSection>
 
@@ -78,10 +78,10 @@ export function FederalRepsStrip({ lookup }: { lookup: CivicLookup }) {
           >
             <OfficialPhoto url={rep.photo_url} name={name} party={rep.party} size="sm" />
             <View className="min-w-0 flex-1">
-              <Text className="text-sm font-medium text-slate-100" numberOfLines={1}>
+              <Text className="text-sm font-sans-medium text-slate-100" numberOfLines={1}>
                 {name}
               </Text>
-              <Text className="text-[11px] text-slate-400" numberOfLines={1}>
+              <Text className="font-sans text-[11px] text-slate-400" numberOfLines={1}>
                 {rep.party ? `${partyShort(rep.party)} · ` : ''}
                 {rep.office}
               </Text>
@@ -97,8 +97,8 @@ export function FederalRepsStrip({ lookup }: { lookup: CivicLookup }) {
 function OfficeSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
     <View>
-      <Text className="text-sm font-semibold uppercase tracking-wider text-slate-300">{title}</Text>
-      {description ? <Text className="mt-1 text-sm text-slate-400">{description}</Text> : null}
+      <Text className="text-sm font-sans-semibold uppercase tracking-wider text-slate-300">{title}</Text>
+      {description ? <Text className="font-sans mt-1 text-sm text-slate-400">{description}</Text> : null}
       <View className="mt-4">{children}</View>
     </View>
   )
@@ -148,12 +148,12 @@ function RepresentativeCard({
           <View className="flex-row flex-wrap items-center gap-2">
             {party ? (
               <View className={`rounded px-2 py-0.5 ${partyBadgeClass(party)}`}>
-                <Text className={`text-xs font-bold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
+                <Text className={`text-xs font-sans-bold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
               </View>
             ) : null}
-            <Text className="text-base font-semibold text-slate-100">{name}</Text>
+            <Text className="text-base font-sans-semibold text-slate-100">{name}</Text>
           </View>
-          <Text className="mt-1 text-xs text-slate-400">
+          <Text className="font-sans mt-1 text-xs text-slate-400">
             {representative.office}
             {district ? ` · ${district}` : stateLabel ? ` · ${stateLabel}` : ''}
           </Text>
@@ -168,20 +168,20 @@ function RepresentativeCard({
         />
       )}
       {!stateLevel && representative.score_matches == null ? (
-        <Text className="mt-3 text-[11px] text-slate-500">Politmus Score: no stated positions to score yet</Text>
+        <Text className="font-sans mt-3 text-[11px] text-slate-500">Politmus Score: no stated positions to score yet</Text>
       ) : null}
 
       <View className="mt-3 flex-row flex-wrap items-center gap-x-4 gap-y-2">
         {phone ? (
           <Pressable onPress={() => openUrl(`tel:${phone}`)} accessibilityRole="link" className="flex-row items-center gap-1.5">
             <Icons.Phone size={14} colorClassName="accent-slate-300" />
-            <Text className="text-xs text-slate-300">{phone}</Text>
+            <Text className="font-sans text-xs text-slate-300">{phone}</Text>
           </Pressable>
         ) : null}
         {website ? (
           <Pressable onPress={() => openUrl(website)} accessibilityRole="link" className="flex-row items-center gap-1.5">
             <Icons.Globe size={14} colorClassName="accent-slate-300" />
-            <Text className="text-xs text-slate-300" numberOfLines={1}>
+            <Text className="font-sans text-xs text-slate-300" numberOfLines={1}>
               {websiteLabel(website)}
             </Text>
           </Pressable>
@@ -193,7 +193,7 @@ function RepresentativeCard({
             accessibilityLabel={`Full profile: ${name}`}
             className="ml-auto flex-row items-center gap-0.5"
           >
-            <Text className="text-xs font-semibold text-blue-400">Full profile</Text>
+            <Text className="text-xs font-sans-semibold text-blue-400">Full profile</Text>
             <Icons.ChevronRight size={14} colorClassName="accent-blue-400" />
           </Pressable>
         ) : null}

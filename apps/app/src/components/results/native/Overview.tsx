@@ -33,7 +33,7 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
     const states = Object.values(snapshot.states).filter((s) => houseRaces(s).length)
     return (
       <Panel>
-        <Text accessibilityRole="header" className="text-xl font-extrabold text-slate-100">
+        <Text accessibilityRole="header" className="text-xl font-display text-slate-100">
           House races we’re counting
         </Text>
         <Source>
@@ -45,12 +45,12 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
           <View key={s.state}>
             <Row onPress={onSelect && (() => onSelect(s.state))} label={`${s.name} House results`}>
               <View className="min-w-0 flex-1 flex-row items-center">
-                <Text className="text-sm font-bold text-slate-100">{s.name}</Text>
+                <Text className="text-sm font-sans-bold text-slate-100">{s.name}</Text>
                 {isAggregated(s) ? <AggTag /> : null}
               </View>
               <View className="flex-row gap-2">
                 {houseTally(s).map((t) => (
-                  <Text key={t.party} style={{ color: PARTY_COLOR[t.party] }} className="text-sm font-bold">
+                  <Text key={t.party} style={{ color: PARTY_COLOR[t.party] }} className="text-sm font-sans-bold">
                     {PARTY_SHORT[t.party]} {t.leading}
                   </Text>
                 ))}
@@ -84,14 +84,14 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
             >
               <View className="min-w-0 flex-1 flex-row items-center gap-2">
                 <Dot color={color} />
-                <Text numberOfLines={1} className="min-w-0 shrink text-sm text-slate-500">
-                  <Text className="font-bold text-slate-100">{s.name}</Text> {standing.leader?.name}
+                <Text numberOfLines={1} className="font-sans min-w-0 shrink text-sm text-slate-500">
+                  <Text className="font-sans-bold text-slate-100">{s.name}</Text> {standing.leader?.name}
                 </Text>
                 {isAggregated(s) ? <AggTag /> : null}
               </View>
               <View className="flex-row items-center gap-2">
                 <RaceStatusBadge race={race} />
-                <Text style={{ color, fontVariant: ['tabular-nums'] }} className="text-sm font-bold">
+                <Text style={{ color, fontVariant: ['tabular-nums'] }} className="text-sm font-sans-bold">
                   {formatMargin(standing.margin)}
                 </Text>
               </View>
@@ -116,7 +116,7 @@ export function Overview({ snapshot, office, onSelect }: { snapshot: ResultsSnap
                 accessibilityRole={onSelect ? 'button' : undefined}
                 className="min-h-[44px] grow basis-[45%] flex-row items-center justify-between gap-2 rounded-[10px] bg-[#1a2540] px-2.5 py-2"
               >
-                <Text className="text-sm text-slate-200">{info.stateName}</Text>
+                <Text className="font-sans text-sm text-slate-200">{info.stateName}</Text>
                 <View className="flex-row">
                   {info.candidates.slice(0, 3).map((c, i) => (
                     <View key={c.name} style={{ marginLeft: i ? -6 : 0 }}>
@@ -165,7 +165,7 @@ export function SeatGrid({
             style={{ backgroundColor: standing.leader ? partyTint(standing.leader.party, standing.margin) : '#1e293b' }}
             className={`h-11 w-11 items-center justify-center rounded-[9px] border ${selected === key ? 'border-slate-200' : 'border-transparent'}`}
           >
-            <Text className="text-xs font-extrabold text-slate-100">{race.district}</Text>
+            <Text className="text-xs font-sans-extrabold text-slate-100">{race.district}</Text>
             {flip ? (
               <View className="absolute -right-[3px] -top-[3px] h-2.5 w-2.5 rounded-full border-2 border-[#131d33] bg-amber-200" />
             ) : null}
@@ -173,7 +173,7 @@ export function SeatGrid({
               <View
                 className={`absolute bottom-0.5 right-0.5 h-[11px] w-[11px] items-center justify-center rounded-full ${status === 'certified' ? 'bg-slate-200' : 'border border-white/80'}`}
               >
-                <Text className={`text-[7px] font-extrabold ${status === 'certified' ? 'text-slate-900' : 'text-white'}`}>✓</Text>
+                <Text className={`text-[7px] font-sans-extrabold ${status === 'certified' ? 'text-slate-900' : 'text-white'}`}>✓</Text>
               </View>
             )}
           </Pressable>
@@ -196,14 +196,14 @@ export function Panel({ children }: { children: ReactNode }) {
 
 export function Heading({ children }: { children: ReactNode }) {
   return (
-    <Text accessibilityRole="header" className="text-xs font-bold uppercase tracking-widest text-slate-500">
+    <Text accessibilityRole="header" className="text-xs font-display uppercase tracking-widest text-slate-500">
       {children}
     </Text>
   )
 }
 
 export function Source({ children }: { children: ReactNode }) {
-  return <Text className="text-xs leading-[18px] text-slate-500">{children}</Text>
+  return <Text className="font-sans text-xs leading-[18px] text-slate-500">{children}</Text>
 }
 
 export function Dot({ color }: { color: string }) {
@@ -213,7 +213,7 @@ export function Dot({ color }: { color: string }) {
 export function AggTag() {
   return (
     <View className="ml-1.5 rounded-full border border-dashed border-amber-300/60 px-1.5">
-      <Text className="text-[10px] font-bold text-amber-300">civicAPI</Text>
+      <Text className="text-[10px] font-sans-bold text-amber-300">civicAPI</Text>
     </View>
   )
 }

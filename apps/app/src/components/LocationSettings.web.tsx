@@ -26,11 +26,11 @@ export default function LocationSettings() {
   }
 
   return (
-    <div className="p-4">
-      <h3 className="mb-4 text-lg font-semibold">Location Settings</h3>
+    <div className="p-4 font-sans">
+      <h3 className="mb-4 font-display-semibold text-lg">Location Settings</h3>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="address" className="mb-1 block text-sm font-medium text-slate-300">
+          <label htmlFor="address" className="mb-1 block text-sm font-sans-medium text-slate-300">
             Saved Address
           </label>
           <input
@@ -45,7 +45,7 @@ export default function LocationSettings() {
         <button
           type="submit"
           disabled={isSaving}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+          className="rounded bg-blue-600 px-4 py-2 text-sm font-sans-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
           {isSaving ? 'Saving...' : 'Save Address'}
         </button>
