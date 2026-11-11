@@ -31,6 +31,9 @@ class OfficialOut(BaseModel):
     photo_attribution: Optional[str] = None
     level: str = "federal"
     openstates_id: Optional[str] = None
+    # A top post in Congress ("Speaker of the House", "Senate Majority
+    # Leader"); None for everyone else (services/leadership.py).
+    leadership_role: Optional[str] = None
     # Stated-positions worker status and saved count; None when not attempted.
     positions_status: Optional[str] = None
     positions_count: Optional[int] = None

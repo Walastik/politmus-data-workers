@@ -46,8 +46,16 @@ class Official(Base):
     # {"description", "birth_date", "occupations": [...], "education": [...],
     #  "positions_held": [...]}.
     bio = Column(JSONB, nullable=True)
+    # Top posts in Congress (services/leadership.py): the title the app shows
+    # ("Speaker of the House"), resolved from the two sources below.
+    leadership_role = Column(String, nullable=True)
+    # The top post congress-legislators lists (fec_client.py crosswalk).
+    legislators_leadership = Column(String, nullable=True)
+    # Congress.gov member detail leadership types marked current, e.g.
+    # ["Majority Leader"]; None until the member sync has fetched the detail.
+    congress_gov_leadership = Column(JSONB, nullable=True)
 
-    bills = relationship("Bill", back_populates="sponsor")
+    bills =relationship("Bill", back_populates="sponsor")
 
     @property
     def display_name(self):

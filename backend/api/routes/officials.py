@@ -323,6 +323,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         photo_attribution=official.photo_attribution,
         level=official.level or "federal",
         openstates_id=official.openstates_id,
+        leadership_role=official.leadership_role,
         votes=[
             OfficialVoteOut(
                 bill_id=bill.id,
