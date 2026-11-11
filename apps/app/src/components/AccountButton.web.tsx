@@ -22,8 +22,8 @@ export default function AccountButton({ subtle = false }: { subtle?: boolean }) 
             type="button"
             className={
               subtle
-                ? 'rounded-md bg-blue-600 px-6 py-2.5 font-semibold text-white opacity-0 transition-opacity duration-300 hover:opacity-100'
-                : 'rounded-md px-3 py-1.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white'
+                ? 'rounded-md bg-blue-600 px-6 py-2.5 font-sans-semibold text-white opacity-0 transition-opacity duration-300 hover:opacity-100'
+                : 'rounded-md px-3 py-1.5 text-sm font-sans-medium text-slate-300 transition hover:bg-slate-800 hover:text-white'
             }
           >
             Sign in
@@ -31,7 +31,7 @@ export default function AccountButton({ subtle = false }: { subtle?: boolean }) 
         </SignInButton>
         {subtle ? null : (
           <SignUpButton mode="modal">
-            <button type="button" className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-500">
+            <button type="button" className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-sans-semibold text-white transition hover:bg-blue-500">
               Sign up
             </button>
           </SignUpButton>

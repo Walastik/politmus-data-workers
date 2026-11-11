@@ -338,9 +338,9 @@ export function USMap({
                 hitSlop={8}
                 className="min-h-[34px] justify-center rounded-full border border-[#26324d] bg-slate-900/85 px-3"
               >
-                <Text className="text-[13px] font-semibold text-slate-200">← All states</Text>
+                <Text className="text-[13px] font-sans-semibold text-slate-200">← All states</Text>
               </Pressable>
-              {!countiesTopo ? <Text className="text-xs text-slate-500">Loading counties…</Text> : null}
+              {!countiesTopo ? <Text className="font-sans text-xs text-slate-500">Loading counties…</Text> : null}
             </View>
           ) : null}
         </View>
@@ -358,11 +358,11 @@ function ZoomButtons({ zoomed, onZoom, onReset }: { zoomed: boolean; onZoom: (fa
   const button = 'h-9 min-w-9 items-center justify-center rounded-full border border-[#26324d] bg-[#131d33] px-2.5'
   return (
     <View className="flex-row items-center justify-between gap-2 border-t border-[#26324d] px-3.5 py-2">
-      <Text className="shrink text-xs text-slate-500">{zoomed ? 'Drag to move around' : 'Pinch or tap + to zoom in'}</Text>
+      <Text className="font-sans shrink text-xs text-slate-500">{zoomed ? 'Drag to move around' : 'Pinch or tap + to zoom in'}</Text>
       <View className="flex-row gap-2">
         {zoomed ? (
           <Pressable onPress={onReset} accessibilityRole="button" accessibilityLabel="Show the whole country" hitSlop={4} className={button}>
-            <Text className="text-xs font-bold text-slate-200">Whole map</Text>
+            <Text className="text-xs font-sans-bold text-slate-200">Whole map</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -374,10 +374,10 @@ function ZoomButtons({ zoomed, onZoom, onReset }: { zoomed: boolean; onZoom: (fa
           hitSlop={4}
           className={`${button} ${zoomed ? '' : 'opacity-40'}`}
         >
-          <Text className="text-lg font-semibold leading-5 text-slate-200">−</Text>
+          <Text className="text-lg font-display-semibold leading-5 text-slate-200">−</Text>
         </Pressable>
         <Pressable onPress={() => onZoom(1.6)} accessibilityRole="button" accessibilityLabel="Zoom in" hitSlop={4} className={button}>
-          <Text className="text-lg font-semibold leading-5 text-slate-200">+</Text>
+          <Text className="text-lg font-display-semibold leading-5 text-slate-200">+</Text>
         </Pressable>
       </View>
     </View>
@@ -516,7 +516,7 @@ function HousePill({
         style={{ backgroundColor: PARTY_COLOR[tally[0].party] }}
         className={`rounded-full ${compact ? 'px-1' : 'px-2 py-0.5'} ${aggregated ? 'border border-dashed border-slate-200/70' : ''}`}
       >
-        <Text style={{ fontVariant: ['tabular-nums'], fontSize: compact ? 9 : 12 }} className="font-extrabold text-white">
+        <Text style={{ fontVariant: ['tabular-nums'], fontSize: compact ? 9 : 12 }} className="font-sans-extrabold text-white">
           {label}
         </Text>
       </Pressable>
@@ -742,7 +742,7 @@ function MarginPill({
       style={[{ position: 'absolute', left: x - size * 1.5, width: size * 3, top: y + depth / 2 - 6, alignItems: 'center', zIndex: 3 }, ride]}
     >
       <View style={{ backgroundColor: color }} className="rounded-full px-1">
-        <Text style={{ fontVariant: ['tabular-nums'], fontSize: size < 32 ? 9 : 11 }} className="font-extrabold text-white">
+        <Text style={{ fontVariant: ['tabular-nums'], fontSize: size < 32 ? 9 : 11 }} className="font-sans-extrabold text-white">
           {margin}
         </Text>
       </View>

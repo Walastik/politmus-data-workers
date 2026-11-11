@@ -34,7 +34,7 @@ export default function PacExplorerScreen() {
         <Explorer officialId={id} election={election} />
       ) : (
         <View className="flex-1 bg-slate-900 px-5 py-5">
-          <Text className={`text-sm ${finance.isError ? 'text-rose-300' : 'text-slate-400'}`}>
+          <Text className={`font-sans text-sm ${finance.isError ? 'text-rose-300' : 'text-slate-400'}`}>
             {finance.isError ? finance.error.message : finance.data ? 'That election has no finance data.' : 'Loading…'}
           </Text>
         </View>
@@ -93,13 +93,13 @@ function Explorer({ officialId, election }: { officialId: string; election: Fina
             ))}
           </ScrollView>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="items-center gap-1.5">
-            <Text className="mr-1 text-xs text-slate-400">Sort</Text>
+            <Text className="font-sans mr-1 text-xs text-slate-400">Sort</Text>
             {PAC_SORTS.map((option) => (
               <Chip key={option.value} label={option.label} active={sort === option.value} onPress={() => setSort(option.value)} />
             ))}
           </ScrollView>
           {total !== undefined ? (
-            <Text className="text-xs text-slate-400">
+            <Text className="font-sans text-xs text-slate-400">
               {total} {total === 1 ? 'PAC' : 'PACs'}
             </Text>
           ) : null}
@@ -118,7 +118,7 @@ function Explorer({ officialId, election }: { officialId: string; election: Fina
         list.isPending ? (
           <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
         ) : (
-          <Text className={`px-5 text-sm ${list.isError ? 'text-rose-300' : 'text-slate-400'}`}>
+          <Text className={`font-sans px-5 text-sm ${list.isError ? 'text-rose-300' : 'text-slate-400'}`}>
             {list.isError ? list.error.message : 'No PACs match.'}
           </Text>
         )
@@ -154,10 +154,10 @@ function PacRow({
           <LegendSwatch color={color(pac.category)} />
         </View>
         <View className="min-w-0 flex-1">
-          <Text className="text-xs text-slate-100">{pac.name}</Text>
-          <Text className="text-[10px] text-slate-500">{pacMeta(pac)}</Text>
+          <Text className="font-sans text-xs text-slate-100">{pac.name}</Text>
+          <Text className="font-sans text-[10px] text-slate-500">{pacMeta(pac)}</Text>
         </View>
-        <Text className="text-xs text-slate-200">{formatMoney(pac.total)}</Text>
+        <Text className="font-sans text-xs text-slate-200">{formatMoney(pac.total)}</Text>
       </Pressable>
       {open ? <PacGifts officialId={officialId} election={election} pac={pac} /> : null}
     </View>
@@ -166,17 +166,17 @@ function PacRow({
 
 function PacGifts({ officialId, election, pac }: { officialId: string; election: FinanceElection; pac: Pac }) {
   const gifts = usePacGifts(officialId, election, pac.pac_key)
-  if (gifts.isError) return <Text className="mt-1 ml-6 text-[11px] text-rose-300">{gifts.error.message}</Text>
-  if (!gifts.data) return <Text className="mt-1 ml-6 text-[11px] text-slate-500">Loading gifts…</Text>
+  if (gifts.isError) return <Text className="font-sans mt-1 ml-6 text-[11px] text-rose-300">{gifts.error.message}</Text>
+  if (!gifts.data) return <Text className="font-sans mt-1 ml-6 text-[11px] text-slate-500">Loading gifts…</Text>
   return (
     <View className="mt-1.5 ml-6 gap-1">
       {gifts.data.map((gift) => (
         <View key={gift.sub_id} className="flex-row items-center gap-3">
-          <Text className="w-20 text-[11px] text-slate-400">{gift.receipt_date ?? '—'}</Text>
-          <Text className="w-16 text-right text-[11px] text-slate-300">{formatMoney(gift.amount)}</Text>
+          <Text className="font-sans w-20 text-[11px] text-slate-400">{gift.receipt_date ?? '—'}</Text>
+          <Text className="font-sans w-16 text-right text-[11px] text-slate-300">{formatMoney(gift.amount)}</Text>
           {gift.pdf_url ? (
             <Pressable onPress={() => openUrl(gift.pdf_url!)} accessibilityRole="link" className="flex-row items-center gap-0.5">
-              <Text className="text-[11px] text-emerald-400">Filing</Text>
+              <Text className="font-sans text-[11px] text-emerald-400">Filing</Text>
               <Icons.ExternalLink size={12} colorClassName="accent-emerald-400" />
             </Pressable>
           ) : null}
@@ -184,7 +184,7 @@ function PacGifts({ officialId, election, pac }: { officialId: string; election:
       ))}
       {pac.committee_id ? (
         <Pressable onPress={() => openUrl(fecCommitteeUrl(pac.committee_id!))} accessibilityRole="link" className="flex-row items-center gap-0.5">
-          <Text className="text-[11px] text-emerald-400">{pac.committee_id} on FEC.gov</Text>
+          <Text className="font-sans text-[11px] text-emerald-400">{pac.committee_id} on FEC.gov</Text>
           <Icons.ExternalLink size={12} colorClassName="accent-emerald-400" />
         </Pressable>
       ) : null}

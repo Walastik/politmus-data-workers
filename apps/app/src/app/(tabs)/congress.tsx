@@ -58,7 +58,7 @@ export default function CongressScreen() {
 
   const header = (
     <View className="gap-4 px-4 pt-4 pb-3">
-      <Text className="text-sm text-slate-400">
+      <Text className="font-sans text-sm text-slate-400">
         Every current member of the Senate and House, with their Politmus Score. Running this cycle?{' '}
         <Text onPress={() => router.push('/candidates')} className="text-blue-400">
           See the candidates
@@ -85,7 +85,7 @@ export default function CongressScreen() {
             accessibilityState={{ selected: view === key }}
             className={`flex-1 items-center rounded-md py-1.5 ${view === key ? 'bg-blue-600' : ''}`}
           >
-            <Text className={`text-sm font-medium ${view === key ? 'text-white' : 'text-slate-300'}`}>{label}</Text>
+            <Text className={`text-sm font-sans-medium ${view === key ? 'text-white' : 'text-slate-300'}`}>{label}</Text>
           </Pressable>
         ))}
       </View>
@@ -97,7 +97,7 @@ export default function CongressScreen() {
           accessibilityLabel={`Filter by state: ${stateName || 'All states'}`}
           className="flex-row items-center gap-1 rounded-full border border-slate-700 bg-slate-800 px-3 py-1"
         >
-          <Text className="text-xs font-medium text-slate-200">{stateName || 'All states'}</Text>
+          <Text className="text-xs font-sans-medium text-slate-200">{stateName || 'All states'}</Text>
           <Icons.ChevronDown size={12} colorClassName="accent-slate-400" />
         </Pressable>
         {PARTY_FILTERS.map(({ value, label }) => (
@@ -126,7 +126,7 @@ export default function CongressScreen() {
         ListHeaderComponent={header}
         ListEmptyComponent={
           members.isError ? (
-            <Text className="px-4 text-red-400">{members.error.message}. Check your connection and try again.</Text>
+            <Text className="font-sans px-4 text-red-400">{members.error.message}. Check your connection and try again.</Text>
           ) : (
             <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
           )
@@ -157,8 +157,8 @@ function ChamberSummary({
   return (
     <View accessibilityLabel={`${title} makeup`} className="rounded-xl border border-slate-700 bg-slate-800/40 p-4">
       <View className="flex-row items-baseline justify-between gap-2">
-        <Text className="text-sm font-semibold uppercase tracking-wider text-slate-300">{title}</Text>
-        <Text className="text-xs text-slate-500">
+        <Text className="text-sm font-sans-semibold uppercase tracking-wider text-slate-300">{title}</Text>
+        <Text className="font-sans text-xs text-slate-500">
           {members.length} members{note ? ` · ${note}` : ''}
         </Text>
       </View>
@@ -169,8 +169,8 @@ function ChamberSummary({
       </View>
       <View className="mt-2 flex-row flex-wrap gap-x-4 gap-y-1">
         {segments.map((s) => (
-          <Text key={s.key} className={`text-sm ${s.text}`}>
-            <Text className="font-semibold">{s.count}</Text> {s.label}
+          <Text key={s.key} className={`font-sans text-sm ${s.text}`}>
+            <Text className="font-sans-semibold">{s.count}</Text> {s.label}
             {s.count === 1 ? '' : 's'}
           </Text>
         ))}
@@ -182,7 +182,7 @@ function ChamberSummary({
           ))}
         </View>
       ) : null}
-      <Text className="mt-2 text-xs text-slate-500">
+      <Text className="font-sans mt-2 text-xs text-slate-500">
         {scored} of {members.length} have a Politmus Score so far.
       </Text>
     </View>
@@ -192,12 +192,12 @@ function ChamberSummary({
 // "Speaker   Mike Johnson (R)", opening their profile; "Vacant" when no one holds the post.
 function LeaderLine({ post }: { post: LeadershipPost }) {
   const { holder } = post
-  const label = <Text className="w-32 text-xs text-slate-500">{post.label}</Text>
+  const label = <Text className="font-sans w-32 text-xs text-slate-500">{post.label}</Text>
   if (!holder) {
     return (
       <View accessible accessibilityLabel={`${post.title}: vacant`} className="flex-row items-baseline gap-2">
         {label}
-        <Text className="flex-1 text-sm text-slate-400">Vacant</Text>
+        <Text className="font-sans flex-1 text-sm text-slate-400">Vacant</Text>
       </View>
     )
   }
@@ -210,7 +210,7 @@ function LeaderLine({ post }: { post: LeadershipPost }) {
       className="flex-row items-baseline gap-2 active:opacity-70"
     >
       {label}
-      <Text className="flex-1 text-sm text-blue-400" numberOfLines={1}>
+      <Text className="font-sans flex-1 text-sm text-blue-400" numberOfLines={1}>
         {name} <Text className="text-slate-400">({partyShort(holder.party)})</Text>
       </Text>
     </Pressable>
@@ -231,11 +231,11 @@ function SenateView({ header, members }: { header: ReactElement; members: Offici
       data={byState(members)}
       keyExtractor={([state]) => state}
       ListHeaderComponent={<View className={grid ? '-mx-2.5' : undefined}>{header}</View>}
-      ListEmptyComponent={<Text className="px-4 text-slate-400">No senators match these filters.</Text>}
+      ListEmptyComponent={<Text className="font-sans px-4 text-slate-400">No senators match these filters.</Text>}
       renderItem={({ item: [state, senators] }) => (
         <View style={gridCellStyle(columns)}>
           <View className={`rounded-lg border border-slate-700 bg-slate-800/40 p-3 ${grid ? 'h-full' : 'mx-4 mb-3'}`}>
-            <Text className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{state}</Text>
+            <Text className="mb-2 text-xs font-sans-semibold uppercase tracking-wider text-slate-400">{state}</Text>
             <View className="gap-1.5">
               {senators.map((senator) => (
                 <MemberRow key={senator.id} official={senator} />
@@ -277,12 +277,12 @@ function HouseView({ header, members, expandAll }: { header: ReactElement; membe
               accessibilityRole="button"
               className="self-end px-4 pb-2"
             >
-              <Text className="text-sm font-semibold text-blue-400">{allOpen ? 'Collapse all' : 'Expand all'}</Text>
+              <Text className="text-sm font-sans-semibold text-blue-400">{allOpen ? 'Collapse all' : 'Expand all'}</Text>
             </Pressable>
           )}
         </View>
       }
-      ListEmptyComponent={<Text className="px-4 text-slate-400">No House members match these filters.</Text>}
+      ListEmptyComponent={<Text className="font-sans px-4 text-slate-400">No House members match these filters.</Text>}
       renderItem={({ item: [state, delegation] }) => {
         const isOpen = expandAll || open.has(state)
         const summary = delegationSummary(delegation)
@@ -296,13 +296,13 @@ function HouseView({ header, members, expandAll }: { header: ReactElement; membe
               className="flex-row items-center gap-3 py-3 active:bg-slate-800/60"
             >
               <Chevron size={16} colorClassName="accent-slate-500" />
-              <Text className="flex-1 font-medium text-slate-100">{state}</Text>
+              <Text className="flex-1 font-sans-medium text-slate-100">{state}</Text>
               <View className="flex-row gap-0.5">
                 {summary.byParty.slice(0, 20).map((m) => (
                   <View key={m.id} className={`h-3 w-1.5 rounded-sm ${partyFillClass(m.party)}`} />
                 ))}
               </View>
-              <Text className="text-xs text-slate-400">{summary.label}</Text>
+              <Text className="font-sans text-xs text-slate-400">{summary.label}</Text>
             </Pressable>
             {isOpen ? (
               columns > 1 ? (
@@ -368,7 +368,7 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
             />
           </View>
           {roster.data && visible.length > 0 ? (
-            <Text className="px-4 pb-3 text-sm text-slate-400">
+            <Text className="font-sans px-4 pb-3 text-sm text-slate-400">
               Showing {visible.length} member{visible.length === 1 ? '' : 's'}
             </Text>
           ) : null}
@@ -378,7 +378,7 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
         roster.isPending ? (
           <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
         ) : (
-          <Text className={`px-4 ${roster.isError ? 'text-red-400' : 'text-slate-400'}`}>
+          <Text className={`font-sans px-4 ${roster.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {roster.isError ? roster.error.message : 'No officials match this filter.'}
           </Text>
         )

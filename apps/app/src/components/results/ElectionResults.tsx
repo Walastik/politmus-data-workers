@@ -102,11 +102,11 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number, a
     return (
       <View className="min-h-[60vh] flex-1 items-center justify-center gap-3 bg-slate-900 p-6">
         {snapshotQuery.isError ? (
-          <Text className="text-center text-sm text-slate-400">Results are unavailable right now. Try again in a minute.</Text>
+          <Text className="font-sans text-center text-sm text-slate-400">Results are unavailable right now. Try again in a minute.</Text>
         ) : (
           <>
             <ActivityIndicator color="#94a3b8" />
-            <Text className="text-center text-sm text-slate-400">Loading the latest counts…</Text>
+            <Text className="font-sans text-center text-sm text-slate-400">Loading the latest counts…</Text>
           </>
         )}
       </View>
@@ -174,7 +174,7 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number, a
                 pending={(snapshot.senate ?? []).some((info) => !senateRace(snapshot.states[info.state]))}
                 aggregated={Object.values(snapshot.states).some(isAggregated)}
               />
-              {selected ? null : <Text className="text-xs text-slate-500">Tap a state to dig into its counties</Text>}
+              {selected ? null : <Text className="font-sans text-xs text-slate-500">Tap a state to dig into its counties</Text>}
             </View>
           </View>
           {selected && tapped ? (

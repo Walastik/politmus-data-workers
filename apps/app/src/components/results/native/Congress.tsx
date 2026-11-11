@@ -34,7 +34,7 @@ export function StatusBadge({ status }: { status: 'called' | 'certified' }) {
       accessibilityLabel={`${STATUS_LABEL[status]}. ${STATUS_EXPLAINER[status]}`}
       className={`flex-row items-center rounded-[5px] border px-1.5 ${certified ? 'border-slate-200 bg-slate-200' : 'border-slate-200/65'}`}
     >
-      <Text className={`text-[10px] font-extrabold uppercase tracking-wide ${certified ? 'text-slate-900' : 'text-slate-200'}`}>
+      <Text className={`text-[10px] font-sans-extrabold uppercase tracking-wide ${certified ? 'text-slate-900' : 'text-slate-200'}`}>
         ✓ {STATUS_LABEL[status]}
       </Text>
     </View>
@@ -57,10 +57,10 @@ export function NextCongress({ snapshot }: { snapshot: ResultsSnapshot }) {
   return (
     <View className="gap-3.5 rounded-[20px] border border-[#26324d] bg-[#131d33] p-4">
       <View className="gap-1">
-        <Text accessibilityRole="header" className="text-xl font-extrabold text-slate-100">
+        <Text accessibilityRole="header" className="text-xl font-display text-slate-100">
           The next Congress, if today’s results hold
         </Text>
-        <Text className="text-sm leading-5 text-slate-400">
+        <Text className="font-sans text-sm leading-5 text-slate-400">
           Who holds each chamber now, and who would if every race ends the way it stands. It’s a projection from the same
           counts; the leads above don’t change.
         </Text>
@@ -72,7 +72,7 @@ export function NextCongress({ snapshot }: { snapshot: ResultsSnapshot }) {
       </View>
       {together.length ? (
         <View className="gap-1.5">
-          <Text className="text-xs font-bold uppercase tracking-wider text-slate-500">What it adds up to</Text>
+          <Text className="text-xs font-sans-bold uppercase tracking-wider text-slate-500">What it adds up to</Text>
           <Notes notes={together} />
         </View>
       ) : null}
@@ -88,7 +88,7 @@ function SeatKey() {
       swatch: 'leading',
       badge: (
         <View className="rounded-[5px] border border-emerald-400/35 bg-emerald-400/15 px-1.5">
-          <Text className="text-[10px] font-extrabold tracking-wide text-emerald-300">LEADS</Text>
+          <Text className="text-[10px] font-sans-extrabold tracking-wide text-emerald-300">LEADS</Text>
         </View>
       ),
       text: 'Nobody has called it. The candidate is ahead in the count so far.',
@@ -102,7 +102,7 @@ function SeatKey() {
             <View style={swatchStyle(row.swatch, BLOC_COLOR.DEM)} className="h-2.5 w-[18px] rounded-[3px]" />
             {row.badge}
           </View>
-          <Text className="flex-1 text-xs leading-[17px] text-slate-400">{row.text}</Text>
+          <Text className="font-sans flex-1 text-xs leading-[17px] text-slate-400">{row.text}</Text>
         </View>
       ))}
     </View>
@@ -116,9 +116,9 @@ function ChamberCard({ outlook }: { outlook: ChamberOutlook }) {
   return (
     <View className="min-w-0 gap-2.5 rounded-2xl bg-[#1a2540] p-3.5 md:flex-1">
       <View className="flex-row items-center justify-between gap-2.5">
-        <Text className="text-xs font-bold uppercase tracking-wider text-slate-500">{CHAMBER_TITLE[office]}</Text>
+        <Text className="text-xs font-sans-bold uppercase tracking-wider text-slate-500">{CHAMBER_TITLE[office]}</Text>
         <View style={{ borderColor: control, backgroundColor: `${control}4d` }} className="rounded-full border px-2.5 py-0.5">
-          <Text className="text-xs font-bold text-white">{controlHeadline(outlook)}</Text>
+          <Text className="text-xs font-sans-bold text-white">{controlHeadline(outlook)}</Text>
         </View>
       </View>
       <View className="flex-row flex-wrap gap-x-5 gap-y-1">
@@ -132,17 +132,17 @@ function ChamberCard({ outlook }: { outlook: ChamberOutlook }) {
               accessibilityLabel={`${BLOC_LABEL[bloc]}: ${row.before} now, ${row.after} after`}
               className="flex-row items-baseline gap-1.5"
             >
-              <Text style={{ color: BLOC_COLOR[bloc] }} className="text-[15px] font-extrabold">
+              <Text style={{ color: BLOC_COLOR[bloc] }} className="text-[15px] font-sans-extrabold">
                 {BLOC_SHORT[bloc]}
               </Text>
-              <Text style={TABULAR} className="text-[15px] font-semibold text-slate-400">
+              <Text style={TABULAR} className="text-[15px] font-sans-semibold text-slate-400">
                 {row.before} →
               </Text>
-              <Text style={TABULAR} className="text-[26px] font-extrabold text-slate-100">
+              <Text style={TABULAR} className="text-[26px] font-display text-slate-100">
                 {row.after}
               </Text>
               {diff ? (
-                <Text style={TABULAR} className={`text-xs font-bold ${diff > 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                <Text style={TABULAR} className={`text-xs font-sans-bold ${diff > 0 ? 'text-emerald-300' : 'text-red-300'}`}>
                   {diff > 0 ? `+${diff}` : diff}
                 </Text>
               ) : null}
@@ -161,8 +161,8 @@ function Notes({ notes }: { notes: string[] }) {
     <View className="gap-1">
       {notes.map((note) => (
         <View key={note} className="flex-row gap-1.5">
-          <Text className="text-[13px] leading-[19px] text-slate-500">•</Text>
-          <Text className="flex-1 text-[13px] leading-[19px] text-slate-400">{note}</Text>
+          <Text className="font-sans text-[13px] leading-[19px] text-slate-500">•</Text>
+          <Text className="font-sans flex-1 text-[13px] leading-[19px] text-slate-400">{note}</Text>
         </View>
       ))}
     </View>
@@ -242,13 +242,13 @@ function SeatBar({ outlook }: { outlook: ChamberOutlook }) {
           <Text
             key={mark.n}
             style={[TABULAR, { left: `${mark.at}%`, width: 30, marginLeft: -15 }]}
-            className="absolute top-0.5 text-center text-[10px] font-bold text-slate-400"
+            className="absolute top-0.5 text-center text-[10px] font-sans-bold text-slate-400"
           >
             {mark.n}
           </Text>
         ))}
       </View>
-      <Text className="text-[11px] text-slate-500">
+      <Text className="font-sans text-[11px] text-slate-500">
         {marks.map((mark) => `${mark.n} ${mark.label}`).join(' · ')}
         {office === 'S' ? ' · Faded: not up this year' : ''}
       </Text>

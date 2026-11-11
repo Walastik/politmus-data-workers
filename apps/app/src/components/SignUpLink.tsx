@@ -5,7 +5,7 @@ export default function SignUpLink() {
   const { startHostedAuth } = useHostedAuth()
   return (
     <Pressable onPress={() => void startHostedAuth({ mode: 'sign-up' })} accessibilityRole="button" className="rounded-lg bg-blue-600 px-6 py-3 active:bg-blue-500">
-      <Text className="font-semibold text-white">Create a free account</Text>
+      <Text className="font-sans-semibold text-white">Create a free account</Text>
     </Pressable>
   )
 }

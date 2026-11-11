@@ -11,8 +11,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@politmus/core": "*",
     "@clerk/clerk-react": "^5.61.10",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@politmus/core": "*",
     "lucide-react": "^1.41.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

@@ -63,7 +63,7 @@ export function AccountabilityReport({
 
   return (
     <Collapsible title="Politmus Report" icon={<Icons.Scale size={16} colorClassName="accent-slate-300" />}>
-      <Text className="mt-2 text-xs text-slate-400">
+      <Text className="font-sans mt-2 text-xs text-slate-400">
         {score.aligned + score.conflicting === 0
           ? 'None of their passage votes touch what they say they want yet.'
           : `${plural(score.aligned, 'vote')} matched and ${score.conflicting} contradicted their stated positions, across ${plural(score.bills_scored, 'bill')}.`}
@@ -72,8 +72,8 @@ export function AccountabilityReport({
       {areas.length > 0 ? (
         <View className="mt-3 flex-row flex-wrap gap-1.5">
           {areas.map(([area, totals]) => (
-            <Text key={area} className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300">
-              {area} <Text className={`font-semibold ${pointsToneClass(totals.points)}`}>{formatPoints(totals.points)}</Text>
+            <Text key={area} className="font-sans rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300">
+              {area} <Text className={`font-sans-semibold ${pointsToneClass(totals.points)}`}>{formatPoints(totals.points)}</Text>
             </Text>
           ))}
         </View>
@@ -89,7 +89,7 @@ export function AccountabilityReport({
 
       {votes.length > INITIAL_ALIGNMENTS_SHOWN ? (
         <Pressable onPress={() => setShowAll(!showAll)} accessibilityRole="button" className="mt-3">
-          <Text className="text-xs font-medium text-slate-300">{showAll ? 'Show fewer' : `Show all ${votes.length}`}</Text>
+          <Text className="text-xs font-sans-medium text-slate-300">{showAll ? 'Show fewer' : `Show all ${votes.length}`}</Text>
         </Pressable>
       ) : null}
     </Collapsible>
@@ -111,14 +111,14 @@ function VoteItem({ vote, onSelect }: { vote: VoteGroup; onSelect: (alignment: V
             {first.bill_id}
             {first.vote_date ? ` · ${first.vote_date}` : ''}
           </Text>
-          <Text className="text-sm font-medium leading-snug text-slate-100">{first.bill_title || 'Untitled bill'}</Text>
+          <Text className="text-sm font-sans-medium leading-snug text-slate-100">{first.bill_title || 'Untitled bill'}</Text>
         </Pressable>
         <View className="flex-row items-center gap-1.5">
           <Pill rounded="rounded" className={positionBadgeClass(first.vote_position)}>
             {first.vote_position}
           </Pill>
           <View accessibilityLabel={alignmentResultLabel(vote.result)} className={`rounded border px-1.5 py-0.5 ${pointsBadgeClass(vote.result ?? 0)}`}>
-            <Text className={`text-xs font-bold ${pointsBadgeClass(vote.result ?? 0)}`}>
+            <Text className={`text-xs font-sans-bold ${pointsBadgeClass(vote.result ?? 0)}`}>
               {vote.result === null ? '—' : formatPoints(vote.result)}
             </Text>
           </View>
@@ -138,8 +138,8 @@ function MatchItem({ match }: { match: VoteAlignment }) {
   const consistent = match.points > 0
   return (
     <View className={counted ? '' : 'opacity-70'}>
-      <Text className="text-xs text-slate-300">
-        Voted <Text className="font-bold">{match.vote_position}</Text> on a bill that{' '}
+      <Text className="font-sans text-xs text-slate-300">
+        Voted <Text className="font-sans-bold">{match.vote_position}</Text> on a bill that{' '}
         {effectPhrase(match.effect_direction, match.target_name, match.mechanism)}
         {counted && match.effect_relation === 'secondary' ? ' (via an unrelated provision)' : ''};{' '}
         {consistent ? 'consistent: ' : 'contradicts: '}
@@ -151,7 +151,7 @@ function MatchItem({ match }: { match: VoteAlignment }) {
           : ''}
         .
       </Text>
-      {counted ? null : <Text className="mt-0.5 text-[11px] text-slate-400">Not counted: {notCountedReason(match.reason)}.</Text>}
+      {counted ? null : <Text className="font-sans mt-0.5 text-[11px] text-slate-400">Not counted: {notCountedReason(match.reason)}.</Text>}
       {match.stance_evidence_quote ? <Quote text={match.stance_evidence_quote} /> : null}
       {match.stance_source_url ? <SourceLink url={match.stance_source_url} /> : null}
     </View>
@@ -160,7 +160,7 @@ function MatchItem({ match }: { match: VoteAlignment }) {
 
 function SourceLink({ url }: { url: string }) {
   return (
-    <Text onPress={() => openUrl(url)} accessibilityRole="link" className="mt-1 text-[11px] text-slate-500 underline">
+    <Text onPress={() => openUrl(url)} accessibilityRole="link" className="font-sans mt-1 text-[11px] text-slate-500 underline">
       Source: {sourceLabel(url)}
     </Text>
   )
@@ -182,17 +182,17 @@ export function StatedPositions({ positions, sync }: { positions: OfficialStance
       boxClassName="rounded-xl border border-purple-500/30 bg-purple-950/10 p-4"
       right={
         models.length > 0 ? (
-          <Text className="rounded bg-purple-900/50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-purple-300">{models.join(', ')}</Text>
+          <Text className="rounded bg-purple-900/50 px-1.5 py-0.5 font-mono text-[10px] text-purple-300">{models.join(', ')}</Text>
         ) : null
       }
     >
-      <Text className={`mt-2 text-xs ${sync?.status === 'failed' ? 'text-rose-300' : 'text-slate-400'}`}>{positionsStatusMessage(sync)}</Text>
+      <Text className={`font-sans mt-2 text-xs ${sync?.status === 'failed' ? 'text-rose-300' : 'text-slate-400'}`}>{positionsStatusMessage(sync)}</Text>
 
       {issues.length > 0 ? (
         <View className="mt-3 gap-4">
           <View>
-            <Text className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Top issues</Text>
-            <Text className="mt-0.5 text-[11px] text-slate-500">Ranked by how many positions they state on each. Tap an issue for the details.</Text>
+            <Text className="text-[11px] font-sans-semibold uppercase tracking-wider text-slate-400">Top issues</Text>
+            <Text className="font-sans mt-0.5 text-[11px] text-slate-500">Ranked by how many positions they state on each. Tap an issue for the details.</Text>
             <View className="mt-2 gap-1.5">
               {visible.map((group, idx) => (
                 <IssueItem key={group.area} rank={idx + 1} group={group} maxCount={maxCount} />
@@ -201,7 +201,7 @@ export function StatedPositions({ positions, sync }: { positions: OfficialStance
           </View>
           {issues.length > INITIAL_ISSUES_SHOWN ? (
             <Pressable onPress={() => setShowAll(!showAll)} accessibilityRole="button">
-              <Text className="text-xs font-medium text-purple-300">{showAll ? 'Show fewer' : `Show all ${issues.length} issues`}</Text>
+              <Text className="text-xs font-sans-medium text-purple-300">{showAll ? 'Show fewer' : `Show all ${issues.length} issues`}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -219,8 +219,8 @@ function IssueItem({ rank, group, maxCount }: { rank: number; group: PositionGro
       <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }} className="px-3 py-2 active:bg-slate-800/60">
         <View className="flex-row items-center gap-2">
           <Text className="w-5 text-right font-mono text-xs text-slate-500">{rank}.</Text>
-          <Text className="min-w-0 flex-1 text-sm font-semibold text-slate-100">
-            {group.area} <Text className="font-normal text-slate-400">({group.count})</Text>
+          <Text className="min-w-0 flex-1 text-sm font-sans-semibold text-slate-100">
+            {group.area} <Text className="font-sans text-slate-400">({group.count})</Text>
           </Text>
           <Chevron size={16} colorClassName="accent-slate-500" />
         </View>
@@ -228,7 +228,7 @@ function IssueItem({ rank, group, maxCount }: { rank: number; group: PositionGro
           <View className="h-1 rounded-full bg-purple-500/70" style={{ width: `${maxCount ? (group.count / maxCount) * 100 : 0}%` }} />
         </View>
         {preview ? (
-          <Text className="mt-1 ml-7 text-[11px] text-slate-500" numberOfLines={1}>
+          <Text className="font-sans mt-1 ml-7 text-[11px] text-slate-500" numberOfLines={1}>
             {preview}
           </Text>
         ) : null}
@@ -254,7 +254,7 @@ function SharedEvidenceBlock({ positions }: { positions: OfficialStance[] }) {
     <View className="rounded-lg border border-slate-800 bg-slate-900/90 p-3">
       {first.evidence_quote ? <Quote text={first.evidence_quote} /> : null}
       {first.source_url ? <SourceLink url={first.source_url} /> : null}
-      <Text className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Supports {positions.length} positions</Text>
+      <Text className="mt-2 text-[10px] font-sans-semibold uppercase tracking-wider text-slate-500">Supports {positions.length} positions</Text>
       <View className="mt-2 gap-2 border-l border-slate-800 pl-3">
         {positions.map((position, idx) => (
           <PositionItem key={`${position.target_name}-${position.mechanism}-${idx}`} position={position} compact />
@@ -269,7 +269,7 @@ function PositionItem({ position, compact = false }: { position: OfficialStance;
   const direction = position.direction?.toLowerCase()
   return (
     <View className={compact ? '' : 'rounded-lg border border-slate-800 bg-slate-900/90 p-3'}>
-      <Text className="text-sm font-semibold text-slate-100">{position.target_name || 'Unnamed target'}</Text>
+      <Text className="text-sm font-sans-semibold text-slate-100">{position.target_name || 'Unnamed target'}</Text>
       <View className="mt-1 flex-row flex-wrap items-center gap-1.5">
         <Pill rounded="rounded border" className={directionBadgeClass(direction)}>
           wants {DIRECTION_LABELS[direction] ?? direction}
@@ -288,14 +288,14 @@ function PositionItem({ position, compact = false }: { position: OfficialStance;
           </Pill>
         ) : null}
       </View>
-      {line ? <Text className="mt-1 text-[11px] text-slate-400">{line}</Text> : null}
-      {position.summary ? <Text className="mt-2 text-xs leading-relaxed text-slate-300">{position.summary}</Text> : null}
+      {line ? <Text className="font-sans mt-1 text-[11px] text-slate-400">{line}</Text> : null}
+      {position.summary ? <Text className="font-sans mt-2 text-xs leading-relaxed text-slate-300">{position.summary}</Text> : null}
       {compact ? (
-        position.issue_label ? <Text className="mt-1 text-[11px] text-slate-500">{position.issue_label}</Text> : null
+        position.issue_label ? <Text className="font-sans mt-1 text-[11px] text-slate-500">{position.issue_label}</Text> : null
       ) : (
         <>
           {position.evidence_quote ? <Quote text={position.evidence_quote} /> : null}
-          {position.issue_label ? <Text className="mt-2 text-[11px] text-slate-500">{position.issue_label}</Text> : null}
+          {position.issue_label ? <Text className="font-sans mt-2 text-[11px] text-slate-500">{position.issue_label}</Text> : null}
           {position.source_url ? <SourceLink url={position.source_url} /> : null}
         </>
       )}

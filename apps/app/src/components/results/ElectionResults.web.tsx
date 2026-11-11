@@ -1684,7 +1684,7 @@ function CountyLists({
           <div key={c.name}>
             <h3 style={{ marginBottom: 4 }}>
               {c.name.split(' ').at(-1)}’s strongest counties{' '}
-              <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>(ahead in {won})</span>
+              <span style={{ textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--font-sans-medium)' }}>(ahead in {won})</span>
             </h3>
             <div className="er-list">
               {strongest.map((r) => (

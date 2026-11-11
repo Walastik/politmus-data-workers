@@ -21,10 +21,10 @@ function LegalPage({ title, children }: { title: string; children: ReactNode }) 
         contentInsetAdjustmentBehavior="automatic"
       >
         <View className="gap-1">
-          <Text role="heading" className="text-2xl font-bold text-slate-50">
+          <Text role="heading" className="text-2xl font-display text-slate-50">
             {title}
           </Text>
-          <Text className="text-sm text-slate-400">Last updated {LAST_UPDATED}</Text>
+          <Text className="font-sans text-sm text-slate-400">Last updated {LAST_UPDATED}</Text>
         </View>
         {children}
       </ScrollView>
@@ -35,7 +35,7 @@ function LegalPage({ title, children }: { title: string; children: ReactNode }) 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <View className="gap-3">
-      <Text role="heading" aria-level={2} className="text-lg font-semibold text-slate-100">
+      <Text role="heading" aria-level={2} className="text-lg font-display-semibold text-slate-100">
         {title}
       </Text>
       {children}
@@ -44,11 +44,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function P({ children }: { children: ReactNode }) {
-  return <Text className="text-sm leading-relaxed text-slate-300">{children}</Text>
+  return <Text className="font-sans text-sm leading-relaxed text-slate-300">{children}</Text>
 }
 
 function Strong({ children }: { children: ReactNode }) {
-  return <Text className="font-semibold text-slate-100">{children}</Text>
+  return <Text className="font-sans-semibold text-slate-100">{children}</Text>
 }
 
 function List({ children }: { children: ReactNode }) {
@@ -58,7 +58,7 @@ function List({ children }: { children: ReactNode }) {
 function Item({ children }: { children: ReactNode }) {
   return (
     <View className="flex-row gap-2 pl-1">
-      <Text className="text-sm leading-relaxed text-slate-500">•</Text>
+      <Text className="font-sans text-sm leading-relaxed text-slate-500">•</Text>
       <P>{children}</P>
     </View>
   )
@@ -66,7 +66,7 @@ function Item({ children }: { children: ReactNode }) {
 
 function ExternalLink({ url, children }: { url: string; children: ReactNode }) {
   return (
-    <Text onPress={() => openUrl(url)} accessibilityRole="link" className="text-blue-400 hover:underline">
+    <Text onPress={() => openUrl(url)} accessibilityRole="link" className="font-sans text-blue-400 hover:underline">
       {children}
     </Text>
   )

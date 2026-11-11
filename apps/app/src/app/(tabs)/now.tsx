@@ -87,7 +87,7 @@ export default function NowScreen() {
   return (
     <ScrollView className="flex-1 bg-slate-900" contentContainerClassName="gap-6 px-4 py-5" keyboardShouldPersistTaps="handled">
       {!location.ready ? (
-        <Text className="text-slate-400">Loading…</Text>
+        <Text className="font-sans text-slate-400">Loading…</Text>
       ) : (
         <>
           {/* After Election Day the results lead; on the day, they follow the countdown. */}
@@ -118,8 +118,8 @@ export default function NowScreen() {
             detail={districtLabel(stateCode, district)}
           />
 
-          {lookup.status === 'error' ? <Text className="text-red-400">{lookup.message}</Text> : null}
-          {hasPlace && lookup.status === 'loading' ? <Text className="text-slate-400">Looking up your area…</Text> : null}
+          {lookup.status === 'error' ? <Text className="font-sans text-red-400">{lookup.message}</Text> : null}
+          {hasPlace && lookup.status === 'loading' ? <Text className="font-sans text-slate-400">Looking up your area…</Text> : null}
 
           {hasPlace && lookupData && electionFocus ? (
             <>
