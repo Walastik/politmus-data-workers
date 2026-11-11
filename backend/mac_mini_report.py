@@ -255,7 +255,15 @@ def prompt_hashes() -> dict[str, str]:
 
 
 def ollama_host() -> str:
-    return os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    """OLLAMA_HOST as a URL. Ollama also accepts it without a scheme
+    (e.g. 0.0.0.0:11434, set so it listens on every interface), and so do
+    the workers' ollama.Client, so add http:// the same way."""
+    host = (os.getenv("OLLAMA_HOST") or "http://localhost:11434").strip().rstrip("/")
+    if "://" not in host:
+        host = f"http://{host}"
+    if not re.search(r":\d+$", host.split("://", 1)[1]):
+        host = f"{host}:11434"
+    return host
 
 
 def machine() -> dict:
@@ -392,7 +400,7 @@ def build_report(
 
     out += ["", "## Errors", ""]
     if not failures:
-        out.append("None.")
+        out += ["None.", ""]
     grouped: dict[str, list[Failure]] = defaultdict(list)
     for failure in failures:
         grouped[kind_of(failure).key].append(failure)
@@ -614,7 +622,13 @@ def preflight() -> int:
             session.close()
         print("Database answers.")
     except Exception as exc:
-        problems.append(f"Database: {type(exc).__name__}: {str(exc).splitlines()[0]}")
+        # Keep every line before SQLAlchemy's "(Background on this error...)":
+        # libpq lists each address it tried (::1, then 127.0.0.1).
+        detail = " / ".join(
+            line.strip() for line in str(exc).split("(Background on this error")[0].splitlines()
+            if line.strip() and not line.startswith("[SQL:")
+        )
+        problems.append(f"Database: {type(exc).__name__}: {detail}")
     for problem in problems:
         print(f"PROBLEM: {problem}")
     return 1 if problems else 0

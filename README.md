@@ -280,7 +280,7 @@ Officials that failed are retried by later runs after a 6-hour backoff (`--force
 15 2 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --limit 40 >> /tmp/official_positions.log 2>&1
 ```
 
-**Candidates.** `--level candidate` reads the campaign sites of people running this cycle (see Candidates below): anyone with a candidacy this cycle who is on the general-election ballot or raised at least $50,000, and has a website. Their stances are saved with `source_type='campaign_site'` and the prompt describes them as candidates, not office holders. Members running again keep their `official_site` positions. A separate nightly line keeps them apart from the member run:
+**Candidates.** `--level candidate` reads the campaign sites of people running this cycle (see Candidates below): anyone with a candidacy this cycle who is on the general-election ballot or raised at least $50,000, and has a website. Their stances are saved with `source_type='campaign_site'` and the prompt describes them as candidates, not office holders. Members running again keep their `official_site` positions. After Election Day each candidate gets one more run, so the results page shows their latest positions, and then none until the next cycle starts on January 1 (failed runs still retry with backoff; `--force` overrides). A separate nightly line keeps them apart from the member run:
 
 ```
 45 3 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --level candidate --limit 40 >> /tmp/candidate_positions.log 2>&1

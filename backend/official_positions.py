@@ -23,7 +23,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -35,7 +36,9 @@ from sqlalchemy import or_
 from models import Candidacy, Official, OfficialPositionSync, OfficialSourcePage, OfficialStance
 from services import llm_runtime
 from services.accountability import try_rescore
-from services.candidate_races import CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle
+from services.candidate_races import (
+    CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle, general_election_date,
+)
 from services.target_matching import make_matcher, try_refresh
 from services.llm_runtime import TruncatedOutputError, load_local_module, required_strings
 from services.official_positions import (
@@ -178,6 +181,27 @@ def is_due(
     return reference is None or reference <= now - max_age
 
 
+def is_due_after_election(
+    sync: OfficialPositionSync | None,
+    *,
+    now: datetime,
+    election_day: date,
+    version: str,
+    max_age_days: float,
+    force: bool = False,
+) -> bool:
+    """A candidate after Election Day: one more run so the results page
+    shows their latest positions, then nothing until the next cycle starts
+    on January 1. A run counts once it finishes without failing; failures
+    keep their usual backoff and cap."""
+    if sync is None or force:
+        return True
+    if sync.status == "failed":
+        return is_due(sync, now=now, version=version, max_age_days=max_age_days)
+    after = datetime.combine(election_day + timedelta(days=1), datetime.min.time())
+    return sync.last_attempt_at is None or sync.last_attempt_at < after
+
+
 def select_officials(
     session,
     *,
@@ -226,10 +250,15 @@ def select_officials(
                 )
             )
         )
+    due = is_due
+    if level == CANDIDATE_LEVEL:
+        election_day = general_election_date(current_cycle(now.date()))
+        if now.date() > election_day:
+            due = partial(is_due_after_election, election_day=election_day)
     rows = [
         (official, sync)
         for official, sync in query.all()
-        if is_due(sync, now=now, version=version, max_age_days=max_age_days, force=force)
+        if due(sync, now=now, version=version, max_age_days=max_age_days, force=force)
     ]
     # Never-attempted first, then oldest attempt first (round-robin).
     rows.sort(key=lambda row: (

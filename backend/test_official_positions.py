@@ -2,7 +2,7 @@ import json
 import os
 import threading
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,7 +39,7 @@ from services.official_positions import (
     verify_positions,
 )
 from services.llm_runtime import TruncatedOutputError
-from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, load_local_prompts
+from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, is_due_after_election, load_local_prompts
 
 OFFICIAL = SimpleNamespace(
     id="E000001",
@@ -431,6 +431,38 @@ class IsDueTests(unittest.TestCase):
         self.assertTrue(self.due(older))
         capped = self.sync(status="failed", attempts=5, last_attempt_at=self.now - timedelta(days=2))
         self.assertFalse(self.due(capped))
+
+
+
+class IsDueAfterElectionTests(unittest.TestCase):
+    election_day = date(2026, 11, 3)
+    now = datetime(2026, 11, 11, 12, 0, 0)
+
+    def sync(self, **fields):
+        base = dict(official_id="C", status="ok", extractor_version="v1", attempts=0,
+                    last_attempt_at=datetime(2026, 11, 1), last_success_at=datetime(2026, 11, 1))
+        base.update(fields)
+        return OfficialPositionSync(**base)
+
+    def due(self, sync, **kwargs):
+        return is_due_after_election(sync, now=self.now, election_day=self.election_day,
+                                     version="v1", max_age_days=30, **kwargs)
+
+    def test_one_more_run_after_election_day_even_when_recent(self):
+        self.assertTrue(self.due(None))
+        self.assertTrue(self.due(self.sync()))
+        # Election Day itself is before the results.
+        self.assertTrue(self.due(self.sync(last_attempt_at=datetime(2026, 11, 3, 23))))
+
+    def test_done_after_a_finished_run_since_election_day(self):
+        self.assertFalse(self.due(self.sync(last_attempt_at=datetime(2026, 11, 4, 1))))
+        self.assertFalse(self.due(self.sync(status="blocked", last_attempt_at=datetime(2026, 11, 5))))
+        self.assertTrue(self.due(self.sync(last_attempt_at=datetime(2026, 11, 5)), force=True))
+
+    def test_failures_keep_backoff(self):
+        recent = self.sync(status="failed", attempts=1, last_attempt_at=self.now - timedelta(hours=1))
+        self.assertFalse(self.due(recent))
+        self.assertTrue(self.due(self.sync(status="failed", attempts=1, last_attempt_at=self.now - timedelta(hours=7))))
 
 
 class ExtractPositionsTests(unittest.TestCase):
