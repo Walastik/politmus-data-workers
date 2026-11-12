@@ -10,12 +10,14 @@ Outputs (all written next to this script, except the favicon):
   app-icon-android-foreground.svg   adaptive icon foreground, glyph inside the 66/108 safe zone
   app-icon-android-background.svg   adaptive icon background (textured paper)
   app-icon-android-monochrome.svg   Android 13+ themed icon layer (alpha only)
+  splash-dry.svg                 launch splash: the P as dry, unreacted litmus paper
   ../apps/app/public/monogram.svg   copy of the full-detail mark for the website header
   ../apps/app/public/favicon.svg    simplified mark that stays legible at 16-32px
 
 The app icon PNGs in apps/app/assets/images are these SVGs rendered at their
 size in a browser (headless Chrome), since only a browser draws the
-watercolor filters; app.json points at them.
+watercolor filters; app.json points at them. splash-icon.png is splash-dry.svg
+at 228x297 (3x the 76pt splash imageWidth).
 
 The glyph lives in a 600x800 box: stem on the left, D-shaped bowl on the right,
 and the bowl's lower ribbon folding over the stem.
@@ -31,6 +33,9 @@ SITE_MONOGRAM = HERE.parent / "apps" / "app" / "public" / "monogram.svg"
 RED, VIOLET, BLUE = "#DC2626", "#7C3AED", "#2563EB"
 INK = "#111111"
 PAPER = "#F7F4EE"
+# Dry, unreacted litmus paper on the app's dark launch screen, and its fibers.
+DRY_PAPER = "#293548"
+DRY_FIBER = "#94A3B8"
 
 # --- Glyph geometry (600x800 box) -------------------------------------------
 # Outer silhouette plus the counter, filled with evenodd.
@@ -251,6 +256,32 @@ def build() -> dict[Path, str]:
         f"  </g>",
         title="Politmus",
         size=1024,
+    )
+
+    # Launch splash: the P before it touches water. It must match the first
+    # frame of the app's animated loader (apps/app/src/components/
+    # PolitmusLoader.tsx), which takes over from it and soaks it with colour,
+    # so the colours, fiber pattern and folds here are copied from there.
+    fiber = (
+        f'<pattern id="s-fiber" patternUnits="userSpaceOnUse" width="48" height="48">'
+        f'<path d="M4 9l11 3M27 4l9 -2M31 30l12 4M8 37l7 -5M20 22l3 9" stroke="{DRY_FIBER}" stroke-opacity=".14" stroke-width="2"/>'
+        f'<path d="M14 2l-6 7M40 17l5 9M22 43l11 -2" stroke="#000" stroke-opacity=".16" stroke-width="2"/>'
+        f'<rect x="36" y="40" width="3" height="3" fill="#000" fill-opacity=".14"/>'
+        f'<rect x="2" y="24" width="3" height="3" fill="{DRY_FIBER}" fill-opacity=".12"/>'
+        f"</pattern>"
+    )
+    lines = "".join(f'<path d="{d}"/>' for d in (SHOULDER, FOLD_TOP, FOLD_BOTTOM))
+    files[HERE / "splash-dry.svg"] = svg(
+        "-30 -30 660 860",
+        f'  <defs><clipPath id="s-clip"><path clip-rule="evenodd" d="{SILHOUETTE}"/></clipPath>{fiber}</defs>\n'
+        f'  <g clip-path="url(#s-clip)">'
+        f'<rect x="-30" y="-30" width="660" height="860" fill="{DRY_PAPER}"/>'
+        f'<rect x="-30" y="-30" width="660" height="860" fill="url(#s-fiber)"/>'
+        f'<path fill="#000" fill-opacity=".18" d="{BEHIND_STEM}"/>'
+        f'<path fill="#000" fill-opacity=".14" d="{UNDER_FOLD}"/></g>\n'
+        f'  <g fill="none" stroke="{INK}" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">'
+        f'<path fill-rule="evenodd" d="{SILHOUETTE}"/>{lines}</g>',
+        title="Politmus",
     )
 
     # The website header serves the full mark as a file, so the browser draws

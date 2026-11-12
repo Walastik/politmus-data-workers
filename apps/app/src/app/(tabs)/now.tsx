@@ -31,6 +31,7 @@ import {
 } from '@/components/HappeningNow'
 import { Icons } from '@/components/icons'
 import LocationBar from '@/components/LocationBar'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { FederalRepsStrip } from '@/components/Representatives'
 import { LinkAction, Section } from '@/components/ui'
 import { useCivicLocation } from '@/lib/civicLocation'
@@ -87,7 +88,7 @@ export default function NowScreen() {
   return (
     <ScrollView className="flex-1 bg-slate-900" contentContainerClassName="gap-6 px-4 py-5" keyboardShouldPersistTaps="handled">
       {!location.ready ? (
-        <Text className="font-sans text-slate-400">Loading…</Text>
+        <PolitmusLoader className="mt-10" label="Loading" />
       ) : (
         <>
           {/* After Election Day the results lead; on the day, they follow the countdown. */}

@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { BillTags } from '@/components/profile/BillSections'
 import VoteTally from '@/components/profile/VoteTally'
 import { Chip, SearchField } from '@/components/ui'
@@ -113,7 +114,7 @@ export default function BillsScreen() {
         className={bills.isPlaceholderData ? 'opacity-50' : ''}
         ListEmptyComponent={
           bills.isPending ? (
-            <ActivityIndicator className="mt-10" colorClassName="accent-slate-400" />
+            <PolitmusLoader className="mt-10" label="Loading bills" />
           ) : (
             <Text className={`font-sans mt-6 px-8 text-center text-sm ${bills.isError ? 'text-red-400' : 'text-slate-400'}`}>
               {bills.isError ? bills.error.message : noBillsMessage(filters.query)}

@@ -1,6 +1,7 @@
 import { ScrollView, Text, View } from 'react-native'
 
 import LocationBar from '@/components/LocationBar'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import LookupResults from '@/components/Representatives'
 import { useCivicLocation } from '@/lib/civicLocation'
 import { pageMetadata } from '@/lib/metadata'
@@ -21,7 +22,7 @@ export default function RepsScreen() {
         </Text>
       </View>
       {!ready ? (
-        <Text className="font-sans text-slate-400">Loading…</Text>
+        <PolitmusLoader className="mt-10" label="Loading" />
       ) : (
         <>
           <LocationBar
@@ -29,7 +30,7 @@ export default function RepsScreen() {
             submitLabel="Find my representatives"
           />
           {!place ? null : lookup.status === 'loading' || lookup.status === 'idle' ? (
-            <Text className="font-sans text-slate-400">Looking up your representatives…</Text>
+            <PolitmusLoader className="mt-6" label="Finding your representatives" />
           ) : lookup.status === 'error' ? (
             <Text className="font-sans text-red-400">{lookup.message}</Text>
           ) : (

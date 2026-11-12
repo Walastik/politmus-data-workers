@@ -24,7 +24,7 @@ backend/             FastAPI on Fly, reached only through the site's /api proxy
   website (same-origin `/api`, proxied by nginx) and `https://politmus.com` in
   the apps. The API has no public address of its own.
 - **Platform differences.** `Name.web.tsx` beside `Name.tsx` replaces it on web
-  only (`AccountButton`, `LocationSettings`, `SignInLink`, `SignUpLink`,
+  only (`AccountButton`, `LaunchScreen`, `LocationSettings`, `SignInLink`, `SignUpLink`,
   `Monogram`, `lib/calendar`, `lib/locationPlatform`). Route files can't be
   split that way reliably, so routes branch on `Platform.OS` instead.
 - **Location.** The shared provider in core takes a platform object:

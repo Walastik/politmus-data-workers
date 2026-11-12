@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { Platform, Pressable, Text } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
+import LaunchScreen from '@/components/LaunchScreen'
 import Monogram from '@/components/Monogram'
 import { ApiProvider } from '@/lib/api'
 import { useAppFocus } from '@/lib/appFocus'
@@ -20,7 +21,8 @@ import { pageTitle } from '@/lib/metadata'
 import { FONT_FILES, FONTS } from '@/lib/theme'
 
 // Keep the native splash up until the brand fonts are in memory, so text never
-// redraws in a fallback face. The website's pages are prerendered and shouldn't
+// redraws in a fallback face. LaunchScreen hides it, once its animated P is
+// drawn over the same spot. The website's pages are prerendered and shouldn't
 // wait on fonts; the browser swaps them in when they arrive.
 if (Platform.OS !== 'web') SplashScreen.preventAutoHideAsync()
 
@@ -64,10 +66,6 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(FONT_FILES)
   const fontsSettled = fontsLoaded || !!fontError
 
-  useEffect(() => {
-    if (Platform.OS !== 'web' && fontsSettled) SplashScreen.hideAsync()
-  }, [fontsSettled])
-
   // A font that fails to load falls back to the system face rather than
   // leaving the app stuck on the splash screen.
   if (Platform.OS !== 'web' && !fontsSettled) return null
@@ -90,6 +88,8 @@ export default function RootLayout() {
                   })}
                 />
                 <DrawerLinks />
+                {/* Last, so it covers the first screen until the app has loaded. */}
+                <LaunchScreen />
                 <DocumentTitle />
               </ThemeProvider>
             </CivicLocationProvider>
