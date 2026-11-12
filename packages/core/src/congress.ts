@@ -1,6 +1,7 @@
 // The Congress roster: views, filters, grouping and the chamber makeup bars,
 // shared by the web page and the native screen.
 
+import { CLOTURE, MAJORITY, TWO_THIRDS } from './electionResults'
 import { officialName, partyShort, type Official, type RosterStatusFilter } from './types'
 
 export type CongressView = 'senate' | 'house' | 'list'
@@ -84,6 +85,55 @@ export function chamberMakeup(members: Official[]) {
     scored: members.filter((m) => m.score_matches).length,
   }
 }
+
+export type VoteThreshold = { votes: number; label: string; detail: string }
+
+// The vote counts that matter in each chamber and what each one does, in a
+// neutral voice (no party named). Shown behind the chamber card's info button.
+export const VOTE_THRESHOLDS: Record<'Senate' | 'House', { thresholds: VoteThreshold[]; notes: string[] }> = {
+  Senate: {
+    thresholds: [
+      {
+        votes: MAJORITY.S,
+        label: 'Majority',
+        detail: 'Passes a bill once debate ends, and confirms judges and cabinet picks. In a 50-50 tie the vice president casts the deciding vote.',
+      },
+      {
+        votes: CLOTURE,
+        label: 'Ends a filibuster',
+        detail: 'Three-fifths of the Senate must vote for cloture to end debate on most bills, so most bills need 60 to reach a final vote.',
+      },
+      {
+        votes: TWO_THIRDS.S,
+        label: 'Two-thirds',
+        detail: 'Overrides a veto (with the House), ratifies a treaty, convicts an impeached official and proposes a constitutional amendment.',
+      },
+    ],
+    notes: [
+      'Budget reconciliation and nominations cannot be filibustered, so they pass with a simple majority.',
+      'The party with the most seats picks the Majority Leader, who decides which bills reach the floor.',
+    ],
+  },
+  House: {
+    thresholds: [
+      {
+        votes: MAJORITY.H,
+        label: 'Majority',
+        detail: 'Passes a bill or impeaches an official. The party with a majority usually elects the Speaker and chairs every committee.',
+      },
+      {
+        votes: TWO_THIRDS.H,
+        label: 'Two-thirds',
+        detail: 'Overrides a veto (with the Senate), passes a bill under suspension of the rules and proposes a constitutional amendment.',
+      },
+    ],
+    notes: ['The House has no filibuster: once a bill reaches the floor, a simple majority passes it.'],
+  },
+}
+
+// Footnote for both chambers: the counts above assume a full chamber.
+export const VOTE_THRESHOLD_FOOTNOTE =
+  'Counts assume every seat is filled and every member votes. Most votes need a majority of members present, so vacancies and absences lower the number.'
 
 // Each chamber's top posts, in order, with the title the chamber card shows.
 const LEADERSHIP_POSTS = {

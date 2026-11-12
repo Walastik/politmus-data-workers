@@ -1,5 +1,7 @@
 import {
   CONGRESS_VIEWS,
+  VOTE_THRESHOLDS,
+  VOTE_THRESHOLD_FOOTNOTE,
   byState,
   chamberLeaders,
   chamberMakeup,
@@ -148,16 +150,29 @@ function ChamberSummary({
   leaders,
   note,
 }: {
-  title: string
+  title: 'Senate' | 'House'
   members: Official[]
   leaders: LeadershipPost[] | null
   note?: string
 }) {
   const { segments, scored } = chamberMakeup(members)
+  const [showNumbers, setShowNumbers] = useState(false)
   return (
     <View accessibilityLabel={`${title} makeup`} className="rounded-xl border border-slate-700 bg-slate-800/40 p-4">
       <View className="flex-row items-baseline justify-between gap-2">
-        <Text className="text-sm font-sans-semibold uppercase tracking-wider text-slate-300">{title}</Text>
+        <View className="flex-row items-center gap-1.5">
+          <Text className="text-sm font-sans-semibold uppercase tracking-wider text-slate-300">{title}</Text>
+          <Pressable
+            onPress={() => setShowNumbers(!showNumbers)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`${title} key vote numbers`}
+            accessibilityState={{ expanded: showNumbers }}
+            className="active:opacity-70"
+          >
+            <Icons.Info size={14} colorClassName={showNumbers ? 'accent-blue-400' : 'accent-slate-500'} />
+          </Pressable>
+        </View>
         <Text className="font-sans text-xs text-slate-500">
           {members.length} members{note ? ` · ${note}` : ''}
         </Text>
@@ -175,6 +190,7 @@ function ChamberSummary({
           </Text>
         ))}
       </View>
+      {showNumbers ? <VoteNumbers chamber={title} /> : null}
       {leaders ? (
         <View accessibilityLabel={`${title} leadership`} className="mt-3 gap-1.5 border-t border-slate-700/70 pt-3">
           {leaders.map((post) => (
@@ -185,6 +201,31 @@ function ChamberSummary({
       <Text className="font-sans mt-2 text-xs text-slate-500">
         {scored} of {members.length} have a Politmus Score so far.
       </Text>
+    </View>
+  )
+}
+
+// The votes it takes to pass a bill, end a filibuster or override a veto,
+// behind the chamber card's info button. No party named and no line on the bar.
+function VoteNumbers({ chamber }: { chamber: 'Senate' | 'House' }) {
+  const { thresholds, notes } = VOTE_THRESHOLDS[chamber]
+  return (
+    <View accessibilityLabel={`${chamber} key vote numbers`} className="mt-3 gap-2.5 rounded-lg bg-slate-900/60 p-3">
+      {thresholds.map((t) => (
+        <View key={t.label} accessible className="flex-row gap-3">
+          <Text className="w-10 font-mono text-base text-slate-100">{t.votes}</Text>
+          <View className="flex-1">
+            <Text className="font-sans-semibold text-sm text-slate-200">{t.label}</Text>
+            <Text className="font-sans text-xs leading-relaxed text-slate-400">{t.detail}</Text>
+          </View>
+        </View>
+      ))}
+      {notes.map((note) => (
+        <Text key={note} className="font-sans text-xs leading-relaxed text-slate-400">
+          {note}
+        </Text>
+      ))}
+      <Text className="font-sans text-xs text-slate-500">{VOTE_THRESHOLD_FOOTNOTE}</Text>
     </View>
   )
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { byState, chamberLeaders, chamberMakeup, delegationSummary, houseSeatLabel, memberMatches, rosterPath, sortRoster } from './congress'
+import { VOTE_THRESHOLDS, byState, chamberLeaders, chamberMakeup, delegationSummary, houseSeatLabel, memberMatches, rosterPath, sortRoster } from './congress'
 import type { Official } from './types'
 
 const member = (partial: Partial<Official>) =>
@@ -56,5 +56,13 @@ describe('congress roster helpers', () => {
     ])
     expect(chamberLeaders(members, 'House')?.map((p) => p.holder?.name ?? null)).toEqual(['Johnson', null, null])
     expect(chamberLeaders([member({ name: 'x' })], 'House')).toBeNull()
+  })
+
+  it('lists the vote thresholds without naming a party', () => {
+    expect(VOTE_THRESHOLDS.Senate.thresholds.map((t) => t.votes)).toEqual([51, 60, 67])
+    expect(VOTE_THRESHOLDS.House.thresholds.map((t) => t.votes)).toEqual([218, 290])
+    const text = JSON.stringify(VOTE_THRESHOLDS)
+    expect(text).not.toMatch(/Democrat|Republican/)
+    expect(text).not.toMatch(/\u2014/)
   })
 })
