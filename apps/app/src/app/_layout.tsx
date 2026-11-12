@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { Platform, Pressable, Text } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
+import LaunchScreen from '@/components/LaunchScreen'
 import Monogram from '@/components/Monogram'
 import { ApiProvider } from '@/lib/api'
 import { useAppFocus } from '@/lib/appFocus'
@@ -64,6 +65,8 @@ export default function RootLayout() {
                   })}
                 />
                 <DrawerLinks />
+                {/* Last, so it covers the first screen until the app has loaded. */}
+                <LaunchScreen />
                 <DocumentTitle />
               </ThemeProvider>
             </CivicLocationProvider>

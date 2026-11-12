@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { ActivityIndicator, RefreshControl, ScrollView, SectionList, Text, View } from 'react-native'
 
 import FeedItemRow from '@/components/FeedItemRow'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { Chip } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { pageMetadata } from '@/lib/metadata'
@@ -67,7 +68,7 @@ export default function FeedScreen() {
         ListHeaderComponent={filters}
         ListEmptyComponent={
           feed.isPending ? (
-            <ActivityIndicator className="mt-10" colorClassName="accent-slate-400" />
+            <PolitmusLoader className="mt-10" label="Loading the feed" />
           ) : feed.isError ? (
             <Text className="mt-10 px-8 text-center text-sm text-red-400">{feed.error.message}</Text>
           ) : (
