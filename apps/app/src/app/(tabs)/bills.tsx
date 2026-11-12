@@ -66,13 +66,13 @@ export default function BillsScreen() {
       >
         {showFilters ? <Icons.ChevronDown size={16} colorClassName="accent-blue-400" /> : <Icons.ChevronRight size={16} colorClassName="accent-blue-400" />}
         <Icons.ListFilter size={14} colorClassName="accent-blue-400" />
-        <Text className="text-sm font-semibold text-blue-400">Filters and sort{active ? ` (${active})` : ''}</Text>
+        <Text className="text-sm font-sans-semibold text-blue-400">Filters and sort{active ? ` (${active})` : ''}</Text>
       </Pressable>
       {showFilters ? (
         <View className="gap-3 rounded-lg border border-slate-700 bg-slate-800/60 p-3">
           {[...BILL_FILTER_GROUPS, { key: 'sort' as const, label: 'Sort By', options: billSortOptions(Boolean(filters.query)) }].map((group) => (
             <View key={group.key}>
-              <Text className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group.label}</Text>
+              <Text className="mb-1.5 text-[11px] font-sans-semibold uppercase tracking-wider text-slate-400">{group.label}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-1.5">
                 {group.options.map((option) => (
                   <Chip
@@ -88,7 +88,7 @@ export default function BillsScreen() {
         </View>
       ) : null}
       {items.length > 0 ? (
-        <Text className="text-sm text-slate-400">
+        <Text className="font-sans text-sm text-slate-400">
           Showing {items.length}/{total} bill{total === 1 ? '' : 's'}
         </Text>
       ) : null}
@@ -116,7 +116,7 @@ export default function BillsScreen() {
           bills.isPending ? (
             <PolitmusLoader className="mt-10" label="Loading bills" />
           ) : (
-            <Text className={`mt-6 px-8 text-center text-sm ${bills.isError ? 'text-red-400' : 'text-slate-400'}`}>
+            <Text className={`font-sans mt-6 px-8 text-center text-sm ${bills.isError ? 'text-red-400' : 'text-slate-400'}`}>
               {bills.isError ? bills.error.message : noBillsMessage(filters.query)}
             </Text>
           )
@@ -146,22 +146,22 @@ function BillCard({ bill, grid }: { bill: Bill; grid: boolean }) {
     >
       <View className="flex-row flex-wrap items-start justify-between gap-2">
         <Text className="font-mono text-xs text-slate-400">{bill.id}</Text>
-        <Text className={`max-w-[70%] text-xs ${sponsor.name ? 'text-slate-300' : 'text-slate-500'}`} numberOfLines={1}>
+        <Text className={`font-sans max-w-[70%] text-xs ${sponsor.name ? 'text-slate-300' : 'text-slate-500'}`} numberOfLines={1}>
           {sponsor.name ?? 'No sponsor listed'}
         </Text>
       </View>
-      <Text className="mt-2 text-base font-semibold leading-snug text-slate-100" numberOfLines={3}>
+      <Text className="mt-2 text-base font-sans-semibold leading-snug text-slate-100" numberOfLines={3}>
         {bill.title || 'Untitled bill'}
       </Text>
       <BillTags bill={bill} />
       {isSignedIn && intents.length > 0 ? (
         <View className="mt-2 flex-row items-center gap-1 self-start rounded-full border border-purple-800/70 bg-purple-950/70 px-2 py-0.5">
           <Icons.Sparkles size={10} colorClassName="accent-purple-400" />
-          <Text className="text-[10px] font-semibold uppercase tracking-wider text-purple-300">AI Classified ({intents.length})</Text>
+          <Text className="text-[10px] font-sans-semibold uppercase tracking-wider text-purple-300">AI Classified ({intents.length})</Text>
         </View>
       ) : null}
       {dates.introduced || dates.voted || dates.velocity ? (
-        <Text className="mt-2 text-xs text-slate-500">
+        <Text className="font-sans mt-2 text-xs text-slate-500">
           {[dates.introduced ? `Introduced ${dates.introduced}` : null, dates.voted ? `Voted ${dates.voted}` : null, dates.velocity?.text]
             .filter(Boolean)
             .join(' · ')}

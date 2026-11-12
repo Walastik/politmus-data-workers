@@ -119,8 +119,8 @@ export default function NowScreen() {
             detail={districtLabel(stateCode, district)}
           />
 
-          {lookup.status === 'error' ? <Text className="text-red-400">{lookup.message}</Text> : null}
-          {hasPlace && lookup.status === 'loading' ? <Text className="text-slate-400">Looking up your area…</Text> : null}
+          {lookup.status === 'error' ? <Text className="font-sans text-red-400">{lookup.message}</Text> : null}
+          {hasPlace && lookup.status === 'loading' ? <Text className="font-sans text-slate-400">Looking up your area…</Text> : null}
 
           {hasPlace && lookupData && electionFocus ? (
             <>

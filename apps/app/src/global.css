@@ -7,3 +7,48 @@
 
 /* Class names returned by shared helpers (e.g. accountability colors). */
 @source '../../../packages/core/src';
+
+/* Politmus brand tokens, shared with the Vite site (apps/web/src/index.css).
+   Names match the fonts loaded in app/_layout.tsx (FONTS in lib/theme.ts).
+   Native needs one font name per weight, so use font-sans-semibold rather
+   than font-sans font-semibold. */
+@theme {
+  --font-display: 'SpaceGrotesk-Bold';
+  --font-display-semibold: 'SpaceGrotesk-SemiBold';
+  --font-sans: 'Inter-Regular';
+  --font-sans-medium: 'Inter-Medium';
+  --font-sans-semibold: 'Inter-SemiBold';
+  --font-sans-bold: 'Inter-Bold';
+  --font-sans-extrabold: 'Inter-ExtraBold';
+  --font-mono: 'IBMPlexMono-Regular';
+  --font-mono-semibold: 'IBMPlexMono-SemiBold';
+  /* Plain HTML on the website (Clerk's widgets) keeps the system face: it
+     would only get synthetic bold from these single-weight fonts. */
+  --default-font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  --color-paper-light: #f8f7f4;
+  --color-paper-dry: #e2e0d8;
+  --color-ink-dark: #0f172a;
+  --color-ink-muted: #1e293b;
+  --color-litmus-red: #dc2626;
+  --color-litmus-violet: #7c3aed;
+  --color-litmus-blue: #2563eb;
+}
+
+/* Web also gets fallbacks, for text drawn before the fonts arrive. Native
+   holds the splash screen until they load, and wants a single name. */
+@layer theme {
+  :root {
+    @variant web {
+      --font-display: 'SpaceGrotesk-Bold', ui-sans-serif, system-ui, sans-serif;
+      --font-display-semibold: 'SpaceGrotesk-SemiBold', ui-sans-serif, system-ui, sans-serif;
+      --font-sans: 'Inter-Regular', ui-sans-serif, system-ui, sans-serif;
+      --font-sans-medium: 'Inter-Medium', ui-sans-serif, system-ui, sans-serif;
+      --font-sans-semibold: 'Inter-SemiBold', ui-sans-serif, system-ui, sans-serif;
+      --font-sans-bold: 'Inter-Bold', ui-sans-serif, system-ui, sans-serif;
+      --font-sans-extrabold: 'Inter-ExtraBold', ui-sans-serif, system-ui, sans-serif;
+      --font-mono: 'IBMPlexMono-Regular', ui-monospace, monospace;
+      --font-mono-semibold: 'IBMPlexMono-SemiBold', ui-monospace, monospace;
+    }
+  }
+}

@@ -6,11 +6,11 @@ import { Icons } from '../icons'
 // Building blocks shared by the member and bill profiles.
 
 export function SectionHeading({ children }: { children: ReactNode }) {
-  return <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400">{children}</Text>
+  return <Text className="text-xs font-sans-semibold uppercase tracking-wider text-slate-400">{children}</Text>
 }
 
 export function SubHeading({ children }: { children: ReactNode }) {
-  return <Text className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{children}</Text>
+  return <Text className="text-[11px] font-sans-semibold uppercase tracking-wider text-slate-400">{children}</Text>
 }
 
 // A section that opens on tap, like the web drawer's collapsible sections.
@@ -44,7 +44,7 @@ export function Collapsible({
         >
           <Chevron size={16} colorClassName={chevronAccent} />
           {icon}
-          <Text className={`text-xs font-semibold uppercase tracking-wider ${tone}`}>{title}</Text>
+          <Text className={`text-xs font-sans-semibold uppercase tracking-wider ${tone}`}>{title}</Text>
         </Pressable>
         {right}
       </View>
@@ -57,7 +57,7 @@ export function Collapsible({
 export function Pill({ className, children, rounded = 'rounded-full' }: { className: string; children: ReactNode; rounded?: string }) {
   return (
     <View className={`self-start px-2 py-0.5 ${rounded} ${className}`}>
-      <Text className={`text-[10px] font-semibold uppercase tracking-wider ${className}`}>{children}</Text>
+      <Text className={`text-[10px] font-sans-semibold uppercase tracking-wider ${className}`}>{children}</Text>
     </View>
   )
 }
@@ -65,7 +65,7 @@ export function Pill({ className, children, rounded = 'rounded-full' }: { classN
 export function Quote({ text, border = 'border-purple-500/60 bg-purple-950/30', tone = 'text-purple-200' }: { text: string; border?: string; tone?: string }) {
   return (
     <View className={`mt-2 rounded-r border-l-2 py-1 pr-2 pl-2.5 ${border}`}>
-      <Text className={`text-[11px] italic ${tone}`}>“{text}”</Text>
+      <Text className={`font-sans text-[11px] italic ${tone}`}>“{text}”</Text>
     </View>
   )
 }
@@ -76,9 +76,9 @@ export function Explainer({ label = 'What does this mean?', children }: { label?
     <View className="mt-2">
       <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }} className="flex-row items-center gap-1">
         <Icons.Info size={12} colorClassName="accent-emerald-400" />
-        <Text className="text-[11px] font-medium text-emerald-400">{label}</Text>
+        <Text className="text-[11px] font-sans-medium text-emerald-400">{label}</Text>
       </Pressable>
-      {open ? <Text className="mt-1 text-xs leading-relaxed text-slate-300">{children}</Text> : null}
+      {open ? <Text className="font-sans mt-1 text-xs leading-relaxed text-slate-300">{children}</Text> : null}
     </View>
   )
 }

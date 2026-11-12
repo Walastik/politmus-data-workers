@@ -19,10 +19,10 @@ export default function Root() {
   return (
     <View className="flex-1 items-center justify-center bg-slate-900 px-8 py-16">
       <AsciiArt />
-      <Text accessibilityRole="header" className="mb-4 text-4xl font-bold tracking-tight text-slate-100 md:text-5xl">
+      <Text accessibilityRole="header" className="mb-4 text-4xl font-display tracking-tight text-slate-100 md:text-5xl">
         Politmus
       </Text>
-      <Text className="text-xl text-slate-400">Work in Progress</Text>
+      <Text className="font-sans text-xl text-slate-400">Work in Progress</Text>
       <View className="absolute top-4 right-0">
         <AccountButton subtle />
       </View>

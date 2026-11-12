@@ -49,40 +49,40 @@ export default function BillScreen() {
       />
       <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="w-full md:max-w-[960px] md:self-center gap-6 px-5 py-5">
         {!view ? (
-          <Text className={`text-sm ${bill.isError ? 'text-red-400' : 'text-slate-400'}`}>
+          <Text className={`font-sans text-sm ${bill.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {bill.isError ? bill.error.message : 'Loading bill details…'}
           </Text>
         ) : (
           <>
             <View className="border-b border-slate-800 pb-5">
-              <Text accessibilityRole="header" className="text-xl font-semibold leading-snug text-slate-100">
+              <Text accessibilityRole="header" className="text-xl font-display-semibold leading-snug text-slate-100">
                 {view.title || 'Untitled bill'}
               </Text>
               <BillTags bill={view} />
-              <Text className={`mt-2 text-xs ${sponsor?.name ? 'text-slate-400' : 'text-slate-500'}`}>
+              <Text className={`font-sans mt-2 text-xs ${sponsor?.name ? 'text-slate-400' : 'text-slate-500'}`}>
                 {sponsor?.name ?? 'No sponsor listed'}
                 {sponsor?.notInRoster ? <Text className="text-slate-500"> (not in roster)</Text> : null}
               </Text>
-              {cosponsors ? <Text className="mt-1 text-xs text-slate-400">{cosponsors}</Text> : null}
+              {cosponsors ? <Text className="font-sans mt-1 text-xs text-slate-400">{cosponsors}</Text> : null}
               {dates ? (
                 <View className="mt-3 flex-row flex-wrap gap-x-4 gap-y-1">
                   {dates.introduced ? (
-                    <Text className="text-xs text-slate-500">
+                    <Text className="font-sans text-xs text-slate-500">
                       Introduced <Text className="text-slate-300">{dates.introduced}</Text>
                     </Text>
                   ) : null}
                   {dates.voted ? (
-                    <Text className="text-xs text-slate-500">
+                    <Text className="font-sans text-xs text-slate-500">
                       Voted <Text className="text-slate-300">{dates.voted}</Text>
                     </Text>
                   ) : null}
                   {dates.velocity ? (
-                    <Text accessibilityLabel={dates.velocity.description} className="text-xs text-slate-300">
+                    <Text accessibilityLabel={dates.velocity.description} className="font-sans text-xs text-slate-300">
                       {dates.velocity.text}
                     </Text>
                   ) : null}
                   {dates.latestAction ? (
-                    <Text className="w-full text-xs text-slate-500">
+                    <Text className="font-sans w-full text-xs text-slate-500">
                       Latest action <Text className="text-slate-300">{dates.latestAction}</Text>
                     </Text>
                   ) : null}
@@ -112,7 +112,7 @@ export default function BillScreen() {
               {view.summary ? (
                 <CrsSummary text={view.summary} />
               ) : (
-                <Text className="mt-3 text-sm text-slate-400">No CRS summary has been ingested for this bill.</Text>
+                <Text className="font-sans mt-3 text-sm text-slate-400">No CRS summary has been ingested for this bill.</Text>
               )}
             </View>
           </>

@@ -17,7 +17,7 @@ export default function AccountButton(_props: { subtle?: boolean }) {
   return isSignedIn ? (
     <>
       <Pressable onPress={() => setSheetOpen(true)} accessibilityRole="button" className="mr-4 rounded-md px-3 py-1.5">
-        <Text className="text-sm font-medium text-slate-300">Account</Text>
+        <Text className="text-sm font-sans-medium text-slate-300">Account</Text>
       </Pressable>
       <AccountSheet visible={sheetOpen} onClose={() => setSheetOpen(false)} />
     </>
@@ -27,7 +27,7 @@ export default function AccountButton(_props: { subtle?: boolean }) {
       accessibilityRole="button"
       className="mr-4 rounded-md bg-blue-600 px-3 py-1.5"
     >
-      <Text className="text-sm font-semibold text-white">Sign in</Text>
+      <Text className="text-sm font-sans-semibold text-white">Sign in</Text>
     </Pressable>
   )
 }

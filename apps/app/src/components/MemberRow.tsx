@@ -19,10 +19,10 @@ export default function MemberRow({ official, subtitle, status }: { official: Of
     >
       <OfficialPhoto url={official.photo_url} name={name} party={official.party} size="sm" />
       <View className="min-w-0 flex-1">
-        <Text className="text-sm font-medium text-slate-100" numberOfLines={1}>
+        <Text className="text-sm font-sans-medium text-slate-100" numberOfLines={1}>
           {name}
         </Text>
-        <Text className="text-[11px] text-slate-400" numberOfLines={1}>
+        <Text className="font-sans text-[11px] text-slate-400" numberOfLines={1}>
           {partyShort(official.party)}
           {official.leadership_role ? <Text className="text-slate-200"> · {official.leadership_role}</Text> : null}
           {subtitle ? ` · ${subtitle}` : ''}

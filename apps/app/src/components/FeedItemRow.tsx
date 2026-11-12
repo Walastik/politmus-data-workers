@@ -44,16 +44,16 @@ export default function FeedItemRow({ entry, grid = false }: { entry: FeedEntry;
         <View className="flex-row items-center justify-between gap-2">
           <View className="flex-1 flex-row items-center gap-1.5">
             <Icon size={14} color={typeof toneColor === 'string' ? toneColor : undefined} />
-            <Text className={`text-xs font-semibold uppercase tracking-wider ${tone}`} numberOfLines={1}>
+            <Text className={`text-xs font-sans-semibold uppercase tracking-wider ${tone}`} numberOfLines={1}>
               {label}
             </Text>
           </View>
-          <Text className="text-xs text-slate-500">{formatBillDate(item.occurred_at)}</Text>
+          <Text className="font-sans text-xs text-slate-500">{formatBillDate(item.occurred_at)}</Text>
         </View>
 
-        <Text className="mt-2 text-base font-semibold leading-snug text-slate-100">{item.headline}</Text>
+        <Text className="mt-2 text-base font-sans-semibold leading-snug text-slate-100">{item.headline}</Text>
         {item.subline ? (
-          <Text className="mt-1 text-sm text-slate-400" numberOfLines={2}>
+          <Text className="font-sans mt-1 text-sm text-slate-400" numberOfLines={2}>
             {item.subline}
           </Text>
         ) : null}
@@ -62,13 +62,13 @@ export default function FeedItemRow({ entry, grid = false }: { entry: FeedEntry;
           <View className="mt-2 flex-row flex-wrap items-center gap-2">
             {bill ? <Text className="font-mono text-xs text-slate-400">{bill.id}</Text> : null}
             {bill?.policy_area ? (
-              <Text className="rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">{bill.policy_area}</Text>
+              <Text className="font-sans rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">{bill.policy_area}</Text>
             ) : null}
             {item.level === 'state' ? (
-              <Text className="rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">State</Text>
+              <Text className="font-sans rounded bg-slate-700/80 px-2 py-0.5 text-xs text-slate-300">State</Text>
             ) : null}
             {official?.party ? (
-              <Text className={`rounded px-2 py-0.5 text-xs font-semibold ${partyBadgeClass(official.party)}`}>
+              <Text className={`rounded px-2 py-0.5 text-xs font-sans-semibold ${partyBadgeClass(official.party)}`}>
                 {partyShort(official.party)}
               </Text>
             ) : null}
@@ -89,17 +89,17 @@ export default function FeedItemRow({ entry, grid = false }: { entry: FeedEntry;
             ) : (
               <Icons.ChevronRight size={14} colorClassName="accent-slate-400" />
             )}
-            <Text className="text-xs text-slate-400">
+            <Text className="font-sans text-xs text-slate-400">
               {showRelated ? 'Hide' : 'Show'} {related.length} earlier vote{related.length === 1 ? '' : 's'} that day
             </Text>
           </Pressable>
           {showRelated
             ? related.map((vote) => (
                 <View key={vote.id} className="mt-1 flex-row justify-between gap-3">
-                  <Text className="flex-1 text-xs text-slate-300">
+                  <Text className="font-sans flex-1 text-xs text-slate-300">
                     {vote.roll_call?.question ?? vote.subline ?? 'Roll call'}
                   </Text>
-                  <Text className="text-xs text-slate-500">{vote.roll_call?.result}</Text>
+                  <Text className="font-sans text-xs text-slate-500">{vote.roll_call?.result}</Text>
                 </View>
               ))
             : null}

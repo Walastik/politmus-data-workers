@@ -23,9 +23,9 @@ export default function OptionSheet({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView className="flex-1 bg-slate-900" edges={['top', 'bottom']}>
         <View className="flex-row items-center justify-between border-b border-slate-800 px-5 py-3">
-          <Text className="text-base font-semibold text-slate-100">{title}</Text>
+          <Text className="text-base font-sans-semibold text-slate-100">{title}</Text>
           <Pressable onPress={onClose} accessibilityRole="button" hitSlop={8}>
-            <Text className="text-base font-semibold text-blue-400">Done</Text>
+            <Text className="text-base font-sans-semibold text-blue-400">Done</Text>
           </Pressable>
         </View>
         <FlatList
@@ -41,7 +41,7 @@ export default function OptionSheet({
               accessibilityState={{ selected: item.value === value }}
               className="flex-row items-center justify-between border-b border-slate-800/60 px-5 py-3 active:bg-slate-800"
             >
-              <Text className={`text-base ${item.value === value ? 'font-semibold text-white' : 'text-slate-300'}`}>{item.label}</Text>
+              <Text className={`text-base ${item.value === value ? 'font-sans-semibold text-white' : 'font-sans text-slate-300'}`}>{item.label}</Text>
               {item.value === value ? <Icons.Check size={18} colorClassName="accent-blue-400" /> : null}
             </Pressable>
           )}

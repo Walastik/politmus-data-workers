@@ -31,10 +31,10 @@ export function Highlights({
   return (
     <View className="gap-2.5">
       <View className="flex-row flex-wrap items-baseline justify-between gap-2">
-        <Text accessibilityRole="header" className="text-xl font-extrabold text-slate-100">
+        <Text accessibilityRole="header" className="text-xl font-display text-slate-100">
           What stands out so far
         </Text>
-        <Text className="text-xs text-slate-500">Tap one to jump to it</Text>
+        <Text className="font-sans text-xs text-slate-500">Tap one to jump to it</Text>
       </View>
       {/* On a phone it bleeds to the screen edges, so cards scroll under the page margin. */}
       <ScrollView
@@ -56,14 +56,14 @@ export function Highlights({
               className="w-[250px] gap-2 overflow-hidden rounded-2xl border border-[#26324d] bg-[#131d33] p-3.5 active:border-slate-600"
             >
               <View style={{ backgroundColor: tone }} className="absolute left-0 right-0 top-0 h-[3px]" />
-              <Text style={{ color: tone }} className="text-[11px] font-extrabold uppercase tracking-widest">
+              <Text style={{ color: tone }} className="text-[11px] font-sans-extrabold uppercase tracking-widest">
                 {h.title}
               </Text>
               <View className="flex-row items-center gap-2.5">
                 {h.candidate ? <Face name={h.candidate.name} profile={h.candidate.profile} party={h.candidate.party} size={40} /> : null}
-                <Text className="min-w-0 flex-1 text-[15px] font-extrabold leading-5 text-slate-100">{h.headline}</Text>
+                <Text className="min-w-0 flex-1 text-[15px] font-sans-extrabold leading-5 text-slate-100">{h.headline}</Text>
               </View>
-              <Text className="text-xs leading-[17px] text-slate-400">{h.detail}</Text>
+              <Text className="font-sans text-xs leading-[17px] text-slate-400">{h.detail}</Text>
             </Pressable>
           )
         })}
@@ -78,8 +78,8 @@ export function Sources({ snapshot }: { snapshot: ResultsSnapshot }) {
   const aggregated = states.filter(isAggregated)
   return (
     <View className="gap-2">
-      <Text className="text-xs leading-[19px] text-slate-500">
-        <Text className="font-bold text-slate-400">Where these numbers come from.</Text> Each state’s election office publishes
+      <Text className="font-sans text-xs leading-[19px] text-slate-500">
+        <Text className="font-sans-bold text-slate-400">Where these numbers come from.</Text> Each state’s election office publishes
         its own unofficial counts; where we can, we read them directly and change nothing. Totals keep moving as mail,
         provisional and overseas ballots are counted, and are final only once each state certifies. Race calls come from{' '}
         <ExternalText url={AGGREGATOR.url} label="civicAPI" className="text-blue-300" />, for every state: they’re its
@@ -89,15 +89,15 @@ export function Sources({ snapshot }: { snapshot: ResultsSnapshot }) {
         {states
           .filter((s) => !isAggregated(s))
           .map((s) => (
-            <Text key={s.state} className="text-xs leading-[19px] text-slate-500">
+            <Text key={s.state} className="font-sans text-xs leading-[19px] text-slate-500">
               • {s.name}: <ExternalText url={s.source.url} label={s.source.name} className="text-blue-300" />
               {s.source.lastUpdated ? `, updated ${formatSourceTime(s.source.lastUpdated)}` : ''}
             </Text>
           ))}
       </View>
       {aggregated.length ? (
-        <Text className="text-xs leading-[19px] text-slate-500">
-          <Text className="font-bold text-slate-400">Via civicAPI.</Text> Results for {aggregated.map((s) => s.name).join(', ')} are
+        <Text className="font-sans text-xs leading-[19px] text-slate-500">
+          <Text className="font-sans-bold text-slate-400">Via civicAPI.</Text> Results for {aggregated.map((s) => s.name).join(', ')} are
           provided by <ExternalText url={AGGREGATOR.url} label="civicAPI" className="text-blue-300" />, an independent
           aggregator, because we can’t read those states’ feeds directly. civicAPI doesn’t say where its numbers come from, and
           they can trail the states by hours; check each state’s own site for its official count.

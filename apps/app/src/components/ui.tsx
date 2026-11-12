@@ -32,7 +32,7 @@ export function Section({
       <View className="mb-3 flex-row flex-wrap items-center justify-between gap-2">
         <View className="flex-row items-center gap-2">
           {icon}
-          <Text className="text-sm font-semibold uppercase tracking-wider text-slate-300">{title}</Text>
+          <Text className="text-sm font-display-semibold uppercase tracking-wider text-slate-300">{title}</Text>
         </View>
         {action}
       </View>
@@ -45,7 +45,7 @@ export function Section({
 export function LinkAction({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="link" className="flex-row items-center gap-0.5">
-      <Text className="text-sm font-semibold text-blue-400">{label}</Text>
+      <Text className="text-sm font-sans-semibold text-blue-400">{label}</Text>
       <Icons.ChevronRight size={16} colorClassName="accent-blue-400" />
     </Pressable>
   )
@@ -54,20 +54,20 @@ export function LinkAction({ label, onPress }: { label: string; onPress: () => v
 // Inline link to an outside page.
 export function ExternalText({ url, label, className = 'text-blue-400' }: { url: string; label: string; className?: string }) {
   return (
-    <Text onPress={() => openUrl(url)} accessibilityRole="link" className={`underline ${className}`}>
+    <Text onPress={() => openUrl(url)} accessibilityRole="link" className={`font-sans underline ${className}`}>
       {label}
     </Text>
   )
 }
 
 export function Muted({ children }: { children: ReactNode }) {
-  return <Text className="text-sm text-slate-400">{children}</Text>
+  return <Text className="font-sans text-sm text-slate-400">{children}</Text>
 }
 
 export function Badge({ className, children }: { className: string; children: ReactNode }) {
   return (
     <View className={`self-start rounded px-1.5 py-0.5 ${className}`}>
-      <Text className={`text-[10px] font-bold ${className}`}>{children}</Text>
+      <Text className={`text-[10px] font-sans-bold ${className}`}>{children}</Text>
     </View>
   )
 }
@@ -94,7 +94,7 @@ export function Chip({
       className={`flex-row items-center gap-1.5 rounded-full border px-3 py-1 ${active ? activeClassName : 'border-slate-700 bg-slate-800'}`}
     >
       {icon}
-      <Text className={`text-xs font-medium ${active ? 'text-white' : 'text-slate-300'}`}>{label}</Text>
+      <Text className={`text-xs font-sans-medium ${active ? 'text-white' : 'text-slate-300'}`}>{label}</Text>
     </Pressable>
   )
 }
@@ -122,7 +122,7 @@ export function SearchField({
         autoCorrect={false}
         returnKeyType="search"
         clearButtonMode="while-editing"
-        className="flex-1 py-2.5 text-sm text-slate-100"
+        className="font-sans flex-1 py-2.5 text-sm text-slate-100"
       />
     </View>
   )

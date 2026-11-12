@@ -61,7 +61,7 @@ export default function FeedScreen() {
           )
         }
         renderSectionHeader={({ section }) => (
-          <Text className="bg-slate-900 px-4 pt-3 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          <Text className="bg-slate-900 px-4 pt-3 pb-2 text-xs font-sans-semibold uppercase tracking-wider text-slate-400">
             {section.title}
           </Text>
         )}
@@ -70,9 +70,9 @@ export default function FeedScreen() {
           feed.isPending ? (
             <PolitmusLoader className="mt-10" label="Loading the feed" />
           ) : feed.isError ? (
-            <Text className="mt-10 px-8 text-center text-sm text-red-400">{feed.error.message}</Text>
+            <Text className="font-sans mt-10 px-8 text-center text-sm text-red-400">{feed.error.message}</Text>
           ) : (
-            <Text className="mt-10 px-8 text-center text-sm text-slate-400">Nothing new yet.</Text>
+            <Text className="font-sans mt-10 px-8 text-center text-sm text-slate-400">Nothing new yet.</Text>
           )
         }
         ListFooterComponent={

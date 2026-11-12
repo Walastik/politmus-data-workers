@@ -11,6 +11,8 @@ import Animated, {
 } from 'react-native-reanimated'
 import Svg, { ClipPath, Defs, G, LinearGradient, Path, Pattern, Rect, Stop } from 'react-native-svg'
 
+import { COLORS } from '@/lib/theme'
+
 // The Politmus "P" as a strip of litmus paper soaking up water from the foot
 // of the stem: dry paper below the waterline, the brand's red, violet and
 // blue above it.
@@ -139,7 +141,8 @@ export default function PolitmusLoader({ size = 72, progress, label, className }
   const clip = `clip-${id}`
   const litmus = `litmus-${id}`
   const fiber = `fiber-${id}`
-  const dry = dark ? '#293548' : '#E2E0D8'
+  // Dark mode is lighter than COLORS.inkMuted so the dry P stands out on inkDark.
+  const dry = dark ? '#293548' : COLORS.paperDry
   const fiberLight = dark ? '#94A3B8' : '#FFFFFF'
 
   return (
@@ -156,11 +159,11 @@ export default function PolitmusLoader({ size = 72, progress, label, className }
             <Path d={P} clipRule="evenodd" />
           </ClipPath>
           <LinearGradient id={litmus} gradientUnits="userSpaceOnUse" x1="60" y1="0" x2="250" y2="800">
-            <Stop offset="0" stopColor="#DC2626" />
-            <Stop offset="0.28" stopColor="#DC2626" />
-            <Stop offset="0.5" stopColor="#7C3AED" />
-            <Stop offset="0.72" stopColor="#2563EB" />
-            <Stop offset="1" stopColor="#2563EB" />
+            <Stop offset="0" stopColor={COLORS.litmusRed} />
+            <Stop offset="0.28" stopColor={COLORS.litmusRed} />
+            <Stop offset="0.5" stopColor={COLORS.litmusViolet} />
+            <Stop offset="0.72" stopColor={COLORS.litmusBlue} />
+            <Stop offset="1" stopColor={COLORS.litmusBlue} />
           </LinearGradient>
           {/* Paper grain: a few short fibers and flecks, tiled. */}
           <Pattern id={fiber} patternUnits="userSpaceOnUse" width="48" height="48">

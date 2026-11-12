@@ -97,15 +97,15 @@ export function StatePanel({
                 <View key={c.name} className="flex-row items-center gap-2.5 rounded-[14px] bg-[#1a2540] p-2.5">
                   <Face name={c.name} profile={c.profile} party={c.party} size={48} />
                   <View className="min-w-0 flex-1 gap-0.5">
-                    <Text numberOfLines={1} className="text-sm font-bold text-slate-100">
+                    <Text numberOfLines={1} className="text-sm font-sans-bold text-slate-100">
                       {c.name}
                     </Text>
                     <View className="flex-row flex-wrap items-center gap-1.5">
-                      <Text style={{ color: PARTY_COLOR[partyKey(c.party)] }} className="text-[11px]">
+                      <Text style={{ color: PARTY_COLOR[partyKey(c.party)] }} className="font-sans text-[11px]">
                         {PARTY_LABEL[partyKey(c.party)]}
                       </Text>
                       {c.incumbent ? <Tag tone="incumbent">INCUMBENT</Tag> : null}
-                      {c.profile?.receipts ? <Text className="text-[11px] text-slate-400">Raised {formatMoney(c.profile.receipts)}</Text> : null}
+                      {c.profile?.receipts ? <Text className="font-sans text-[11px] text-slate-400">Raised {formatMoney(c.profile.receipts)}</Text> : null}
                     </View>
                     {c.profile ? <ProfileLink profile={c.profile} name={c.name} /> : null}
                   </View>
@@ -131,8 +131,8 @@ export function StatePanel({
         <Title>{name}</Title>
         {isAggregated(results) ? (
           <View accessibilityRole="summary" className="mt-1.5 rounded-xl border border-dashed border-amber-300/55 bg-amber-900/20 px-3 py-2.5">
-            <Text className="text-[12.5px] leading-5 text-slate-200">
-              <Text className="font-bold text-amber-300">Counts via civicAPI, not from {name} directly.</Text> We can’t read{' '}
+            <Text className="font-sans text-[12.5px] leading-5 text-slate-200">
+              <Text className="font-sans-bold text-amber-300">Counts via civicAPI, not from {name} directly.</Text> We can’t read{' '}
               {name}’s own results feed, so these come from{' '}
               <ExternalText url={AGGREGATOR.url} label="civicAPI" className="text-blue-300" />, an independent aggregator that
               doesn’t publish its sources. They can trail the state’s count by hours.
@@ -170,7 +170,7 @@ export function StatePanel({
               accessibilityState={{ selected: race === senate }}
               className={`min-h-[34px] justify-center rounded-full border px-3 ${race === senate ? 'border-slate-200 bg-slate-200' : 'border-[#26324d] bg-[#1a2540]'}`}
             >
-              <Text className={`text-xs font-semibold ${race === senate ? 'text-slate-900' : 'text-slate-200'}`}>Senate</Text>
+              <Text className={`text-xs font-sans-semibold ${race === senate ? 'text-slate-900' : 'text-slate-200'}`}>Senate</Text>
             </Pressable>
           ) : null}
           {office === 'S' && house.length ? <Source>+ {house.length} House seats below</Source> : null}
@@ -205,7 +205,7 @@ export function StatePanel({
 
 function Title({ children }: { children: ReactNode }) {
   return (
-    <Text accessibilityRole="header" className="text-xl font-extrabold tracking-tight text-slate-100">
+    <Text accessibilityRole="header" className="text-xl font-display tracking-tight text-slate-100">
       {children}
     </Text>
   )
@@ -220,7 +220,7 @@ function BackButton({ onPress }: { onPress: () => void }) {
       hitSlop={6}
       className="min-h-[34px] justify-center self-start rounded-full border border-[#26324d] bg-slate-900/85 px-3"
     >
-      <Text className="text-[13px] font-semibold text-slate-200">← All states</Text>
+      <Text className="text-[13px] font-sans-semibold text-slate-200">← All states</Text>
     </Pressable>
   )
 }
@@ -228,8 +228,8 @@ function BackButton({ onPress }: { onPress: () => void }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-1 rounded-xl bg-[#1a2540] px-2.5 py-2">
-      <Text className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</Text>
-      <Text style={TABULAR} className="mt-0.5 text-base font-extrabold text-slate-100">
+      <Text className="text-[10px] font-sans-bold uppercase tracking-wide text-slate-500">{label}</Text>
+      <Text style={TABULAR} className="mt-0.5 text-base font-sans-extrabold text-slate-100">
         {value}
       </Text>
     </View>
@@ -241,7 +241,7 @@ function Tag({ tone, children }: { tone: 'incumbent' | 'leads'; children: ReactN
   const text = tone === 'incumbent' ? 'text-amber-300' : 'text-emerald-300'
   return (
     <View className={`rounded-[5px] border px-1.5 ${look}`}>
-      <Text className={`text-[10px] font-extrabold tracking-wide ${text}`}>{children}</Text>
+      <Text className={`text-[10px] font-sans-extrabold tracking-wide ${text}`}>{children}</Text>
     </View>
   )
 }
@@ -256,7 +256,7 @@ function ProfileLink({ profile, name }: { profile: CandidateProfile; name: strin
       hitSlop={{ top: 10, bottom: 10, left: 4, right: 12 }}
       className="mt-1 self-start"
     >
-      <Text className="text-[11px] font-bold text-blue-300">Full profile →</Text>
+      <Text className="text-[11px] font-sans-bold text-blue-300">Full profile →</Text>
     </Pressable>
   )
 }
@@ -304,15 +304,15 @@ function RaceCard({ state, race }: { state: StateResults; race: RaceResult }) {
             <View className="pt-px">
               <StatusBadge status={status} />
             </View>
-            <Text className="flex-1 text-xs leading-[18px] text-slate-400">
+            <Text className="font-sans flex-1 text-xs leading-[18px] text-slate-400">
               {status === 'certified' ? (
                 <>
-                  {state.name} certified <Text className="font-bold text-slate-200">{winner.name}</Text> the winner. This count
+                  {state.name} certified <Text className="font-sans-bold text-slate-200">{winner.name}</Text> the winner. This count
                   is final.
                 </>
               ) : (
                 <>
-                  {race.call?.source} called this for <Text className="font-bold text-slate-200">{winner.name}</Text>
+                  {race.call?.source} called this for <Text className="font-sans-bold text-slate-200">{winner.name}</Text>
                   {race.call?.at ? ` on ${formatSourceTime(race.call.at)}` : ''}. Votes are still being counted, and only{' '}
                   {state.name}’s certification makes it final.
                 </>
@@ -370,7 +370,7 @@ function TugOfWar({
         className="h-[34px] flex-row overflow-hidden rounded-[10px] bg-slate-900"
       >
         <Animated.View style={[{ flexBasis: 0, backgroundColor: leaderColor }, left]} className="justify-center px-2.5">
-          <Text numberOfLines={1} className="text-xs font-extrabold text-white">
+          <Text numberOfLines={1} className="text-xs font-sans-extrabold text-white">
             {formatPercent(share(leader.votes, totalVotes))}
           </Text>
         </Animated.View>
@@ -378,18 +378,18 @@ function TugOfWar({
           style={[{ flexBasis: 0, backgroundColor: PARTY_COLOR[partyKey(runnerUp.party)] }, right]}
           className="items-end justify-center px-2.5"
         >
-          <Text numberOfLines={1} className="text-xs font-extrabold text-white">
+          <Text numberOfLines={1} className="text-xs font-sans-extrabold text-white">
             {formatPercent(share(runnerUp.votes, totalVotes))}
           </Text>
         </Animated.View>
         <View pointerEvents="none" className="absolute bottom-0 left-1/2 top-0 w-0.5 bg-white/70" />
       </View>
       <View className="mt-1.5 flex-row items-baseline justify-between gap-2">
-        <Text className="shrink text-xs text-slate-400">
-          <Text className="font-bold text-slate-200">{leader.name}</Text> leads by{' '}
-          <Text className="font-bold text-slate-200">{formatVotes(marginVotes)}</Text> votes
+        <Text className="font-sans shrink text-xs text-slate-400">
+          <Text className="font-sans-bold text-slate-200">{leader.name}</Text> leads by{' '}
+          <Text className="font-sans-bold text-slate-200">{formatVotes(marginVotes)}</Text> votes
         </Text>
-        <Text style={{ color: leaderColor }} className="text-xs font-bold">
+        <Text style={{ color: leaderColor }} className="text-xs font-sans-bold">
           {formatMargin(margin)}
         </Text>
       </View>
@@ -424,18 +424,18 @@ function CandidateCard({
       <Face name={c.name} profile={c.profile} party={c.party} size={48} />
       <View className="min-w-0 flex-1">
         <View className="flex-row items-baseline justify-between gap-2">
-          <Text numberOfLines={1} className="shrink text-sm font-bold text-slate-100">
+          <Text numberOfLines={1} className="shrink text-sm font-sans-bold text-slate-100">
             {c.name}
           </Text>
-          <Text style={TABULAR} className="text-lg font-extrabold text-slate-100">
+          <Text style={TABULAR} className="text-lg font-display text-slate-100">
             {formatPercent(share(c.votes, totalVotes))}
           </Text>
         </View>
         <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5">
-          <Text style={{ color }} className="text-[11px]">
+          <Text style={{ color }} className="font-sans text-[11px]">
             {PARTY_LABEL[partyKey(c.party)]}
           </Text>
-          <Text className="text-[11px] text-slate-400">{formatVotes(c.votes)} votes</Text>
+          <Text className="font-sans text-[11px] text-slate-400">{formatVotes(c.votes)} votes</Text>
           {c.incumbent ? <Tag tone="incumbent">INCUMBENT</Tag> : null}
           {won ? <StatusBadge status={won} /> : isLeader ? <Tag tone="leads">LEADS</Tag> : null}
         </View>
@@ -444,17 +444,17 @@ function CandidateCard({
         </View>
         {c.profile?.receipts ? (
           <View className="mt-1.5 flex-row flex-wrap gap-x-3">
-            <Text style={TABULAR} className="text-[11px] text-slate-400">
-              Raised <Text className="font-bold text-slate-200">{formatMoney(c.profile.receipts)}</Text>
+            <Text style={TABULAR} className="font-sans text-[11px] text-slate-400">
+              Raised <Text className="font-sans-bold text-slate-200">{formatMoney(c.profile.receipts)}</Text>
             </Text>
             {perVote ? (
-              <Text style={TABULAR} className="text-[11px] text-slate-400">
-                <Text className="font-bold text-slate-200">${perVote.toFixed(2)}</Text> per vote
+              <Text style={TABULAR} className="font-sans text-[11px] text-slate-400">
+                <Text className="font-sans-bold text-slate-200">${perVote.toFixed(2)}</Text> per vote
               </Text>
             ) : null}
             {c.profile.outsideSupport ? (
-              <Text style={TABULAR} className="text-[11px] text-slate-400">
-                Outside help <Text className="font-bold text-slate-200">{formatMoney(c.profile.outsideSupport)}</Text>
+              <Text style={TABULAR} className="font-sans text-[11px] text-slate-400">
+                Outside help <Text className="font-sans-bold text-slate-200">{formatMoney(c.profile.outsideSupport)}</Text>
               </Text>
             ) : null}
           </View>
@@ -525,7 +525,7 @@ function CountyLists({
             {list(
               <>
                 {c.name.split(' ').at(-1)}’s strongest counties{' '}
-                <Text className="font-medium normal-case tracking-normal">(ahead in {ahead.length})</Text>
+                <Text className="font-sans-medium normal-case tracking-normal">(ahead in {ahead.length})</Text>
               </>,
               strongest.map((r) => ({
                 county: r.county,
@@ -562,11 +562,11 @@ function CountyRow({
       <Row onPress={onPress} label={`${label}, ${side}${flagged ? ', shown on the map' : ''}`}>
         <View className="min-w-0 flex-1 flex-row items-center gap-2">
           <Dot color={dot} />
-          <Text numberOfLines={1} className={`shrink text-[13px] ${flagged ? 'font-bold text-amber-200' : 'text-slate-200'}`}>
+          <Text numberOfLines={1} className={`shrink text-[13px] ${flagged ? 'font-sans-bold text-amber-200' : 'font-sans text-slate-200'}`}>
             {label}
           </Text>
         </View>
-        <Text style={[TABULAR, sideColor ? { color: sideColor } : null]} className="text-[13px] font-bold text-slate-200">
+        <Text style={[TABULAR, sideColor ? { color: sideColor } : null]} className="text-[13px] font-sans-bold text-slate-200">
           {side}
         </Text>
       </Row>

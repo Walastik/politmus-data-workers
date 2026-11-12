@@ -16,8 +16,8 @@ export default function RepsScreen() {
   return (
     <ScrollView className="flex-1 bg-slate-900" contentContainerClassName="gap-6 px-4 py-5" keyboardShouldPersistTaps="handled">
       <View>
-        <Text className="text-2xl font-bold tracking-tight text-slate-50">Who represents me</Text>
-        <Text className="mt-1 text-sm text-slate-400">
+        <Text className="text-2xl font-display tracking-tight text-slate-50">Who represents me</Text>
+        <Text className="font-sans mt-1 text-sm text-slate-400">
           Your members of Congress and state officials, how they score, and how to reach them.
         </Text>
       </View>
@@ -32,7 +32,7 @@ export default function RepsScreen() {
           {!place ? null : lookup.status === 'loading' || lookup.status === 'idle' ? (
             <PolitmusLoader className="mt-6" label="Finding your representatives" />
           ) : lookup.status === 'error' ? (
-            <Text className="text-red-400">{lookup.message}</Text>
+            <Text className="font-sans text-red-400">{lookup.message}</Text>
           ) : (
             <LookupResults lookup={lookup.data} />
           )}

@@ -27,17 +27,17 @@ export default function VotersScreen() {
         keyExtractor={(voter) => voter.official_id}
         ListHeaderComponent={
           <View className="py-5">
-            <Text className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{chamberLabel} votes</Text>
+            <Text className="text-[10px] font-sans-semibold uppercase tracking-wider text-slate-500">{chamberLabel} votes</Text>
             <View className="mt-2 flex-row items-center gap-2">
               <View className={`rounded px-1.5 py-0.5 ${partyBadgeClass(party)}`}>
-                <Text className={`text-xs font-semibold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
+                <Text className={`text-xs font-sans-semibold ${partyBadgeClass(party)}`}>{partyShort(party)}</Text>
               </View>
-              <Text className="text-lg font-semibold text-slate-100">{party}</Text>
+              <Text className="text-lg font-display-semibold text-slate-100">{party}</Text>
             </View>
           </View>
         }
         ListEmptyComponent={
-          <Text className={`text-sm ${voters.isError ? 'text-red-400' : 'text-slate-400'}`}>
+          <Text className={`font-sans text-sm ${voters.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {voters.isError
               ? voters.error.message
               : voters.isPending
@@ -50,7 +50,7 @@ export default function VotersScreen() {
             <Text className="min-w-0 flex-1 font-mono text-sm text-slate-200" numberOfLines={1}>
               {item.name}
             </Text>
-            <Text className={`w-8 text-right font-mono text-sm font-semibold ${voteTextClass(item.position)}`}>{voteShort(item.position)}</Text>
+            <Text className={`w-8 text-right font-mono-semibold text-sm ${voteTextClass(item.position)}`}>{voteShort(item.position)}</Text>
           </View>
         )}
       />
