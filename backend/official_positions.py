@@ -27,6 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 
 from database import SessionLocal
@@ -190,9 +191,9 @@ def is_due_after_election(
     max_age_days: float,
     force: bool = False,
 ) -> bool:
-    """A candidate after Election Day: one more run so the results page
-    shows their latest positions, then nothing until the next cycle starts
-    on January 1. A run counts once it finishes without failing; failures
+    """A winner or runner-up after Election Day: one more run so the results
+    page shows their latest positions, then nothing until the next cycle
+    starts on January 1. A run counts once it finishes without failing; failures
     keep their usual backoff and cap."""
     if sync is None or force:
         return True
@@ -200,6 +201,42 @@ def is_due_after_election(
         return is_due(sync, now=now, version=version, max_age_days=max_age_days)
     after = datetime.combine(election_day + timedelta(days=1), datetime.min.time())
     return sync.last_attempt_at is None or sync.last_attempt_at < after
+
+
+# The /results page's snapshot, published by the Election Results workflow.
+ELECTION_RESULTS_URL = os.getenv(
+    "ELECTION_RESULTS_URL",
+    "https://raw.githubusercontent.com/Walastik/politmus-data-workers/election-results-data/{date}.json",
+)
+
+
+def top_two_finishers(snapshot: dict) -> set[str]:
+    """Official ids of each race's winner and runner-up, by votes, from a
+    results snapshot. Write-in lines are left out."""
+    ids: set[str] = set()
+    for state in (snapshot.get("states") or {}).values():
+        for race in state.get("races") or []:
+            ballot = [c for c in race.get("candidates") or [] if not c.get("writeIn")]
+            for candidate in sorted(ballot, key=lambda c: -(c.get("votes") or 0))[:2]:
+                profile = candidate.get("profile") or {}
+                if profile.get("officialId"):
+                    ids.add(profile["officialId"])
+    return ids
+
+
+def election_finishers(election_day: date) -> set[str]:
+    """Winners and runners-up of that general election, from the published
+    results snapshot."""
+    url = ELECTION_RESULTS_URL.format(date=election_day.isoformat())
+    try:
+        response = httpx.get(url, timeout=60, follow_redirects=True)
+        response.raise_for_status()
+        ids = top_two_finishers(response.json())
+    except Exception as exc:
+        raise RuntimeError(f"Couldn't read the election results at {url}: {type(exc).__name__}: {exc}") from exc
+    if not ids:
+        raise RuntimeError(f"The election results at {url} name no finishers.")
+    return ids
 
 
 def select_officials(
@@ -254,6 +291,9 @@ def select_officials(
     if level == CANDIDATE_LEVEL:
         election_day = general_election_date(current_cycle(now.date()))
         if now.date() > election_day:
+            # After the election only the winner and runner-up of each race
+            # still matter (the results page shows them), each for one run.
+            query = query.filter(Official.id.in_(election_finishers(election_day)))
             due = partial(is_due_after_election, election_day=election_day)
     rows = [
         (official, sync)

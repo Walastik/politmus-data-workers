@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import unittest
+from unittest import mock
 from datetime import date, datetime, timedelta
 import tempfile
 from pathlib import Path
@@ -39,7 +40,7 @@ from services.official_positions import (
     verify_positions,
 )
 from services.llm_runtime import TruncatedOutputError
-from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, is_due_after_election, load_local_prompts
+from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, is_due_after_election, load_local_prompts, top_two_finishers
 
 OFFICIAL = SimpleNamespace(
     id="E000001",
@@ -465,6 +466,29 @@ class IsDueAfterElectionTests(unittest.TestCase):
         self.assertTrue(self.due(self.sync(status="failed", attempts=1, last_attempt_at=self.now - timedelta(hours=7))))
 
 
+
+class TopTwoFinishersTests(unittest.TestCase):
+    def test_winner_and_runner_up_by_votes_without_write_ins(self):
+        def line(name, votes, official_id=None, write_in=False):
+            row = {"name": name, "votes": votes}
+            if official_id:
+                row["profile"] = {"officialId": official_id}
+            if write_in:
+                row["writeIn"] = True
+            return row
+
+        snapshot = {"states": {
+            "TX": {"races": [
+                {"candidates": [line("Third", 900, "C3"), line("First", 5000, "C1"),
+                                line("Write-in", 4000, "W1", write_in=True), line("Second", 3000, "C2")]},
+                # The runner-up has no Politmus profile: only the winner counts.
+                {"candidates": [line("Winner", 10, "C4"), line("Unknown", 8)]},
+            ]},
+        }}
+        self.assertEqual(top_two_finishers(snapshot), {"C1", "C2", "C4"})
+        self.assertEqual(top_two_finishers({}), set())
+
+
 class ExtractPositionsTests(unittest.TestCase):
     def test_runs_chunks_in_parallel_and_merges(self):
         threads = set()
@@ -842,6 +866,15 @@ class RunPositionsDatabaseTests(unittest.TestCase):
             self.assertFalse(selected())
             session.query(Candidacy).filter_by(fec_candidate_id="H6ZZ99001").update({"in_general_election": True})
             self.assertTrue(selected())
+            # After Election Day only winners and runners-up are picked up.
+            after = datetime(2026, 11, 14, 12, 0, 0)
+            with mock.patch("official_positions.election_finishers", return_value={"SOMEONE_ELSE"}) as finishers:
+                rows = select_officials(session, version="v", now=after, limit=None, level="candidate")
+                self.assertNotIn(self.OFFICIAL_ID, [o.id for o, _ in rows])
+                finishers.assert_called_once_with(date(2026, 11, 3))
+            with mock.patch("official_positions.election_finishers", return_value={self.OFFICIAL_ID}):
+                rows = select_officials(session, version="v", now=after, limit=None, level="candidate")
+                self.assertIn(self.OFFICIAL_ID, [o.id for o, _ in rows])
             # A past cycle's candidacy doesn't count.
             session.query(Candidacy).filter_by(fec_candidate_id="H6ZZ99001").update({"election_year": 2024})
             self.assertFalse(selected())
