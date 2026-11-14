@@ -1,27 +1,27 @@
-# Mac Mini report: Fri Nov 13, 2026
+# Mac Mini report: Sat Nov 14, 2026
 
-⚠️ Degraded: 2 of 4 passes ran, 0 step(s) failed. 16 item(s) failed and will retry on their own.
+✅ Healthy: 4 of 4 passes ran and every step finished. 16 item(s) failed and will retry on their own.
 
-Covers Nov 12 17:43 to Nov 13 17:43 (CST). Written by dexter-mini at 17:43.
+Covers Nov 13 07:00 to Nov 14 07:00 (CST). Written by dexter-mini at 07:00.
 
 ## What got done
 
 | Step | Last 24 hours |
 |---|---|
-| Bills | 55 bills selected · 55 ok (saved) · 130 intents saved |
+| Bills | 96 bills selected · 96 ok (saved) · 234 intents saved |
 | Debates | 7 due · 7 ok |
 | Officials' positions | 1 officials selected · 1 extracted · 67 stances saved |
-| Candidates' positions | 50 officials selected · 19 extracted · 7 no positions found · 266 stances saved · 1 blocked · 26 failed |
+| Candidates' positions | 100 officials selected · 50 extracted · 13 no positions found · 674 stances saved · 1 blocked · 41 failed |
 | Target matching |  |
-| Scoring | 890 unchanged |
+| Scoring | 1,841 unchanged |
 
 ## Backlog
 
 | | Now | Last report | Change |
 |---|---:|---:|---:|
-| Bills due | 0 | | |
-| Officials due | 0 | | |
-| Candidates due | 1,196 | | |
+| Bills due | 0 | 0 | +0 |
+| Officials due | 0 | 0 | +0 |
+| Candidates due | 1,144 | 1,196 | -52 |
 
 Due means what the next pass would pick up: new, changed, failed and waiting to retry, or older than 30 days.
 
@@ -70,6 +70,8 @@ for id in H0CA35146 H0CA48172 H0GA14048 H0NY02267 H0TN09061 H0TX08145 H0TX09077 
 |---|---|---|---|---|---|---|---|---|---|
 | 08:40 | 1h39m | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ some items failed | ✅ | ✅ |
 | 13:30 | 3h00m | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ some items failed | ✅ | ✅ |
+| 19:30 | 2h02m | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ some items failed | ✅ | ✅ |
+| 01:30 | 1h39m | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ some items failed | ✅ | ✅ |
 
 Code: Now at 49e8f70 Congress page: key vote numbers behind an info button (#111)
 
