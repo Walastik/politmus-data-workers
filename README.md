@@ -280,6 +280,8 @@ Officials that failed are retried by later runs after a 6-hour backoff (`--force
 15 2 * * * cd /path/to/politmus-data-workers && ./scripts/run_positions.sh --limit 40 >> /tmp/official_positions.log 2>&1
 ```
 
+**New members.** Someone elected as a non-member keeps their campaign positions on their `level='candidate'` record (linked to the member by FEC candidate ID). Until their official site states positions, the member page shows those as a separate, clearly labeled "Campaign Positions" section (`campaign_positions` on `GET /api/officials/{id}`, never mixed into `stated_positions`), and the Politmus Report doesn't use them. A new member's site often has no issue pages for the first few weeks, so while it gives no positions (`no_positions`, `no_issue_pages`, `thin_site`) the member is rechecked every 7 days instead of 30.
+
 **Candidates.** `--level candidate` reads the campaign sites of people running this cycle (see Candidates below): anyone with a candidacy this cycle who is on the general-election ballot or raised at least $50,000, and has a website. Their stances are saved with `source_type='campaign_site'` and the prompt describes them as candidates, not office holders. Members running again keep their `official_site` positions. After Election Day only each race's winner and runner-up are picked up (by votes, from the results snapshot the /results page reads; `ELECTION_RESULTS_URL` overrides where it's read from), each for one more run so the results page shows their latest positions, and then none until the next cycle starts on January 1 (failed runs still retry with backoff; `--official-id` and `--force` still select anyone). A separate nightly line keeps them apart from the member run:
 
 ```

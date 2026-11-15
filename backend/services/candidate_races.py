@@ -71,3 +71,38 @@ def visible_candidacies(candidacies, show_all=False, today=None):
     return [
         c for c in ranked if c.in_general_election or (c.receipts or 0) >= LIST_MIN_RECEIPTS
     ], False
+
+
+def campaign_records(session, officials):
+    """Member id -> ids of the level='candidate' records for the same person,
+    for members who ran as non-members (a newly elected member's campaign).
+
+    Linked by FEC candidate ID: the crosswalk puts a member's IDs on
+    fec_candidate_ids, and the FEC sync moves their candidacies onto them.
+    """
+    from models import Candidacy, Official
+
+    members = [o for o in officials if o.level != CANDIDATE_LEVEL]
+    if not members:
+        return {}
+    fec_ids = {o.id: set(o.fec_candidate_ids or []) for o in members}
+    for official_id, fec_id in (
+        session.query(Candidacy.official_id, Candidacy.fec_candidate_id)
+        .filter(Candidacy.official_id.in_(list(fec_ids)))
+    ):
+        fec_ids[official_id].add(fec_id)
+    wanted = set().union(*fec_ids.values())
+    if not wanted:
+        return {}
+    candidate_ids = {
+        row.id
+        for row in session.query(Official.id).filter(
+            Official.level == CANDIDATE_LEVEL, Official.id.in_(list(wanted))
+        )
+    }
+    records = {}
+    for official_id, ids in fec_ids.items():
+        linked = sorted(ids & candidate_ids)
+        if linked:
+            records[official_id] = linked
+    return records

@@ -62,6 +62,15 @@ export interface OfficialStance {
   model?: string | null
 }
 
+// A new member's positions from the campaign website they ran on. Never
+// mixed into stated_positions: they're what the person said as a candidate,
+// and the Politmus Report doesn't use them.
+export interface CampaignPositions {
+  election_year: number | null
+  candidate_id: string
+  positions: OfficialStance[]
+}
+
 export interface PositionsSync {
   status: PositionsStatus | string
   last_attempt_at: string | null
@@ -166,6 +175,8 @@ export interface VoteAlignment {
 export interface OfficialDetail extends Official {
   votes: OfficialVote[]
   stated_positions: OfficialStance[]
+  // Only while stated_positions is empty.
+  campaign_positions?: CampaignPositions | null
   positions_sync: PositionsSync | null
   accountability?: AccountabilityScore | null
   alignments?: VoteAlignment[]

@@ -38,7 +38,8 @@ from models import Candidacy, Official, OfficialPositionSync, OfficialSourcePage
 from services import llm_runtime
 from services.accountability import try_rescore
 from services.candidate_races import (
-    CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, current_cycle, general_election_date,
+    CANDIDATE_DETAIL_MIN_RECEIPTS, CANDIDATE_LEVEL, campaign_records, current_cycle,
+    general_election_date,
 )
 from services.target_matching import make_matcher, try_refresh
 from services.llm_runtime import TruncatedOutputError, load_local_module, required_strings
@@ -90,6 +91,11 @@ LOCAL_CONFIG_PATH = Path(__file__).resolve().parent / "scripts" / "positions_llm
 
 # Statuses where the site was read and the model ran (or had nothing to read).
 EXTRACTED_STATUSES = ("ok", "no_positions", "no_issue_pages")
+# A newly elected member's site often has no issue pages for the first few
+# weeks; recheck it this often instead of every DEFAULT_MAX_AGE_DAYS until it
+# gives positions. Their campaign positions show meanwhile.
+NEW_MEMBER_RECHECK_DAYS = 7
+NOTHING_FOUND_STATUSES = ("no_positions", "no_issue_pages", "thin_site")
 
 
 def utcnow() -> datetime:
@@ -239,6 +245,21 @@ def election_finishers(election_day: date) -> set[str]:
     return ids
 
 
+def is_due_new_member(
+    sync: OfficialPositionSync | None,
+    *,
+    now: datetime,
+    version: str,
+    max_age_days: float,
+    force: bool = False,
+) -> bool:
+    """A member who ran as a non-member: weekly while their site has given
+    no positions, then the usual schedule."""
+    if sync is not None and sync.status in NOTHING_FOUND_STATUSES:
+        max_age_days = min(max_age_days, NEW_MEMBER_RECHECK_DAYS)
+    return is_due(sync, now=now, version=version, max_age_days=max_age_days, force=force)
+
+
 def select_officials(
     session,
     *,
@@ -295,10 +316,16 @@ def select_officials(
             # still matter (the results page shows them), each for one run.
             query = query.filter(Official.id.in_(election_finishers(election_day)))
             due = partial(is_due_after_election, election_day=election_day)
+    candidates = query.all()
+    new_members = set()
+    if level != CANDIDATE_LEVEL:
+        new_members = set(campaign_records(session, [official for official, _ in candidates]))
     rows = [
         (official, sync)
-        for official, sync in query.all()
-        if due(sync, now=now, version=version, max_age_days=max_age_days, force=force)
+        for official, sync in candidates
+        if (is_due_new_member if official.id in new_members else due)(
+            sync, now=now, version=version, max_age_days=max_age_days, force=force
+        )
     ]
     # Never-attempted first, then oldest attempt first (round-robin).
     rows.sort(key=lambda row: (

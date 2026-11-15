@@ -11,6 +11,7 @@ from api.filters import name_search_pattern, normalize_party, normalize_state
 from api.routes.candidates import race_for
 from api.schemas import (
     AccountabilityScoreOut,
+    CampaignPositionsOut,
     CandidacyOut,
     FinanceElectionOut,
     FinanceStateOut,
@@ -254,6 +255,38 @@ def _candidacy_out(candidacy):
     )
 
 
+def _campaign_positions(db: Session, official: Official) -> Optional[CampaignPositionsOut]:
+    """A new member's positions from the campaign website they ran on, from
+    their level='candidate' record (the latest campaign with any)."""
+    candidate_ids = candidate_races.campaign_records(db, [official]).get(official.id)
+    if not candidate_ids:
+        return None
+    years = dict(
+        db.query(Candidacy.fec_candidate_id, func.max(Candidacy.election_year))
+        .filter(Candidacy.fec_candidate_id.in_(candidate_ids))
+        .group_by(Candidacy.fec_candidate_id)
+        .all()
+    )
+    for candidate_id in sorted(candidate_ids, key=lambda cid: years.get(cid) or 0, reverse=True):
+        stances = (
+            db.query(OfficialStance)
+            .filter(OfficialStance.official_id == candidate_id)
+            .order_by(
+                _EMPHASIS_ORDER,
+                nulls_last(OfficialStance.policy_area),
+                OfficialStance.target_name,
+            )
+            .all()
+        )
+        if stances:
+            return CampaignPositionsOut(
+                election_year=years.get(candidate_id),
+                candidate_id=candidate_id,
+                positions=[OfficialStanceOut.model_validate(s) for s in stances],
+            )
+    return None
+
+
 @router.get("/{official_id:path}", response_model=OfficialDetailOut)
 def get_official(official_id: str, db: Session = Depends(get_db)):
     official_id = unquote(official_id)
@@ -281,6 +314,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
         )
         .all()
     )
+    campaign = None if stances else _campaign_positions(db, official)
     sync = db.get(OfficialPositionSync, official_id)
     score = db.get(OfficialScore, official_id)
     alignment_rows = (
@@ -340,6 +374,7 @@ def get_official(official_id: str, db: Session = Depends(get_db)):
             for vote, bill, roll_call in vote_rows
         ],
         stated_positions=[OfficialStanceOut.model_validate(s) for s in stances],
+        campaign_positions=campaign,
         positions_sync=PositionsSyncOut.model_validate(sync) if sync else None,
         **score_fields(score),
         accountability=AccountabilityScoreOut.model_validate(score) if score else None,

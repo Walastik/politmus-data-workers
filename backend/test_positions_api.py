@@ -74,10 +74,13 @@ class PositionsApiTests(unittest.TestCase):
         self._cleanup()
 
     def _cleanup(self):
-        from models import Official, OfficialPositionSync, OfficialStance, PolicyTarget
+        from models import Candidacy, Official, OfficialPositionSync, OfficialStance, PolicyTarget
 
         session = self.SessionLocal()
         pattern = f"{self.PREFIX}%"
+        session.query(Candidacy).filter(Candidacy.fec_candidate_id.like(pattern)).delete(
+            synchronize_session=False
+        )
         session.query(OfficialStance).filter(OfficialStance.official_id.like(pattern)).delete(
             synchronize_session=False
         )
@@ -222,11 +225,48 @@ class PositionsApiTests(unittest.TestCase):
         never = self.client.get(f"/api/officials/{self.NEVER}").json()
         self.assertEqual(never["display_name"], "Zzpos Charlie")
 
+    def test_new_member_shows_campaign_positions_apart_until_their_own(self):
+        from models import Candidacy, Official, OfficialStance, PolicyTarget
+
+        campaign = "ZZPOSC01"
+        session = self.SessionLocal()
+        session.add(Official(
+            id=campaign, name="Zzpos Charlie", state="New York", party="Democratic",
+            office="House candidate", district=1, level="candidate", current_member=False,
+        ))
+        session.flush()
+        session.add(Candidacy(
+            fec_candidate_id=campaign, election_year=2026, official_id=self.NEVER,
+            state="NY", office="H", district=1,
+        ))
+        target = session.query(PolicyTarget).filter_by(slug="zzpos-medicaid").one()
+        session.add(OfficialStance(
+            official_id=campaign, target_id=target.id, target_name="Medicaid", mechanism="funding",
+            direction="increase", source_type="campaign_site",
+            source_url="https://zzposforcongress.com/issues", evidence_quote="Protect Medicaid.",
+        ))
+        # A member with positions of their own doesn't get their campaign's.
+        session.get(Official, self.DONE).fec_candidate_ids = [campaign]
+        session.commit()
+        session.close()
+
+        body = self.client.get(f"/api/officials/{self.NEVER}").json()
+        self.assertEqual(body["stated_positions"], [])
+        self.assertEqual(body["campaign_positions"]["election_year"], 2026)
+        self.assertEqual(body["campaign_positions"]["candidate_id"], campaign)
+        [position] = body["campaign_positions"]["positions"]
+        self.assertEqual((position["target_name"], position["source_type"]), ("Medicaid", "campaign_site"))
+
+        done = self.client.get(f"/api/officials/{self.DONE}").json()
+        self.assertEqual(len(done["stated_positions"]), 3)
+        self.assertIsNone(done["campaign_positions"])
+
     def test_detail_for_official_never_attempted(self):
         response = self.client.get(f"/api/officials/{self.NEVER}")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["stated_positions"], [])
+        self.assertIsNone(body["campaign_positions"])
         self.assertIsNone(body["positions_sync"])
 
     def test_list_includes_positions_status_without_per_row_queries(self):

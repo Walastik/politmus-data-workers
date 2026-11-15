@@ -26,6 +26,7 @@ import {
   mechanismBadgeClass,
   positionBadgeClass,
   type AccountabilityScore,
+  type CampaignPositions as CampaignPositionsData,
   type OfficialStance,
   type PositionsSync,
   type VoteAlignment,
@@ -158,12 +159,44 @@ function MatchItem({ match }: { match: VoteAlignment }) {
   )
 }
 
-function SourceLink({ url }: { url: string }) {
+function SourceLink({ url, label = 'Source' }: { url: string; label?: string }) {
   return (
     <Text onPress={() => openUrl(url)} accessibilityRole="link" className="font-sans mt-1 text-[11px] text-slate-500 underline">
-      Source: {sourceLabel(url)}
+      {label}: {sourceLabel(url)}
     </Text>
   )
+}
+
+// How a list of positions is drawn: purple for what an official's site says
+// now, amber for what a new member said as a candidate, labeled on every item.
+interface PositionsLook {
+  bar: string
+  more: string
+  quoteBorder: string
+  quoteTone: string
+  sourceLabel: string
+  // Shown on every position, so one seen on its own still says where it's from.
+  badge: string | null
+}
+
+const STATED_LOOK: PositionsLook = {
+  bar: 'bg-purple-500/70',
+  more: 'text-purple-300',
+  quoteBorder: 'border-purple-500/60 bg-purple-950/30',
+  quoteTone: 'text-purple-200',
+  sourceLabel: 'Source',
+  badge: null,
+}
+
+function campaignLook(year: number | null): PositionsLook {
+  return {
+    bar: 'bg-amber-500/70',
+    more: 'text-amber-300',
+    quoteBorder: 'border-amber-500/60 bg-amber-950/30',
+    quoteTone: 'text-amber-200',
+    sourceLabel: 'Campaign site',
+    badge: year ? `${year} campaign` : 'campaign',
+  }
 }
 
 export function StatedPositions({ positions, sync }: { positions: OfficialStance[]; sync: PositionsSync | null }) {
@@ -195,7 +228,7 @@ export function StatedPositions({ positions, sync }: { positions: OfficialStance
             <Text className="font-sans mt-0.5 text-[11px] text-slate-500">Ranked by how many positions they state on each. Tap an issue for the details.</Text>
             <View className="mt-2 gap-1.5">
               {visible.map((group, idx) => (
-                <IssueItem key={group.area} rank={idx + 1} group={group} maxCount={maxCount} />
+                <IssueItem key={group.area} rank={idx + 1} group={group} maxCount={maxCount} look={STATED_LOOK} />
               ))}
             </View>
           </View>
@@ -210,7 +243,47 @@ export function StatedPositions({ positions, sync }: { positions: OfficialStance
   )
 }
 
-function IssueItem({ rank, group, maxCount }: { rank: number; group: PositionGroup; maxCount: number }) {
+// A new member's positions from their campaign website, until their official
+// site states some. Its own section and color, never mixed with the above.
+export function CampaignPositions({ campaign }: { campaign: CampaignPositionsData }) {
+  const [showAll, setShowAll] = useState(false)
+  const look = useMemo(() => campaignLook(campaign.election_year), [campaign.election_year])
+  const issues = useMemo(() => groupPositions(campaign.positions), [campaign.positions])
+  const visible = showAll ? issues : issues.slice(0, INITIAL_ISSUES_SHOWN)
+  const maxCount = issues[0]?.count ?? 0
+  const when = campaign.election_year ? `${campaign.election_year} campaign` : 'campaign'
+
+  return (
+    <Collapsible
+      title="Campaign Positions (AI)"
+      icon={<Icons.Vote size={16} colorClassName="accent-amber-400" />}
+      tone="text-amber-300"
+      chevronAccent="accent-amber-400"
+      boxClassName="rounded-xl border border-amber-500/30 bg-amber-950/10 p-4"
+      right={<Text className="rounded bg-amber-900/50 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">{when}</Text>}
+    >
+      <Text className="font-sans mt-2 text-xs leading-relaxed text-slate-300">
+        What they said on their {when} website, before they took office. These are not positions from their official
+        site, and they don't count in the Politmus Report. Positions from their official site replace these once it
+        states some.
+      </Text>
+      {issues.length > 0 ? (
+        <View className="mt-3 gap-1.5">
+          {visible.map((group, idx) => (
+            <IssueItem key={group.area} rank={idx + 1} group={group} maxCount={maxCount} look={look} />
+          ))}
+          {issues.length > INITIAL_ISSUES_SHOWN ? (
+            <Pressable onPress={() => setShowAll(!showAll)} accessibilityRole="button" className="mt-1.5">
+              <Text className={`text-xs font-sans-medium ${look.more}`}>{showAll ? 'Show fewer' : `Show all ${issues.length} issues`}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+    </Collapsible>
+  )
+}
+
+function IssueItem({ rank, group, maxCount, look }: { rank: number; group: PositionGroup; maxCount: number; look: PositionsLook }) {
   const [open, setOpen] = useState(false)
   const preview = targetPreview(group)
   const Chevron = open ? Icons.ChevronDown : Icons.ChevronRight
@@ -225,7 +298,7 @@ function IssueItem({ rank, group, maxCount }: { rank: number; group: PositionGro
           <Chevron size={16} colorClassName="accent-slate-500" />
         </View>
         <View className="mt-1.5 ml-7 h-1 rounded-full bg-slate-800">
-          <View className="h-1 rounded-full bg-purple-500/70" style={{ width: `${maxCount ? (group.count / maxCount) * 100 : 0}%` }} />
+          <View className={`h-1 rounded-full ${look.bar}`} style={{ width: `${maxCount ? (group.count / maxCount) * 100 : 0}%` }} />
         </View>
         {preview ? (
           <Text className="font-sans mt-1 ml-7 text-[11px] text-slate-500" numberOfLines={1}>
@@ -237,9 +310,9 @@ function IssueItem({ rank, group, maxCount }: { rank: number; group: PositionGro
         <View className="gap-2.5 border-t border-slate-800 p-3">
           {group.blocks.map((block, idx) =>
             block.positions.length > 1 ? (
-              <SharedEvidenceBlock key={idx} positions={block.positions} />
+              <SharedEvidenceBlock key={idx} positions={block.positions} look={look} />
             ) : (
-              <PositionItem key={idx} position={block.positions[0]} />
+              <PositionItem key={idx} position={block.positions[0]} look={look} />
             ),
           )}
         </View>
@@ -248,27 +321,37 @@ function IssueItem({ rank, group, maxCount }: { rank: number; group: PositionGro
   )
 }
 
-function SharedEvidenceBlock({ positions }: { positions: OfficialStance[] }) {
+function SharedEvidenceBlock({ positions, look }: { positions: OfficialStance[]; look: PositionsLook }) {
   const [first] = positions
   return (
     <View className="rounded-lg border border-slate-800 bg-slate-900/90 p-3">
-      {first.evidence_quote ? <Quote text={first.evidence_quote} /> : null}
-      {first.source_url ? <SourceLink url={first.source_url} /> : null}
+      {look.badge ? <CampaignBadge label={look.badge} /> : null}
+      {first.evidence_quote ? <Quote text={first.evidence_quote} border={look.quoteBorder} tone={look.quoteTone} /> : null}
+      {first.source_url ? <SourceLink url={first.source_url} label={look.sourceLabel} /> : null}
       <Text className="mt-2 text-[10px] font-sans-semibold uppercase tracking-wider text-slate-500">Supports {positions.length} positions</Text>
       <View className="mt-2 gap-2 border-l border-slate-800 pl-3">
         {positions.map((position, idx) => (
-          <PositionItem key={`${position.target_name}-${position.mechanism}-${idx}`} position={position} compact />
+          <PositionItem key={`${position.target_name}-${position.mechanism}-${idx}`} position={position} look={look} compact />
         ))}
       </View>
     </View>
   )
 }
 
-function PositionItem({ position, compact = false }: { position: OfficialStance; compact?: boolean }) {
+function CampaignBadge({ label }: { label: string }) {
+  return (
+    <Pill rounded="rounded border" className="mb-1.5 border-amber-500/40 bg-amber-950/40 text-amber-300">
+      {label}
+    </Pill>
+  )
+}
+
+function PositionItem({ position, look, compact = false }: { position: OfficialStance; look: PositionsLook; compact?: boolean }) {
   const line = stanceLine(position)
   const direction = position.direction?.toLowerCase()
   return (
     <View className={compact ? '' : 'rounded-lg border border-slate-800 bg-slate-900/90 p-3'}>
+      {look.badge && !compact ? <CampaignBadge label={look.badge} /> : null}
       <Text className="text-sm font-sans-semibold text-slate-100">{position.target_name || 'Unnamed target'}</Text>
       <View className="mt-1 flex-row flex-wrap items-center gap-1.5">
         <Pill rounded="rounded border" className={directionBadgeClass(direction)}>
@@ -294,9 +377,9 @@ function PositionItem({ position, compact = false }: { position: OfficialStance;
         position.issue_label ? <Text className="font-sans mt-1 text-[11px] text-slate-500">{position.issue_label}</Text> : null
       ) : (
         <>
-          {position.evidence_quote ? <Quote text={position.evidence_quote} /> : null}
+          {position.evidence_quote ? <Quote text={position.evidence_quote} border={look.quoteBorder} tone={look.quoteTone} /> : null}
           {position.issue_label ? <Text className="font-sans mt-2 text-[11px] text-slate-500">{position.issue_label}</Text> : null}
-          {position.source_url ? <SourceLink url={position.source_url} /> : null}
+          {position.source_url ? <SourceLink url={position.source_url} label={look.sourceLabel} /> : null}
         </>
       )}
     </View>
