@@ -98,7 +98,7 @@ python congress_client.py members
 python congress_client.py backfill-name-parts
 ```
 
-**Recent bills and roll-call votes** (default) — fetches the latest bills for the 119th Congress, upserts them into `bills` (including introduced date, Congress.gov `latestAction`, and a derived `status` such as Became Law / Vetoed / Passed House), then loads House member votes from Congress.gov and Senate member votes from Senate.gov XML. Each roll call is stored in `roll_calls` (question, result, and required threshold when the source publishes one); member positions go in `votes` linked to that roll call:
+**Recent bills and roll-call votes** (default) — fetches the latest bills for the sitting Congress (worked out from the date, so the 120th from January 3, 2027; `--congress` overrides), upserts them into `bills` (including introduced date, Congress.gov `latestAction`, and a derived `status` such as Became Law / Vetoed / Passed House), then loads House member votes from Congress.gov and Senate member votes from Senate.gov XML. Each roll call is stored in `roll_calls` (question, result, and required threshold when the source publishes one); member positions go in `votes` linked to that roll call:
 
 ```bash
 python congress_client.py

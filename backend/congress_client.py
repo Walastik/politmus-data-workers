@@ -9,6 +9,7 @@ import requests
 from dotenv import load_dotenv
 from sqlalchemy import and_, exists, or_
 
+from api.census import sitting_congress
 from api.filters import classify_bipartisan_type, normalize_party, normalize_state
 from database import SessionLocal
 from init_db import ensure_schema
@@ -54,7 +55,12 @@ SENATE_USER_AGENT = os.getenv(
 )
 API_KEY = os.getenv("CONGRESS_GOV_API_KEY")
 PAGE_SIZE = 250
-CURRENT_CONGRESS = 119
+
+
+# Read once per run; every caller is a script, so a new Congress is picked up
+# by the first run after January 3.
+CURRENT_CONGRESS = sitting_congress(date.today())
+
 REQUEST_PAUSE_SECONDS = 0.2
 SENATE_REQUEST_PAUSE_SECONDS = float(os.getenv("SENATE_REQUEST_PAUSE_SECONDS", "1.0"))
 MAX_RETRIES = 5

@@ -22,7 +22,7 @@ Updated 2026-11-05 against `main` at `6d2abdb`. Replaces the 2026-10-30 "private
 
 ## What changed on `main` since the last plan
 - **Election Results** (`.github/workflows/election-results.yml`, `backend/election_results.py`, PRs #85 and #90):
-  - It runs on GitHub's runners in a self-chaining 5.5-hour loop, which is about **1,440 Actions minutes a day** while it runs. A run is in progress now.
+  - On election night it runs on GitHub's runners in a self-chaining 5.5-hour loop, about **1,440 Actions minutes a day**. Since Nov 15 the schedule refreshes once every 3 hours instead (a few minutes a run), and the loop only starts from a manual run with `loop` checked.
   - It publishes to the `election-results-data` branch, and the `/results` page reads it from `raw.githubusercontent.com/Walastik/politmus-data-workers/...` (`RESULTS_SNAPSHOT_URL` in `packages/core/src/electionResults.ts`).
   - **That URL stops working if the repo goes private,** so this is now a hard blocker for going private (step 7).
   - The candidate positions worker reads the same snapshot after Election Day to pick winners and runners-up (`ELECTION_RESULTS_URL` in `backend/official_positions.py`). Point it at wherever the results move.
