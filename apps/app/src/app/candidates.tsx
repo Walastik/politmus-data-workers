@@ -24,12 +24,13 @@ import {
 } from '@politmus/core/types'
 import { Stack } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native'
+import { FlatList, Pressable, Text, View } from 'react-native'
 
 import { UnlistedNomineeCard } from '@/components/HappeningNow'
 import { Icons } from '@/components/icons'
 import OfficialPhoto from '@/components/OfficialPhoto'
 import OptionSheet from '@/components/OptionSheet'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { Chip, SearchField } from '@/components/ui'
 import { openProfile } from '@/lib/links'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
@@ -130,7 +131,7 @@ export default function CandidatesScreen() {
         }
         ListEmptyComponent={
           races.isPending ? (
-            <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
+            <PolitmusLoader className="mt-6" label="Loading races" />
           ) : (
             <Text className={`font-sans px-4 ${races.isError ? 'text-red-400' : 'text-slate-400'}`}>
               {races.isError ? `${races.error.message}. Check your connection and try again.` : 'No races match this filter.'}

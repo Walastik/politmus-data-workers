@@ -14,6 +14,7 @@ import {
   Debate,
   RollCalls,
 } from '@/components/profile/BillSections'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { SectionHeading, ShareButton } from '@/components/profile/parts'
 import VoteTally from '@/components/profile/VoteTally'
 import { profileShareUrl } from '@/lib/links'
@@ -49,9 +50,11 @@ export default function BillScreen() {
       />
       <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="w-full md:max-w-[960px] md:self-center gap-6 px-5 py-5">
         {!view ? (
-          <Text className={`font-sans text-sm ${bill.isError ? 'text-red-400' : 'text-slate-400'}`}>
-            {bill.isError ? bill.error.message : 'Loading bill details…'}
-          </Text>
+          bill.isError ? (
+            <Text className="font-sans text-sm text-red-400">{bill.error.message}</Text>
+          ) : (
+            <PolitmusLoader className="mt-10" label="Loading bill" />
+          )
         ) : (
           <>
             <View className="border-b border-slate-800 pb-5">

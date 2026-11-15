@@ -28,11 +28,12 @@ import {
 } from '@politmus/core/types'
 import { router } from 'expo-router'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native'
+import { FlatList, Pressable, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
 import MemberRow from '@/components/MemberRow'
 import OptionSheet from '@/components/OptionSheet'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { Chip, SearchField } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { openProfile } from '@/lib/links'
@@ -130,7 +131,7 @@ export default function CongressScreen() {
           members.isError ? (
             <Text className="font-sans px-4 text-red-400">{members.error.message}. Check your connection and try again.</Text>
           ) : (
-            <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
+            <PolitmusLoader className="mt-6" label="Loading Congress" />
           )
         }
       />
@@ -417,7 +418,7 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
       }
       ListEmptyComponent={
         roster.isPending ? (
-          <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
+          <PolitmusLoader className="mt-6" label="Loading officials" />
         ) : (
           <Text className={`font-sans px-4 ${roster.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {roster.isError ? roster.error.message : 'No officials match this filter.'}

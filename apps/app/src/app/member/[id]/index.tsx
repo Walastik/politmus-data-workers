@@ -30,6 +30,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
 import OfficialPhoto from '@/components/OfficialPhoto'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import FinanceSection from '@/components/profile/Finance'
 import { SectionHeading, ShareButton } from '@/components/profile/parts'
 import { AccountabilityReport, StatedPositions } from '@/components/profile/Positions'
@@ -65,9 +66,11 @@ export default function MemberScreen() {
       />
       <ScrollView className="flex-1 bg-slate-900" contentInsetAdjustmentBehavior="automatic" contentContainerClassName="w-full md:max-w-[960px] md:self-center gap-6 px-5 py-5" keyboardShouldPersistTaps="handled">
         {!detail ? (
-          <Text className={`font-sans text-sm ${official.isError ? 'text-red-400' : 'text-slate-400'}`}>
-            {official.isError ? official.error.message : 'Loading…'}
-          </Text>
+          official.isError ? (
+            <Text className="font-sans text-sm text-red-400">{official.error.message}</Text>
+          ) : (
+            <PolitmusLoader className="mt-10" label="Loading profile" />
+          )
         ) : (
           <>
             <View className="flex-row items-center gap-4 border-b border-slate-800 pb-5">
