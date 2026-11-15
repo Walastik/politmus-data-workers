@@ -23,7 +23,7 @@ import { useState } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
-import PolitmusLoader from '@/components/PolitmusLoader'
+import { VotingSkeleton } from '@/components/Skeleton'
 import { addToCalendar, CALENDAR_HINT, canAddToCalendar } from '@/lib/calendar'
 import { useCivicLocation } from '@/lib/civicLocation'
 import { openUrl } from '@/lib/links'
@@ -50,7 +50,7 @@ export default function VotingScreen() {
         {!address ? (
           <Text className="font-sans text-sm text-slate-400">Enter your street address on Happening Now to see your voting locations.</Text>
         ) : query.isPending ? (
-          <PolitmusLoader className="mt-10" label="Finding voting locations" />
+          <VotingSkeleton />
         ) : query.isError || !voterInfo || voterInfo.uiState === 'unavailable' ? (
           <>
             <NoticeBox

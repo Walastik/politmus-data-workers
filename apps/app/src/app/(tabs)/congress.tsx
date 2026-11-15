@@ -33,7 +33,9 @@ import { FlatList, Pressable, Text, View } from 'react-native'
 import { Icons } from '@/components/icons'
 import MemberRow from '@/components/MemberRow'
 import OptionSheet from '@/components/OptionSheet'
-import PolitmusLoader from '@/components/PolitmusLoader'
+import {
+  Bone,
+  ChamberSummarySkeleton, MemberRowSkeleton, Repeat, SenateStateSkeleton, Skeleton, TextBone } from '@/components/Skeleton'
 import { Chip, SearchField } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { openProfile } from '@/lib/links'
@@ -78,7 +80,12 @@ export default function CongressScreen() {
             note={`plus ${chambers.delegates} non-voting delegates`}
           />
         </View>
-      ) : null}
+      ) : members.isError ? null : (
+        <Skeleton label="Loading Congress" className="gap-3">
+          <ChamberSummarySkeleton />
+          <ChamberSummarySkeleton />
+        </Skeleton>
+      )}
       <View className="flex-row rounded-lg border border-slate-700 bg-slate-800/60 p-1">
         {CONGRESS_VIEWS.map(({ key, label }) => (
           <Pressable
@@ -131,7 +138,7 @@ export default function CongressScreen() {
           members.isError ? (
             <Text className="font-sans px-4 text-red-400">{members.error.message}. Check your connection and try again.</Text>
           ) : (
-            <PolitmusLoader className="mt-6" label="Loading Congress" />
+            <CongressListSkeleton view={view} />
           )
         }
       />
@@ -413,12 +420,22 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
             <Text className="font-sans px-4 pb-3 text-sm text-slate-400">
               Showing {visible.length} member{visible.length === 1 ? '' : 's'}
             </Text>
+          ) : roster.isPending ? (
+            <TextBone size="sm" width="w-36" className="mx-4 mb-3" />
           ) : null}
         </View>
       }
       ListEmptyComponent={
         roster.isPending ? (
-          <PolitmusLoader className="mt-6" label="Loading officials" />
+          <Skeleton label="Loading officials" className={grid ? '-mx-2.5' : undefined}>
+            <Repeat count={10} columns={columns}>
+              {(i) => (
+                <View className={grid ? undefined : 'mx-4 mb-1.5'}>
+                  <MemberRowSkeleton index={i} />
+                </View>
+              )}
+            </Repeat>
+          </Skeleton>
         ) : (
           <Text className={`font-sans px-4 ${roster.isError ? 'text-red-400' : 'text-slate-400'}`}>
             {roster.isError ? roster.error.message : 'No officials match this filter.'}
@@ -431,6 +448,32 @@ function MemberList({ header, party, stateName, query }: { header: ReactElement;
         </View>
       )}
     />
+  )
+}
+
+// The Senate's state cards or the House's state rows, while the members load.
+function CongressListSkeleton({ view }: { view: CongressView }) {
+  const columns = useGridColumns()
+  if (view === 'house') {
+    return (
+      <Skeleton label="Loading the House">
+        {Array.from({ length: 10 }, (_, i) => (
+          <View key={i} className="mx-4 flex-row items-center gap-3 border-b border-slate-800 py-3">
+            <Bone className="h-4 w-4" />
+            <TextBone size="base" width={i % 2 ? 'w-28' : 'w-36'} className="flex-1" />
+            <Bone className="h-3 w-16" />
+            <Bone className="h-3 w-12" />
+          </View>
+        ))}
+      </Skeleton>
+    )
+  }
+  return (
+    <Skeleton label="Loading the Senate">
+      <Repeat count={6} columns={columns}>
+        {(i) => <SenateStateSkeleton index={i} grid={columns > 1} />}
+      </Repeat>
+    </Skeleton>
   )
 }
 

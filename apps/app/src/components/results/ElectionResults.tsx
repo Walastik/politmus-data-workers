@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AccessibilityInfo, Platform, Text, View, useWindowDimensions } from 'react-native'
 import { useReducedMotion } from 'react-native-reanimated'
 
-import PolitmusLoader from '@/components/PolitmusLoader'
+import { ResultsSkeleton } from '@/components/Skeleton'
 
 import { CountyCard } from './native/CountyCard'
 import { Hero, Toolbar } from './native/Hero'
@@ -101,13 +101,13 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number, a
   const senateStates = useMemo(() => new Set((snapshot?.senate ?? []).map((info) => info.state)), [snapshot])
 
   if (!snapshot) {
-    return (
+    return snapshotQuery.isError ? (
       <View className="min-h-[60vh] flex-1 items-center justify-center gap-3 bg-slate-900 p-6">
-        {snapshotQuery.isError ? (
-          <Text className="font-sans text-center text-sm text-slate-400">Results are unavailable right now. Try again in a minute.</Text>
-        ) : (
-          <PolitmusLoader label="Loading the latest counts" />
-        )}
+        <Text className="font-sans text-center text-sm text-slate-400">Results are unavailable right now. Try again in a minute.</Text>
+      </View>
+    ) : (
+      <View className="flex-1 bg-slate-900">
+        <ResultsSkeleton />
       </View>
     )
   }

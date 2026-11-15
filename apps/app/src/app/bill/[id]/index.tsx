@@ -14,9 +14,9 @@ import {
   Debate,
   RollCalls,
 } from '@/components/profile/BillSections'
-import PolitmusLoader from '@/components/PolitmusLoader'
 import { SectionHeading, ShareButton } from '@/components/profile/parts'
 import VoteTally from '@/components/profile/VoteTally'
+import { BillDetailSkeleton } from '@/components/Skeleton'
 import { profileShareUrl } from '@/lib/links'
 import { pageMetadata } from '@/lib/metadata'
 import { useBill } from '@/lib/queries'
@@ -53,7 +53,7 @@ export default function BillScreen() {
           bill.isError ? (
             <Text className="font-sans text-sm text-red-400">{bill.error.message}</Text>
           ) : (
-            <PolitmusLoader className="mt-10" label="Loading bill" />
+            <BillDetailSkeleton />
           )
         ) : (
           <>

@@ -27,6 +27,7 @@ import { openUrl } from '@/lib/links'
 import { useFinance, usePacSummary } from '@/lib/queries'
 
 import { Icons } from '../icons'
+import { Bone, LinesSkeleton, Skeleton } from '../Skeleton'
 import { Collapsible, Explainer, LegendSwatch, StackedBar, SubHeading } from './parts'
 
 // Campaign Finance on the member profile; native counterpart of the web
@@ -52,7 +53,21 @@ function FinanceBody({ officialId }: { officialId: string }) {
   const { elections, selected, compared, race, raced } = financeSelection(finance.data ?? null, selectedKey)
 
   if (finance.isError) return <Text className="font-sans mt-2 text-xs text-rose-300">{finance.error.message}</Text>
-  if (!finance.data) return <Text className="font-sans mt-2 text-xs text-slate-400">Loading…</Text>
+  if (!finance.data) {
+    return (
+      <Skeleton label="Loading campaign finance" className="mt-3 gap-3">
+        <View className="flex-row gap-1.5">
+          <Bone className="h-6 w-24 rounded-full" />
+          <Bone className="h-6 w-24 rounded-full" />
+        </View>
+        <View className="flex-row gap-3">
+          <Bone className="h-14 flex-1 rounded-lg" />
+          <Bone className="h-14 flex-1 rounded-lg" />
+        </View>
+        <LinesSkeleton lines={2} size="xs" />
+      </Skeleton>
+    )
+  }
   if (!selected) return <Text className="font-sans mt-2 text-xs text-slate-400">{noTotalsMessage(finance.data, officialId, race)}</Text>
 
   return (
@@ -224,14 +239,23 @@ function PacSummaryView({ officialId, election }: { officialId: string; election
       </View>
     )
   }
-  if (!summary || !summary.synced || summary.gift_count === 0) {
+  if (!summary) {
+    return (
+      <View>
+        {heading}
+        <Skeleton label="Loading PAC contributions" className="mt-1 gap-2">
+          <Bone className="h-3 w-full rounded-full" />
+          <LinesSkeleton lines={3} size="xs" />
+        </Skeleton>
+      </View>
+    )
+  }
+  if (!summary.synced || summary.gift_count === 0) {
     return (
       <View>
         {heading}
         <Text className="font-sans mt-1 text-xs text-slate-400">
-          {!summary
-            ? 'Loading…'
-            : !summary.synced
+          {!summary.synced
               ? "PAC details haven't been loaded for this member yet (fec_client.py pacs)."
               : 'No PAC gifts were reported for this election.'}
         </Text>

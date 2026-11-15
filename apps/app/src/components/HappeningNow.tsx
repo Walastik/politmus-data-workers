@@ -44,6 +44,7 @@ import { useFeedPreview } from '@/lib/queries'
 import FeedItemRow from './FeedItemRow'
 import { Icons } from './icons'
 import OfficialPhoto from './OfficialPhoto'
+import { CandidateCardSkeleton, FeedCardSkeleton, SiteSkeleton, Skeleton, TextBone } from './Skeleton'
 import { LinkAction, Muted, Section } from './ui'
 
 // The pieces of the Happening Now screen; what they say comes from
@@ -241,7 +242,10 @@ export function WhereToVote({
       }
     >
       {voterInfo.status === 'loading' ? (
-        <Muted>Finding voting locations near you…</Muted>
+        <Skeleton label="Finding voting locations near you" className="gap-3">
+          <SiteSkeleton />
+          <SiteSkeleton index={1} />
+        </Skeleton>
       ) : voterInfo.status === 'error' || data?.uiState === 'unavailable' ? (
         <NoSites
           message={(voterInfo.status === 'error' ? voterInfo.message : data?.detail) ?? 'Voting locations are unavailable right now.'}
@@ -325,7 +329,11 @@ export function OnYourBallot({
       action={<LinkAction label="All candidates" onPress={() => router.push('/candidates')} />}
     >
       {races.status === 'loading' ? (
-        <Muted>Loading your races…</Muted>
+        <Skeleton label="Loading your races" className="gap-3">
+          <TextBone size="base" width="w-1/2" />
+          <CandidateCardSkeleton />
+          <CandidateCardSkeleton index={1} />
+        </Skeleton>
       ) : races.status === 'error' ? (
         <Muted>{races.message}</Muted>
       ) : ballotRaces.length === 0 ? (
@@ -575,7 +583,11 @@ export function FeedPreview({ lead }: { lead: boolean }) {
       action={<LinkAction label="See the full Feed" onPress={() => router.navigate('/feed')} />}
     >
       {feed.isPending ? (
-        <Muted>Loading the latest…</Muted>
+        <Skeleton label="Loading the latest" className="-mx-4">
+          <FeedCardSkeleton />
+          <FeedCardSkeleton index={1} />
+          <FeedCardSkeleton index={2} />
+        </Skeleton>
       ) : feed.isError ? (
         <Muted>{errorMessage(feed.error, 'The feed is unavailable.')}</Muted>
       ) : items.length === 0 ? (

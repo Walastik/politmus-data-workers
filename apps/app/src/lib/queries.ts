@@ -34,6 +34,8 @@ export function useFeed(filterKey: string, level: string) {
       api.json<FeedPage>(feedPath({ filterKey, level, cursor: pageParam, limit: FEED_PAGE_SIZE }), { signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor,
+    // Keep the old list on screen while a new filter loads.
+    placeholderData: (previous) => previous,
   })
 }
 
@@ -120,6 +122,8 @@ export function usePacSummary(officialId: string, election: FinanceElection) {
     queryKey: ['pacs', officialId, pacParams(election).toString()],
     queryFn: ({ signal }) =>
       api.json<PacSummary>(`/api/officials/${encodeURIComponent(officialId)}/finance/pacs?${pacParams(election)}`, { signal }),
+    // Switching elections keeps the last summary up until the new one lands.
+    placeholderData: (previous) => previous,
   })
 }
 

@@ -6,8 +6,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
-import PolitmusLoader from '@/components/PolitmusLoader'
 import { LegendSwatch } from '@/components/profile/parts'
+import { LinesSkeleton, PacRowsSkeleton, Skeleton } from '@/components/Skeleton'
 import { Chip, SearchField } from '@/components/ui'
 import { openUrl } from '@/lib/links'
 import { pageMetadata } from '@/lib/metadata'
@@ -34,13 +34,13 @@ export default function PacExplorerScreen() {
       {election ? (
         <Explorer officialId={id} election={election} />
       ) : (
-        <View className="flex-1 bg-slate-900 px-5 py-5">
+        <View className="flex-1 bg-slate-900 py-5">
           {finance.isError || finance.data ? (
-            <Text className={`font-sans text-sm ${finance.isError ? 'text-rose-300' : 'text-slate-400'}`}>
+            <Text className={`font-sans px-5 text-sm ${finance.isError ? 'text-rose-300' : 'text-slate-400'}`}>
               {finance.isError ? finance.error.message : 'That election has no finance data.'}
             </Text>
           ) : (
-            <PolitmusLoader className="mt-10" label="Loading PACs" />
+            <PacRowsSkeleton />
           )}
         </View>
       )}
@@ -121,7 +121,7 @@ function Explorer({ officialId, election }: { officialId: string; election: Fina
       )}
       ListEmptyComponent={
         list.isPending ? (
-          <PolitmusLoader className="mt-6" label="Loading PACs" />
+          <PacRowsSkeleton />
         ) : (
           <Text className={`font-sans px-5 text-sm ${list.isError ? 'text-rose-300' : 'text-slate-400'}`}>
             {list.isError ? list.error.message : 'No PACs match.'}
@@ -172,7 +172,13 @@ function PacRow({
 function PacGifts({ officialId, election, pac }: { officialId: string; election: FinanceElection; pac: Pac }) {
   const gifts = usePacGifts(officialId, election, pac.pac_key)
   if (gifts.isError) return <Text className="font-sans mt-1 ml-6 text-[11px] text-rose-300">{gifts.error.message}</Text>
-  if (!gifts.data) return <Text className="font-sans mt-1 ml-6 text-[11px] text-slate-500">Loading gifts…</Text>
+  if (!gifts.data) {
+    return (
+      <Skeleton label="Loading gifts" className="mt-1.5 ml-6 w-2/3">
+        <LinesSkeleton lines={2} size="11" />
+      </Skeleton>
+    )
+  }
   return (
     <View className="mt-1.5 ml-6 gap-1">
       {gifts.data.map((gift) => (
