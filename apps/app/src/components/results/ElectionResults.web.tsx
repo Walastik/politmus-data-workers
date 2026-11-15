@@ -81,6 +81,8 @@ import { router } from 'expo-router'
 import { feature, mesh } from 'topojson-client'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import PolitmusLoader from '@/components/PolitmusLoader'
+
 import { getJson, useSnapshot } from './snapshot'
 
 // us-atlas shapes are projected (Albers USA) into the W × H frame.
@@ -220,7 +222,9 @@ export default function ElectionResults() {
   if (!snapshot || !statesTopo.data) {
     return (
       <div className="er">
-        <div className="er-loading">Loading the latest counts…</div>
+        <div className="er-loading">
+          <PolitmusLoader label="Loading the latest counts" />
+        </div>
       </div>
     )
   }

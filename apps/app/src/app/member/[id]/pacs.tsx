@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { LegendSwatch } from '@/components/profile/parts'
 import { Chip, SearchField } from '@/components/ui'
 import { openUrl } from '@/lib/links'
@@ -34,9 +35,13 @@ export default function PacExplorerScreen() {
         <Explorer officialId={id} election={election} />
       ) : (
         <View className="flex-1 bg-slate-900 px-5 py-5">
-          <Text className={`font-sans text-sm ${finance.isError ? 'text-rose-300' : 'text-slate-400'}`}>
-            {finance.isError ? finance.error.message : finance.data ? 'That election has no finance data.' : 'Loading…'}
-          </Text>
+          {finance.isError || finance.data ? (
+            <Text className={`font-sans text-sm ${finance.isError ? 'text-rose-300' : 'text-slate-400'}`}>
+              {finance.isError ? finance.error.message : 'That election has no finance data.'}
+            </Text>
+          ) : (
+            <PolitmusLoader className="mt-10" label="Loading PACs" />
+          )}
         </View>
       )}
     </>
@@ -116,7 +121,7 @@ function Explorer({ officialId, election }: { officialId: string; election: Fina
       )}
       ListEmptyComponent={
         list.isPending ? (
-          <ActivityIndicator className="mt-6" colorClassName="accent-slate-400" />
+          <PolitmusLoader className="mt-6" label="Loading PACs" />
         ) : (
           <Text className={`font-sans px-5 text-sm ${list.isError ? 'text-rose-300' : 'text-slate-400'}`}>
             {list.isError ? list.error.message : 'No PACs match.'}

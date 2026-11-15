@@ -2,6 +2,7 @@ import { partyBadgeClass, partyShort, voteShort, voteTextClass, type VoteChamber
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { FlatList, Text, View } from 'react-native'
 
+import PolitmusLoader from '@/components/PolitmusLoader'
 import { pageMetadata } from '@/lib/metadata'
 import { useBillVoters } from '@/lib/queries'
 
@@ -37,13 +38,13 @@ export default function VotersScreen() {
           </View>
         }
         ListEmptyComponent={
-          <Text className={`font-sans text-sm ${voters.isError ? 'text-red-400' : 'text-slate-400'}`}>
-            {voters.isError
-              ? voters.error.message
-              : voters.isPending
-                ? 'Loading votes…'
-                : `No recorded votes for this party in the ${chamberLabel.toLowerCase()}.`}
-          </Text>
+          voters.isPending ? (
+            <PolitmusLoader className="mt-6" label="Loading votes" />
+          ) : (
+            <Text className={`font-sans text-sm ${voters.isError ? 'text-red-400' : 'text-slate-400'}`}>
+              {voters.isError ? voters.error.message : `No recorded votes for this party in the ${chamberLabel.toLowerCase()}.`}
+            </Text>
+          )
         }
         renderItem={({ item }) => (
           <View className="flex-row items-baseline justify-between gap-3 py-1">

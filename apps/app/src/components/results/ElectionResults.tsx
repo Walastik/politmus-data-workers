@@ -11,8 +11,10 @@ import type { CountyView, MapOffice } from '@politmus/core/resultsMap'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, ActivityIndicator, Platform, Text, View, useWindowDimensions } from 'react-native'
+import { AccessibilityInfo, Platform, Text, View, useWindowDimensions } from 'react-native'
 import { useReducedMotion } from 'react-native-reanimated'
+
+import PolitmusLoader from '@/components/PolitmusLoader'
 
 import { CountyCard } from './native/CountyCard'
 import { Hero, Toolbar } from './native/Hero'
@@ -104,10 +106,7 @@ export default function ElectionResults({ scrollTo }: { scrollTo?: (y: number, a
         {snapshotQuery.isError ? (
           <Text className="font-sans text-center text-sm text-slate-400">Results are unavailable right now. Try again in a minute.</Text>
         ) : (
-          <>
-            <ActivityIndicator color="#94a3b8" />
-            <Text className="font-sans text-center text-sm text-slate-400">Loading the latest counts…</Text>
-          </>
+          <PolitmusLoader label="Loading the latest counts" />
         )}
       </View>
     )
