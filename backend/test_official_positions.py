@@ -40,7 +40,7 @@ from services.official_positions import (
     verify_positions,
 )
 from services.llm_runtime import TruncatedOutputError
-from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, is_due_after_election, load_local_prompts, top_two_finishers
+from official_positions import LOCAL_CONFIG_PATH, Prompts, extract_positions, is_due, is_due_after_election, is_due_new_member, load_local_prompts, top_two_finishers
 
 OFFICIAL = SimpleNamespace(
     id="E000001",
@@ -465,6 +465,29 @@ class IsDueAfterElectionTests(unittest.TestCase):
         self.assertFalse(self.due(recent))
         self.assertTrue(self.due(self.sync(status="failed", attempts=1, last_attempt_at=self.now - timedelta(hours=7))))
 
+
+
+
+class IsDueNewMemberTests(unittest.TestCase):
+    now = datetime(2027, 1, 20, 12, 0, 0)
+
+    def due(self, status, days_ago):
+        sync = OfficialPositionSync(
+            official_id="N", status=status, extractor_version="v1", attempts=0,
+            last_attempt_at=self.now - timedelta(days=days_ago),
+            last_success_at=self.now - timedelta(days=days_ago),
+        )
+        return is_due_new_member(sync, now=self.now, version="v1", max_age_days=30)
+
+    def test_weekly_while_their_site_gives_nothing(self):
+        for status in ("no_positions", "no_issue_pages", "thin_site"):
+            self.assertFalse(self.due(status, 6), status)
+            self.assertTrue(self.due(status, 8), status)
+
+    def test_usual_schedule_once_they_have_positions_or_are_blocked(self):
+        self.assertFalse(self.due("ok", 8))
+        self.assertTrue(self.due("ok", 31))
+        self.assertFalse(self.due("blocked", 8))
 
 
 class TopTwoFinishersTests(unittest.TestCase):
@@ -1033,6 +1056,30 @@ class RunPositionsDatabaseTests(unittest.TestCase):
         sync = self._sync()
         self.assertEqual(sync.status, "failed")
         self.assertIn("socket exploded", sync.last_error)
+
+    def test_new_member_with_nothing_found_is_rechecked_weekly(self):
+        from models import Official
+        from official_positions import select_officials
+
+        session = self.SessionLocal()
+        session.add(OfficialPositionSync(
+            official_id=self.OFFICIAL_ID, status="no_issue_pages", attempts=0, extractor_version="v",
+            last_attempt_at=self.clock[0] - timedelta(days=10),
+            last_success_at=self.clock[0] - timedelta(days=10),
+        ))
+        session.commit()
+
+        def selected():
+            rows = select_officials(session, version="v", now=self.clock[0], limit=None)
+            return self.OFFICIAL_ID in [official.id for official, _ in rows]
+
+        self.assertFalse(selected())
+        # They ran as a non-member: their candidate record is linked by FEC ID.
+        session.add(Official(id="ZZTEST0003", name="Jane Example", level="candidate", current_member=False))
+        session.get(Official, self.OFFICIAL_ID).fec_candidate_ids = ["ZZTEST0003"]
+        session.commit()
+        self.assertTrue(selected())
+        session.close()
 
     def test_official_id_list_selects_each_official_even_when_not_due(self):
         from models import Official

@@ -32,7 +32,7 @@ import { Icons } from '@/components/icons'
 import OfficialPhoto from '@/components/OfficialPhoto'
 import FinanceSection from '@/components/profile/Finance'
 import { SectionHeading, ShareButton } from '@/components/profile/parts'
-import { AccountabilityReport, StatedPositions } from '@/components/profile/Positions'
+import { AccountabilityReport, CampaignPositions, StatedPositions } from '@/components/profile/Positions'
 import { ScoreHeadline } from '@/components/Score'
 import { openBill, openUrl, profileShareUrl } from '@/lib/links'
 import { pageMetadata } from '@/lib/metadata'
@@ -110,6 +110,7 @@ export default function MemberScreen() {
               />
             ) : null}
             {isSignedIn ? <StatedPositions positions={detail.stated_positions ?? []} sync={detail.positions_sync ?? null} /> : null}
+            {isSignedIn && detail.campaign_positions?.positions.length ? <CampaignPositions campaign={detail.campaign_positions} /> : null}
             {isSignedIn && ((detail.level ?? 'federal') === 'federal' || isCandidate(detail)) ? <FinanceSection officialId={id} /> : null}
 
             {isCandidate(detail) ? null : (

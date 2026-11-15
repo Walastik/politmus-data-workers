@@ -79,6 +79,16 @@ class OfficialStanceOut(BaseModel):
     model: Optional[str] = None
 
 
+class CampaignPositionsOut(BaseModel):
+    """Positions from a new member's campaign website, saved while they were
+    a candidate. Kept apart from stated_positions: they're what the person
+    said as a candidate, not as a member, and accountability never uses them."""
+
+    election_year: Optional[int] = None
+    candidate_id: str
+    positions: list[OfficialStanceOut] = Field(default_factory=list)
+
+
 class PositionsSyncOut(BaseModel):
     """The stated-positions worker's last attempt for one official."""
 
@@ -179,6 +189,9 @@ class CandidacyOut(BaseModel):
 class OfficialDetailOut(OfficialOut):
     votes: list[OfficialVoteOut] = Field(default_factory=list)
     stated_positions: list[OfficialStanceOut] = Field(default_factory=list)
+    # Only while stated_positions is empty: a new member's site often has none
+    # for the first few weeks.
+    campaign_positions: Optional[CampaignPositionsOut] = None
     positions_sync: Optional[PositionsSyncOut] = None
     accountability: Optional[AccountabilityScoreOut] = None
     alignments: list[VoteAlignmentOut] = Field(default_factory=list)
