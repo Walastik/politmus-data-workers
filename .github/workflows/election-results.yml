@@ -6,24 +6,31 @@ name: Election Results
 # single commit that each run replaces, so the repo doesn't grow a commit
 # every few minutes. The page reads it from raw.githubusercontent.com.
 #
-# GitHub's scheduler runs this repo's schedules hours late (on Election
-# Night 2026 a */5 schedule never fired), so a run doesn't wait on it: it
-# refreshes every REFRESH_SECONDS for about LOOP_MINUTES, then starts the next
-# run itself (GITHUB_TOKEN may dispatch workflow_dispatch runs). The schedule
-# only restarts the chain if it breaks. To stop: disable the workflow; the
-# running loop finishes its pass and the next dispatch is refused.
+# Since the counting slowed down, the schedule refreshes once every 3 hours
+# until the states certify. For an election night, start a manual run with
+# `loop` checked: GitHub's scheduler runs this repo's schedules hours late (on
+# Election Night 2026 a */5 schedule never fired), so that run refreshes every
+# REFRESH_SECONDS for about LOOP_MINUTES, then starts the next looping run
+# itself (GITHUB_TOKEN may dispatch workflow_dispatch runs). To stop the loop:
+# disable the workflow; the running loop finishes its pass and the next
+# dispatch is refused.
 #
 # A manual run with `states` refreshes those states once and doesn't loop.
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '17 */3 * * *'
   workflow_dispatch:
     inputs:
       states:
-        description: 'Comma-separated postal codes to refresh once (blank to start the refresh loop)'
+        description: 'Comma-separated postal codes to refresh once (blank for every state)'
         required: false
         default: ''
+      loop:
+        description: 'Refresh every 5 minutes and keep starting new runs (election night)'
+        type: boolean
+        required: false
+        default: false
 
 # One run at a time. A run that starts while another is going waits for it,
 # and only the newest waiting run is kept, so a backup schedule run or an
@@ -72,6 +79,7 @@ jobs:
         id: refresh
         env:
           STATES: ${{ inputs.states }}
+          LOOP: ${{ inputs.loop }}
           PUSH_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
         run: |
           publish() {
@@ -98,7 +106,7 @@ jobs:
             (cd backend && python election_results.py --out "../snapshot/$SNAPSHOT" ${STATES:+--states "$STATES"})
           }
 
-          if [ -n "$STATES" ]; then
+          if [ -n "$STATES" ] || [ "$LOOP" != "true" ]; then
             refresh && publish
             exit
           fi
@@ -118,10 +126,10 @@ jobs:
 
       # Hand off to a fresh run before this one hits GitHub's 6-hour limit.
       # Only after the loop itself ran, so a run that breaks during setup
-      # can't hand off to another broken run right away; the schedule retries.
-      # Skipped for one-off state refreshes and when the run is cancelled.
+      # can't hand off to another broken run right away.
+      # Only for looping runs, and not when the run is cancelled.
       - name: Start the next run
-        if: ${{ !cancelled() && inputs.states == '' && steps.refresh.outcome == 'success' }}
+        if: ${{ !cancelled() && inputs.loop && inputs.states == '' && steps.refresh.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run election-results.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
+        run: gh workflow run election-results.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" -f loop=true

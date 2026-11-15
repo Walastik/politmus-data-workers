@@ -96,7 +96,8 @@ the root README).
 
 The results page doesn't use the API. The **Election Results** workflow
 (`.github/workflows/election-results.yml`) runs `backend/election_results.py`
-on GitHub's runners every 5 minutes. The script reads each state's
+on GitHub's runners every 3 hours until the states certify (every 5 minutes
+on an election night, see below). The script reads each state's
 unofficial counts from its election office's site and force-pushes the
 snapshot as the only commit on the `election-results-data` branch. The page
 loads it from
@@ -113,20 +114,23 @@ loads it from
   and credits civicAPI in the footer, which its terms require. Its counts can
   trail the states by hours and it doesn't name its sources; its race calls
   are ignored. `--no-civicapi` skips the fallback.
-- **How it keeps running:** GitHub's scheduler runs this repo's schedules
-  hours late (on Election Night a `*/5` schedule never fired), so the
-  workflow doesn't rely on it. Each run refreshes every 5 minutes for about
-  5½ hours (`REFRESH_SECONDS`, `LOOP_MINUTES`), then starts the next run
-  itself, just before GitHub's 6-hour job limit. The `*/5` schedule is only a
-  backup that restarts the chain if it breaks. One run goes at a time; an
-  extra run waits behind it. A pass that fails (a site down) is logged as a
-  warning and the loop carries on; a state whose site fails keeps its
-  previous counts.
-- **Starting it:** if no Election Results run is in progress, start one from
-  the Actions tab (**Election Results**, `states` blank) or
-  `gh workflow run election-results.yml`.
+- **After election week:** the schedule (`17 */3 * * *`) refreshes once
+  every 3 hours, which is enough while the last counts and certifications
+  come in. GitHub may start it late; that's fine at this pace. Once every
+  state has certified, disable the workflow; the last snapshot stays
+  published.
+- **Election night (the loop):** GitHub's scheduler runs this repo's
+  schedules hours late (on Election Night 2026 a `*/5` schedule never fired),
+  so don't rely on it. Start a run from the Actions tab (**Election Results**,
+  `loop` checked) or `gh workflow run election-results.yml -f loop=true`. It
+  refreshes every 5 minutes for about 5½ hours (`REFRESH_SECONDS`,
+  `LOOP_MINUTES`), then starts the next looping run itself, just before
+  GitHub's 6-hour job limit. That's about 1,440 Actions minutes a day. One
+  run goes at a time; an extra run waits behind it. A pass that fails (a site
+  down) is logged as a warning and the loop carries on; a state whose site
+  fails keeps its previous counts. To stop it, disable the workflow.
 - **One-off refresh:** a manual run with a comma-separated `states` list
-  refreshes just those states once and doesn't loop. It waits for the running
+  refreshes just those states once and doesn't loop. It waits for a running
   loop to finish first, so for a quick refresh, cancel the loop, run it, then
   start the loop again.
 - Locally: `cd backend && python election_results.py --out ../apps/app/public/dev-results.json`,
