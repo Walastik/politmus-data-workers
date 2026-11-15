@@ -30,11 +30,11 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
 import OfficialPhoto from '@/components/OfficialPhoto'
-import PolitmusLoader from '@/components/PolitmusLoader'
 import FinanceSection from '@/components/profile/Finance'
 import { SectionHeading, ShareButton } from '@/components/profile/parts'
 import { AccountabilityReport, CampaignPositions, StatedPositions } from '@/components/profile/Positions'
 import { ScoreHeadline } from '@/components/Score'
+import { ProfileSkeleton } from '@/components/Skeleton'
 import { openBill, openUrl, profileShareUrl } from '@/lib/links'
 import { pageMetadata } from '@/lib/metadata'
 import { useOfficial } from '@/lib/queries'
@@ -69,7 +69,7 @@ export default function MemberScreen() {
           official.isError ? (
             <Text className="font-sans text-sm text-red-400">{official.error.message}</Text>
           ) : (
-            <PolitmusLoader className="mt-10" label="Loading profile" />
+            <ProfileSkeleton />
           )
         ) : (
           <>

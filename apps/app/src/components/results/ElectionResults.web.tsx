@@ -81,7 +81,7 @@ import { router } from 'expo-router'
 import { feature, mesh } from 'topojson-client'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import PolitmusLoader from '@/components/PolitmusLoader'
+import { ResultsSkeleton } from '@/components/Skeleton'
 
 import { getJson, useSnapshot } from './snapshot'
 
@@ -222,9 +222,7 @@ export default function ElectionResults() {
   if (!snapshot || !statesTopo.data) {
     return (
       <div className="er">
-        <div className="er-loading">
-          <PolitmusLoader label="Loading the latest counts" />
-        </div>
+        <ResultsSkeleton />
       </div>
     )
   }

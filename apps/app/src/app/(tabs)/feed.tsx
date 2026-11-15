@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { ActivityIndicator, RefreshControl, ScrollView, SectionList, Text, View } from 'react-native'
 
 import FeedItemRow from '@/components/FeedItemRow'
-import PolitmusLoader from '@/components/PolitmusLoader'
+import { FeedCardSkeleton, Repeat, Skeleton, TextBone } from '@/components/Skeleton'
 import { Chip } from '@/components/ui'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
 import { pageMetadata } from '@/lib/metadata'
@@ -66,9 +66,15 @@ export default function FeedScreen() {
           </Text>
         )}
         ListHeaderComponent={filters}
+        className={feed.isPlaceholderData ? 'opacity-50' : undefined}
         ListEmptyComponent={
           feed.isPending ? (
-            <PolitmusLoader className="mt-10" label="Loading the feed" />
+            <Skeleton label="Loading the feed">
+              <TextBone size="xs" width="w-20" className="mx-4 mt-3 mb-2" />
+              <Repeat count={6} columns={columns}>
+                {(i) => <FeedCardSkeleton index={i} grid={columns > 1} />}
+              </Repeat>
+            </Skeleton>
           ) : feed.isError ? (
             <Text className="font-sans mt-10 px-8 text-center text-sm text-red-400">{feed.error.message}</Text>
           ) : (
@@ -83,7 +89,7 @@ export default function FeedScreen() {
         }}
         onEndReachedThreshold={0.5}
         refreshControl={
-          <RefreshControl refreshing={feed.isRefetching && !feed.isFetchingNextPage} onRefresh={() => void feed.refetch()} />
+          <RefreshControl refreshing={feed.isRefetching && !feed.isPlaceholderData && !feed.isFetchingNextPage} onRefresh={() => void feed.refetch()} />
         }
         stickySectionHeadersEnabled
       />

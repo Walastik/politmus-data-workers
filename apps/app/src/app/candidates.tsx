@@ -30,7 +30,7 @@ import { UnlistedNomineeCard } from '@/components/HappeningNow'
 import { Icons } from '@/components/icons'
 import OfficialPhoto from '@/components/OfficialPhoto'
 import OptionSheet from '@/components/OptionSheet'
-import PolitmusLoader from '@/components/PolitmusLoader'
+import { RaceCardSkeleton, Skeleton, TextBone } from '@/components/Skeleton'
 import { Chip, SearchField } from '@/components/ui'
 import { openProfile } from '@/lib/links'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
@@ -118,6 +118,12 @@ export default function CandidatesScreen() {
                 <Text className="font-sans text-sm text-slate-400">{racesSummary(page, Boolean(filters.state))}</Text>
                 <SourceNote text={racesSourceNote(page)} />
               </View>
+            ) : races.isPending ? (
+              <View className="gap-1">
+                <TextBone size="sm" width="w-2/3" />
+                <TextBone size="xs" width="w-full" />
+                <TextBone size="xs" width="w-3/4" />
+              </View>
             ) : null}
             <OptionSheet
               visible={picking}
@@ -131,7 +137,7 @@ export default function CandidatesScreen() {
         }
         ListEmptyComponent={
           races.isPending ? (
-            <PolitmusLoader className="mt-6" label="Loading races" />
+            <CandidatesSkeleton />
           ) : (
             <Text className={`font-sans px-4 ${races.isError ? 'text-red-400' : 'text-slate-400'}`}>
               {races.isError ? `${races.error.message}. Check your connection and try again.` : 'No races match this filter.'}
@@ -154,6 +160,17 @@ export default function CandidatesScreen() {
         }
       />
     </>
+  )
+}
+
+function CandidatesSkeleton() {
+  const columns = useGridColumns()
+  return (
+    <Skeleton label="Loading races">
+      {[0, 1, 2].map((i) => (
+        <RaceCardSkeleton key={i} index={i} columns={columns} />
+      ))}
+    </Skeleton>
   )
 }
 

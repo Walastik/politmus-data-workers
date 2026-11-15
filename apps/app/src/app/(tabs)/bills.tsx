@@ -13,9 +13,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 
 import { Icons } from '@/components/icons'
-import PolitmusLoader from '@/components/PolitmusLoader'
 import { BillTags } from '@/components/profile/BillSections'
 import VoteTally from '@/components/profile/VoteTally'
+import { BillCardSkeleton, Repeat, Skeleton, TextBone } from '@/components/Skeleton'
 import { Chip, SearchField } from '@/components/ui'
 import { openBill } from '@/lib/links'
 import { gridCellStyle, useGridColumns } from '@/lib/layout'
@@ -91,6 +91,8 @@ export default function BillsScreen() {
         <Text className="font-sans text-sm text-slate-400">
           Showing {items.length}/{total} bill{total === 1 ? '' : 's'}
         </Text>
+      ) : bills.isPending ? (
+        <TextBone size="sm" width="w-36" />
       ) : null}
     </View>
   )
@@ -114,7 +116,11 @@ export default function BillsScreen() {
         className={bills.isPlaceholderData ? 'opacity-50' : ''}
         ListEmptyComponent={
           bills.isPending ? (
-            <PolitmusLoader className="mt-10" label="Loading bills" />
+            <Skeleton label="Loading bills" className={grid ? '-mx-2.5' : undefined}>
+              <Repeat count={6} columns={columns}>
+                {(i) => <BillCardSkeleton index={i} grid={grid} />}
+              </Repeat>
+            </Skeleton>
           ) : (
             <Text className={`font-sans mt-6 px-8 text-center text-sm ${bills.isError ? 'text-red-400' : 'text-slate-400'}`}>
               {bills.isError ? bills.error.message : noBillsMessage(filters.query)}
@@ -126,7 +132,7 @@ export default function BillsScreen() {
           if (bills.hasNextPage && !bills.isFetchingNextPage) void bills.fetchNextPage()
         }}
         onEndReachedThreshold={0.5}
-        refreshControl={<RefreshControl refreshing={bills.isRefetching && !bills.isFetchingNextPage} onRefresh={() => void bills.refetch()} />}
+        refreshControl={<RefreshControl refreshing={bills.isRefetching && !bills.isPlaceholderData && !bills.isFetchingNextPage} onRefresh={() => void bills.refetch()} />}
       />
     </View>
   )

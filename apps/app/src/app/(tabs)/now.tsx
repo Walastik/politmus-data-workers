@@ -31,8 +31,8 @@ import {
 } from '@/components/HappeningNow'
 import { Icons } from '@/components/icons'
 import LocationBar from '@/components/LocationBar'
-import PolitmusLoader from '@/components/PolitmusLoader'
 import { FederalRepsStrip } from '@/components/Representatives'
+import { NowSkeleton, RepStripSkeleton, SectionSkeleton, Skeleton } from '@/components/Skeleton'
 import { LinkAction, Section } from '@/components/ui'
 import { useCivicLocation } from '@/lib/civicLocation'
 import { pageMetadata } from '@/lib/metadata'
@@ -88,7 +88,7 @@ export default function NowScreen() {
   return (
     <ScrollView className="flex-1 bg-slate-900" contentContainerClassName="gap-6 px-4 py-5" keyboardShouldPersistTaps="handled">
       {!location.ready ? (
-        <PolitmusLoader className="mt-10" label="Loading" />
+        <NowSkeleton />
       ) : (
         <>
           {/* After Election Day the results lead; on the day, they follow the countdown. */}
@@ -120,7 +120,13 @@ export default function NowScreen() {
           />
 
           {lookup.status === 'error' ? <Text className="font-sans text-red-400">{lookup.message}</Text> : null}
-          {hasPlace && lookup.status === 'loading' ? <Text className="font-sans text-slate-400">Looking up your area…</Text> : null}
+          {hasPlace && lookup.status === 'loading' ? (
+            <Skeleton label="Looking up your area">
+              <SectionSkeleton>
+                <RepStripSkeleton />
+              </SectionSkeleton>
+            </Skeleton>
+          ) : null}
 
           {hasPlace && lookupData && electionFocus ? (
             <>
