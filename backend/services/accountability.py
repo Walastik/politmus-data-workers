@@ -299,27 +299,21 @@ def passage_roll_call_ids(session: Session) -> list[int]:
     return [rc_id for rc_id, question in rows if is_passage_question(question)]
 
 
+# Built so every join and sort before the last step carries only ids. The
+# planner underestimates how many stances an official has, and when votes
+# were joined to stances by official first it built millions of wide rows and
+# sorted them, spilling hundreds of MB of temp files (the 1 GB database
+# volume filled up). Here the bill intent / position matches come first (a
+# few thousand across the whole database, by target and mechanism), then
+# they meet the votes, and the text columns are joined last.
 _ALIGNMENTS_SQL = """
 WITH bill_sizes AS (
     SELECT bill_id, count(*) AS effects FROM bill_effects GROUP BY bill_id
 ),
-latest_votes AS (
-    SELECT DISTINCT ON (v.official_id, rc.bill_id, rc.chamber)
-        v.official_id, v.position, rc.id AS roll_call_id, rc.bill_id,
-        rc.chamber, rc.date
-    FROM votes v
-    JOIN roll_calls rc ON rc.id = v.roll_call_id
-    WHERE rc.id = ANY(:roll_call_ids)
-      AND v.position = ANY(:positions)
-      {official_filter}
-    ORDER BY v.official_id, rc.bill_id, rc.chamber,
-             rc.date DESC NULLS LAST, rc.id DESC
-),
-stances AS (
+stances AS MATERIALIZED (
     -- One stance per target + mechanism (several source types may repeat it).
     SELECT DISTINCT ON (s.official_id, s.target_id, s.mechanism)
-        s.official_id, s.target_id, s.mechanism, s.direction, s.emphasis,
-        s.summary, s.evidence_quote, s.source_url, s.policy_area, s.scope,
+        s.id, s.official_id, s.target_id, s.mechanism,
         CASE s.emphasis WHEN 'high' THEN 0 WHEN 'medium' THEN 1
                         WHEN 'low' THEN 2 ELSE 3 END AS emphasis_rank
     FROM official_stances s
@@ -341,35 +335,54 @@ links AS (
     UNION ALL
     SELECT target_b, target_a, similarity, inverse FROM near
 ),
+matches AS MATERIALIZED (
+    -- Bill intents of classified bills and the positions they can score.
+    SELECT e.id AS effect_id, e.bill_id, s.id AS stance_id, s.official_id,
+           s.emphasis_rank, l.similarity, l.inverse
+    FROM bill_effects e
+    JOIN bills b ON b.id = e.bill_id AND b.classification_status = 'ok'
+    JOIN links l ON l.effect_target = e.target_id
+    JOIN stances s ON s.target_id = l.stance_target AND s.mechanism = e.mechanism
+),
+latest_votes AS MATERIALIZED (
+    -- Only official + bill pairs with a match (whole groups, so the latest
+    -- vote picked is the same as over all votes).
+    SELECT DISTINCT ON (v.official_id, rc.bill_id, rc.chamber)
+        v.official_id, v.position, rc.id AS roll_call_id, rc.bill_id,
+        rc.chamber, rc.date
+    FROM votes v
+    JOIN roll_calls rc ON rc.id = v.roll_call_id
+    WHERE rc.id = ANY(:roll_call_ids)
+      AND v.position = ANY(:positions)
+      AND (v.official_id, rc.bill_id) IN (SELECT official_id, bill_id FROM matches)
+      {official_filter}
+    ORDER BY v.official_id, rc.bill_id, rc.chamber,
+             rc.date DESC NULLS LAST, rc.id DESC
+),
 pairs AS (
     -- One stance per vote and bill intent: the exact target first, then
     -- the most similar name, then the most explicit position.
-    SELECT DISTINCT ON (lv.official_id, lv.roll_call_id, e.id)
+    SELECT DISTINCT ON (lv.official_id, lv.roll_call_id, m.effect_id)
         lv.official_id, lv.bill_id, lv.roll_call_id, lv.chamber, lv.date,
-        lv.position, e.target_id, e.mechanism, e.direction AS effect_direction,
-        e.magnitude, e.rationale, e.relation, s.direction, s.emphasis, s.summary,
-        s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area) AS policy_area,
-        s.scope, s.target_id AS stance_target_id, l.similarity, l.inverse, e.legal_force
-    FROM latest_votes lv
-    JOIN bills b ON b.id = lv.bill_id AND b.classification_status = 'ok'
-    JOIN bill_effects e ON e.bill_id = lv.bill_id
-    JOIN links l ON l.effect_target = e.target_id
-    JOIN stances s ON s.official_id = lv.official_id
-                  AND s.target_id = l.stance_target
-                  AND s.mechanism = e.mechanism
-    ORDER BY lv.official_id, lv.roll_call_id, e.id,
-             l.similarity DESC NULLS FIRST, s.emphasis_rank
+        lv.position, m.effect_id, m.stance_id, m.similarity, m.inverse
+    FROM matches m
+    JOIN latest_votes lv ON lv.official_id = m.official_id AND lv.bill_id = m.bill_id
+    ORDER BY lv.official_id, lv.roll_call_id, m.effect_id,
+             m.similarity DESC NULLS FIRST, m.emphasis_rank
 )
 SELECT p.official_id, p.bill_id, p.roll_call_id, p.chamber, p.date,
-       p.position, p.target_id, t.name, p.mechanism, p.effect_direction,
-       p.magnitude, p.rationale, p.direction, p.emphasis, p.summary,
-       p.evidence_quote, p.source_url, p.policy_area,
-       p.relation, p.scope, bs.effects, p.stance_target_id, st.name, p.similarity,
-       p.inverse, p.legal_force
+       p.position, e.target_id, t.name, e.mechanism, e.direction,
+       e.magnitude, e.rationale, s.direction, s.emphasis, s.summary,
+       s.evidence_quote, s.source_url, COALESCE(s.policy_area, b.policy_area),
+       e.relation, s.scope, bs.effects, s.target_id, st.name, p.similarity,
+       p.inverse, e.legal_force
 FROM pairs p
+JOIN bill_effects e ON e.id = p.effect_id
+JOIN official_stances s ON s.id = p.stance_id
+JOIN bills b ON b.id = p.bill_id
 JOIN bill_sizes bs ON bs.bill_id = p.bill_id
-JOIN policy_targets t ON t.id = p.target_id
-JOIN policy_targets st ON st.id = p.stance_target_id
+JOIN policy_targets t ON t.id = e.target_id
+JOIN policy_targets st ON st.id = s.target_id
 """
 
 
