@@ -1,0 +1,78 @@
+{
+  "date": "2026-11-24",
+  "status": "\u2705",
+  "passes": 3,
+  "failed_steps": 0,
+  "item_failures": 0,
+  "totals": {
+    "classifier": {
+      "Bills selected": 23,
+      "OK (saved)": 23,
+      "Incomplete (no TLDR)": 0,
+      "Failed": 0,
+      "No summary": 7,
+      "Unchanged (skipped)": 5229,
+      "Intents saved": 50,
+      "Chunks sent to model": 23,
+      "Rejected (citation)": 0,
+      "Rejected (bill name)": 1
+    },
+    "debate": {
+      "due": 0,
+      "ok": 0,
+      "failed": 0
+    },
+    "positions": {
+      "Officials selected": 50,
+      "Extracted": 36,
+      "Unchanged (skipped)": 14,
+      "No positions found": 3,
+      "Stances saved": 1395,
+      "Chunks sent to model": 463,
+      "Rejected (bad quote)": 221,
+      "Rejected (bill name)": 16,
+      "Blocked": 0,
+      "Needs JavaScript": 0,
+      "Thin site": 0,
+      "No website": 0,
+      "Failed": 0
+    },
+    "candidates": {
+      "Officials selected": 0,
+      "Extracted": 0,
+      "Unchanged (skipped)": 0,
+      "No positions found": 0,
+      "Stances saved": 0,
+      "Chunks sent to model": 0,
+      "Rejected (bad quote)": 0,
+      "Rejected (bill name)": 0,
+      "Blocked": 0,
+      "Needs JavaScript": 0,
+      "Thin site": 0,
+      "No website": 0,
+      "Failed": 0
+    },
+    "matching": {
+      "Targets embedded": 0,
+      "Pairs stored": 0,
+      "Pairs reviewed": 0
+    },
+    "scoring": {
+      "Officials with positions": 1622,
+      "Updated": 0,
+      "Unchanged": 1622,
+      "Removed": 0,
+      "Counted matches": 6642,
+      "Matches not counted": 1856
+    }
+  },
+  "backlog": {
+    "Bills due": 0,
+    "Officials due": 19,
+    "Candidates due": 0
+  },
+  "prompts": {
+    "llm_config.py": "1399bd5e56",
+    "positions_llm_config.py": "32970a4b10"
+  }
+}
